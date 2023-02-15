@@ -120,7 +120,7 @@ feeding.mat <- function(prm.file, grp.file, nc.file, bgm.file, cum.depths, quiet
     }
     Ages      <- data.frame(FG = groups.csv$code, Adul = groups.csv$numcohorts)
     Ages$Juv  <- apply(Ages, 1, function(x){if(x[1] %in% age_transition$FG){ age_transition$Value[which(age_transition$FG %in% x[1])]} else {NA}})
-    Gape     <- gape.func(groups.csv, Struct, Biom.N, prm)
+    Gape     <- gape.func(groups.csv, Struct, prm)
     if(!quiet) cat('          ...Done!')
     if(!quiet) cat('\n Calculating size and spatial overlap')
     Over.mat <- Over.mat.func(Ava.mat, Gape[[1]])
@@ -659,7 +659,7 @@ Bio.func <- function(nc.file, groups.csv, numlayers){
                     over.sp    <- cbind(over.sp, new.sp)
                     names.temp <- c(names.temp, paste(FGN[code], cohort, sep = '_'))
                 }
-                Biom.N[code, cohort] <- sum(StructN + ReservN * Numb, na.rm = TRUE)
+                Biom.N[code, cohort] <- sum((StructN + ReservN) * Numb, na.rm = TRUE)
                 Struct[code, cohort] <- max(StructN, na.rm = TRUE)
             }
         }
@@ -748,7 +748,7 @@ Bio.func <- function(nc.file, groups.csv, numlayers){
 ##' @param prm Atlantis paramter file
 ##' @return the limits for the prey based on the predator gape size and prey size
 ##' @author Demiurgo
-gape.func <- function(groups.csv, Struct, Biom.N, prm){
+gape.func <- function(groups.csv, Struct, prm){
     ## Gape size and adult and young age
     KLP                     <- text2num(prm, 'KLP', FG = as.character(groups.csv$code))
     KUP                     <- text2num(prm, 'KUP',  FG = as.character(groups.csv$code))
@@ -776,7 +776,6 @@ gape.func <- function(groups.csv, Struct, Biom.N, prm){
     Gape$Age.Young  <- Gape$Age.Adult - 1
     Gape$Age.Young  <- ifelse(Gape$Age.Young == 0,  1, Gape$Age.Young)
     ## Pre-Calculations
-    Biom.N        <- Biom.N[order(row.names(Biom.N)), ]
     Struct        <- data.frame(as.factor(row.names(Struct)), Struct)
     names(Struct) <- c('FG',  paste0('Age_', 1 : (ncol(Struct) - 1)))
     Gape          <- dplyr::left_join(Gape, Struct, by = 'FG')
