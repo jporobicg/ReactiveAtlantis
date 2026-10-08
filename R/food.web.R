@@ -45,6 +45,14 @@
 ##' @import utils grDevices ggplot2 graphics
 ##' @export
 food.web <- function(diet.file, grp.file,  diet.file.bypol = NULL, quiet = TRUE){
+    if(!quiet) {
+        message("\n========================================")
+        message("Note: For an improved experience, use the unified application:")
+        message("  launch_reactiveatlantis()")
+        message("This provides all tools in one modern interface.")
+        message("========================================\n")
+    }
+    
     txtHelp <- "<h2>Summary</h2>"
     txtHelp <- paste(txtHelp, "<p>This bit of code help to visualize the food web change during the simulation output from <b>Atlantis</b> run. </p>")
     txtHelp <- paste(txtHelp, "<p>It calculate the trophic position of each functional group at each time step</p>")

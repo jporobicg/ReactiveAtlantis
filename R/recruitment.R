@@ -44,6 +44,14 @@
 ##' @author Demiurgo
 ##' @export
 recruitment.cal <- function(ini.nc.file, out.nc.file, yoy.file, grp.file, prm.file,  quiet = TRUE){
+    if(!quiet) {
+        message("\n========================================")
+        message("Note: For an improved experience, use the unified application:")
+        message("  launch_reactiveatlantis()")
+        message("This provides all tools in one modern interface.")
+        message("========================================\n")
+    }
+    
     txtHelp <- "<h2>Summary Recruit and YOY page</h2>"
     txtHelp <- paste(txtHelp, "<p>This code Helps to calibrate the recruitment for <b>Atlantis</b> based on the recruitment and allows you to test new values</p>")
     txtHelp <- paste(txtHelp, "<p><b>Rec_model</b> Recruitment model used for the functional group</p>")

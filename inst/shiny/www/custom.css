@@ -1,0 +1,115 @@
+/* ReactiveAtlantis Custom Styles */
+
+body {
+  font-family: 'Source Sans Pro', sans-serif;
+}
+
+.navbar {
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.card {
+  box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+
+.card-header {
+  background-color: #f8f9fa;
+  border-bottom: 1px solid #dee2e6;
+  padding: 12px 20px;
+  font-weight: 600;
+  font-size: 1.1em;
+}
+
+.card-body {
+  padding: 20px;
+}
+
+.btn-primary {
+  background-color: #3498db;
+  border-color: #3498db;
+}
+
+.btn-primary:hover {
+  background-color: #2980b9;
+  border-color: #2980b9;
+}
+
+.alert-info {
+  background-color: #d1ecf1;
+  border-color: #bee5eb;
+  color: #0c5460;
+}
+
+h3 {
+  color: #2c3e50;
+  margin-top: 0;
+  margin-bottom: 20px;
+}
+
+h4 {
+  color: #34495e;
+  margin-top: 20px;
+  margin-bottom: 15px;
+}
+
+h5 {
+  color: #34495e;
+  margin-top: 15px;
+  margin-bottom: 10px;
+  font-weight: 600;
+}
+
+.form-control {
+  border-radius: 4px;
+}
+
+.well-panel {
+  background-color: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 8px;
+  padding: 15px;
+  margin-bottom: 15px;
+}
+
+.shiny-input-container {
+  margin-bottom: 15px;
+}
+
+hr {
+  margin-top: 20px;
+  margin-bottom: 20px;
+  border-top: 1px solid #dee2e6;
+}
+
+.dataTables_wrapper {
+  padding-top: 20px;
+}
+
+.shiny-notification {
+  position: fixed;
+  top: 60px;
+  right: 20px;
+  max-width: 350px;
+  border-radius: 6px;
+}
+
+.progress {
+  height: 25px;
+  margin-bottom: 20px;
+}
+
+.tab-content {
+  padding-top: 20px;
+}
+
+label {
+  font-weight: 500;
+  color: #495057;
+  margin-bottom: 5px;
+}
+
+.checkbox label {
+  font-weight: 400;
+}

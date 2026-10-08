@@ -3,6 +3,12 @@
 ##'     biomasses, abundance, structural or reserve nitrogen between two different
 ##'     outputs. The user is also able to check the changes is these variables by
 ##'     age for the different functional groups.
+##' 
+##' @section Unified Application:
+##' This function launches a separate Shiny app. For a better experience with all
+##' tools integrated in one modern interface, use \code{\link{launch_reactiveatlantis}}
+##' instead.
+##' 
 ##' @title Compare Outputs
 ##' @param nc.out.current Current netcdf output file. Character string with the path
 ##'     to the netcdf file to read in. This netcdf file contains a generic output
@@ -65,6 +71,12 @@
 ##' @author Demiurgo
 ##' @export
 compare <- function(nc.out.current, nc.out.old = NULL, grp.csv, bgm.file, cum.depths){
+    message("\n========================================")
+    message("Note: For an improved experience, use the unified application:")
+    message("  launch_reactiveatlantis()")
+    message("This provides all tools in one modern interface.")
+    message("========================================\n")
+    
     ## General configuration
     mycol  <- c(RColorBrewer::brewer.pal(8, "Dark2"), c("#000000", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7"))
     mycol  <- grDevices::colorRampPalette(mycol)

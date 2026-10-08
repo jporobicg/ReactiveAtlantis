@@ -15,6 +15,12 @@
 ##' @import utils grDevices ggplot2 graphics shiny RColorBrewer
 ##' @export
 mortality <- function(grp.file, prm.file, SpeMort, PredMort){
+    message("\n========================================")
+    message("Note: For an improved experience, use the unified application:")
+    message("  launch_reactiveatlantis()")
+    message("This provides all tools in one modern interface.")
+    message("========================================\n")
+    
     SpeMort    <- read.csv(SpeMort, sep = ' ')
     PredMort   <- read.csv(PredMort, sep = ' ')
     grp        <- read.csv(grp.file)

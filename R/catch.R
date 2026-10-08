@@ -75,7 +75,12 @@
 ##' @author Demiurgo
 ##' @export
 catch <- function(grp.csv, fish.csv, catch.nc, ext.catch.by.fleet = NULL, ext.catch.total = NULL){
-#library(dplyr)
+    message("\n========================================")
+    message("Note: For an improved experience, use the unified application:")
+    message("  launch_reactiveatlantis()")
+    message("This provides all tools in one modern interface.")
+    message("========================================\n")
+    
     ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
     ## ~         General Settings     ~ ##
     ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##

@@ -66,6 +66,14 @@
 ##' @author Demiurgo
 ##' @export
 feeding.mat <- function(prm.file, grp.file, nc.file, bgm.file, cum.depths, quiet = TRUE){
+    if(!quiet) {
+        message("\n========================================")
+        message("Note: For an improved experience, use the unified application:")
+        message("  launch_reactiveatlantis()")
+        message("This provides all tools in one modern interface.")
+        message("========================================\n")
+    }
+    
     txtHelp <- "<h2>Summary</h2>"
     txtHelp <- paste(txtHelp, "<p>This program displays data for the predator prey relationship for  <b>Atlantis</b> run. Also,  provide help for the tuning of the pprey matrix</p>")
     txtHelp <- paste(txtHelp, "<h3>Details</h3>")
