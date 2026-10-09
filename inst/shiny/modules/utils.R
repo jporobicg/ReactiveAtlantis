@@ -170,10 +170,15 @@ infer_cum_depths <- function(nc){
   if(!('nominal_dz' %in% names(nc$var))) return(NULL)
   ndz <- ncdf4::ncvar_get(nc, 'nominal_dz')
   if(is.null(dim(ndz)) || length(dim(ndz)) != 2) return(NULL)
-  if(nrow(ndz) < ncol(ndz)) ndz <- t(ndz)
+  z_len <- if(!is.null(nc$dim$z)) nc$dim$z$len else NA
+  if(is.finite(z_len)){
+    if(ncol(ndz) == z_len && nrow(ndz) != z_len) ndz <- t(ndz)
+  } else if(nrow(ndz) > ncol(ndz)){
+    ndz <- t(ndz)
+  }
   n_z <- nrow(ndz)
   if(n_z < 2) return(NULL)
-  water <- ndz[1:(n_z - 1), , drop = FALSE]
+  water <- ndz[seq_len(n_z - 1), , drop = FALSE]
   box_score <- apply(water, 2, function(x){
     x[!is.finite(x)] <- 0
     sum(x > 0) * sum(x, na.rm = TRUE)

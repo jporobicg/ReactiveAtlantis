@@ -108,7 +108,7 @@ compare_server <- function(id) {
     outputOptions(output, "data_loaded", suspendWhenHidden = FALSE)
     
     observeEvent(input$load_data, {
-      req(input$nc_current, input$grp_csv, input$bgm_file, input$cum_depths)
+      req(input$nc_current, input$grp_csv, input$bgm_file)
       
       tryCatch({
         showNotification("Loading data...", type = "message", duration = NULL, id = "load_compare")
@@ -121,7 +121,7 @@ compare_server <- function(id) {
         Time <- time_calc(nc_cur)
         
         inferred <- infer_cum_depths(nc_cur)
-        user_raw <- trimws(input$cum_depths)
+        user_raw <- if(is.null(input$cum_depths)) "" else trimws(input$cum_depths)
         if(nchar(user_raw) == 0){
           if(is.null(inferred)){
             stop("Could not read layer thicknesses from the NetCDF. Enter cumulative depths (surface first, include 0).")
