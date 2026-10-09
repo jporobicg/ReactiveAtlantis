@@ -18,6 +18,8 @@ library(proj4)
 library(tidyr)
 library(stats)
 
+options(shiny.maxRequestSize = 500 * 1024^2)
+
 app_dir <- getwd()
 source(file.path(app_dir, "modules", "colors.R"))
 source(file.path(app_dir, "modules", "utils.R"))

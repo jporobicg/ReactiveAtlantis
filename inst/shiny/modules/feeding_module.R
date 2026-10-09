@@ -20,7 +20,7 @@ feeding_ui <- function(id) {
         actionButton(ns("load_data"), "Load Data", class = "btn-primary btn-block"),
         hr(),
         conditionalPanel(
-          condition = sprintf("output['%s']", ns("data_loaded")),
+          condition = "output.data_loaded",
           ns = ns,
           h5("Matrix Options"),
           selectInput(ns("view_type"), "View Type",
@@ -35,7 +35,7 @@ feeding_ui <- function(id) {
       mainPanel(
         width = 9,
         conditionalPanel(
-          condition = sprintf("!output['%s']", ns("data_loaded")),
+          condition = "!output.data_loaded",
           ns = ns,
           div(
             class = "alert alert-info",
@@ -45,7 +45,7 @@ feeding_ui <- function(id) {
           )
         ),
         conditionalPanel(
-          condition = sprintf("output['%s']", ns("data_loaded")),
+          condition = "output.data_loaded",
           ns = ns,
           plotOutput(ns("feeding_plot"), height = "700px")
         )

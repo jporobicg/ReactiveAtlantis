@@ -19,14 +19,14 @@ recruitment_ui <- function(id) {
         actionButton(ns("load_data"), "Load Data", class = "btn-primary btn-block"),
         hr(),
         conditionalPanel(
-          condition = sprintf("output['%s']", ns("data_loaded")),
+          condition = "output.data_loaded",
           ns = ns,
           h5("Analysis Options"),
           selectInput(ns("analysis_type"), "Analysis Type",
                      choices = c("Recruits and YOY" = "yoy",
                                "Growth Zoo and PPs" = "growth")),
           conditionalPanel(
-            condition = sprintf("input['%s'] == 'yoy'", ns("analysis_type")),
+            condition = "input.analysis_type == 'yoy'",
             ns = ns,
             selectInput(ns("fg_yoy"), "Functional Group:", choices = NULL),
             numericInput(ns("new_alpha"), "New Alpha:", value = 0, step = 0.1),
@@ -34,7 +34,7 @@ recruitment_ui <- function(id) {
             actionButton(ns("recalc"), "Recalculate", class = "btn-primary")
           ),
           conditionalPanel(
-            condition = sprintf("input['%s'] == 'growth'", ns("analysis_type")),
+            condition = "input.analysis_type == 'growth'",
             ns = ns,
             selectInput(ns("fg_growth"), "Functional Group:", choices = NULL),
             selectInput(ns("box"), "Box:", choices = NULL),
@@ -48,7 +48,7 @@ recruitment_ui <- function(id) {
       mainPanel(
         width = 9,
         conditionalPanel(
-          condition = sprintf("!output['%s']", ns("data_loaded")),
+          condition = "!output.data_loaded",
           ns = ns,
           div(
             class = "alert alert-info",
@@ -58,7 +58,7 @@ recruitment_ui <- function(id) {
           )
         ),
         conditionalPanel(
-          condition = sprintf("output['%s']", ns("data_loaded")),
+          condition = "output.data_loaded",
           ns = ns,
           uiOutput(ns("analysis_output"))
         )

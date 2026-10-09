@@ -18,7 +18,7 @@ predation_ui <- function(id) {
         actionButton(ns("load_data"), "Load Data", class = "btn-primary btn-block"),
         hr(),
         conditionalPanel(
-          condition = sprintf("output['%s']", ns("data_loaded")),
+          condition = "output.data_loaded",
           ns = ns,
           h5("Analysis Options"),
           selectInput(ns("analysis_type"), "Analysis Type",
@@ -26,7 +26,7 @@ predation_ui <- function(id) {
                                "Predation Through Time" = "predation",
                                "Predation by Age" = "age")),
           conditionalPanel(
-            condition = sprintf("input['%s'] == 'predation'", ns("analysis_type")),
+            condition = "input.analysis_type == 'predation'",
             ns = ns,
             selectInput(ns("fg_pred"), "Functional Group:", choices = NULL),
             selectInput(ns("stock_pred"), "Stock:", choices = NULL),
@@ -36,7 +36,7 @@ predation_ui <- function(id) {
             checkboxInput(ns("melt_time"), "Melt Time Step", FALSE)
           ),
           conditionalPanel(
-            condition = sprintf("input['%s'] == 'age'", ns("analysis_type")),
+            condition = "input.analysis_type == 'age'",
             ns = ns,
             selectInput(ns("fg_age"), "Functional Group:", choices = NULL),
             sliderInput(ns("time_age"), "Simulation Time:", min = 0, max = 100, value = 0, step = 1),
@@ -50,7 +50,7 @@ predation_ui <- function(id) {
       mainPanel(
         width = 9,
         conditionalPanel(
-          condition = sprintf("!output['%s']", ns("data_loaded")),
+          condition = "!output.data_loaded",
           ns = ns,
           div(
             class = "alert alert-info",
@@ -60,7 +60,7 @@ predation_ui <- function(id) {
           )
         ),
         conditionalPanel(
-          condition = sprintf("output['%s']", ns("data_loaded")),
+          condition = "output.data_loaded",
           ns = ns,
           uiOutput(ns("analysis_output"))
         )

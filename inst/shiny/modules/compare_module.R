@@ -25,7 +25,7 @@ compare_ui <- function(id) {
                     class = "btn-primary btn-block"),
         hr(),
         conditionalPanel(
-          condition = sprintf("output['%s']", ns("data_loaded")),
+          condition = "output.data_loaded",
           ns = ns,
           h5("Analysis Options"),
           selectInput(ns("analysis_type"), "Analysis Type",
@@ -33,12 +33,12 @@ compare_ui <- function(id) {
                                "Total" = "total",
                                "By AgeClass" = "age")),
           conditionalPanel(
-            condition = sprintf("input['%s'] == 'total'", ns("analysis_type")),
+            condition = "input.analysis_type == 'total'",
             ns = ns,
             selectInput(ns("fg_total"), "Functional Group:", choices = NULL),
             checkboxInput(ns("by_polygon"), "By Polygon", FALSE),
             conditionalPanel(
-              condition = sprintf("input['%s']", ns("by_polygon")),
+              condition = "input.by_polygon",
               ns = ns,
               selectInput(ns("polygon_n"), "Polygon:", choices = NULL)
             ),
@@ -52,7 +52,7 @@ compare_ui <- function(id) {
             checkboxInput(ns("limit_axis"), "Limit Axis", TRUE)
           ),
           conditionalPanel(
-            condition = sprintf("input['%s'] == 'age'", ns("analysis_type")),
+            condition = "input.analysis_type == 'age'",
             ns = ns,
             selectInput(ns("fg_age"), "Functional Group:", choices = NULL),
             hr(),
@@ -69,7 +69,7 @@ compare_ui <- function(id) {
       mainPanel(
         width = 9,
         conditionalPanel(
-          condition = sprintf("!output['%s']", ns("data_loaded")),
+          condition = "!output.data_loaded",
           ns = ns,
           div(
             class = "alert alert-info",
@@ -79,7 +79,7 @@ compare_ui <- function(id) {
           )
         ),
         conditionalPanel(
-          condition = sprintf("output['%s']", ns("data_loaded")),
+          condition = "output.data_loaded",
           ns = ns,
           uiOutput(ns("analysis_output"))
         )

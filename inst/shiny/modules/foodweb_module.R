@@ -17,7 +17,7 @@ foodweb_ui <- function(id) {
         actionButton(ns("load_data"), "Load Data", class = "btn-primary btn-block"),
         hr(),
         conditionalPanel(
-          condition = sprintf("output['%s']", ns("data_loaded")),
+          condition = "output.data_loaded",
           ns = ns,
           h5("Food Web Options"),
           selectInput(ns("focal_fg"), "Focal Functional Group:", choices = NULL),
@@ -28,13 +28,13 @@ foodweb_ui <- function(id) {
           numericInput(ns("time_step"), "Time Step:", value = 0),
           selectInput(ns("stock"), "Stock:", choices = NULL),
           conditionalPanel(
-            condition = sprintf("output['%s']", ns("has_bypol")),
+            condition = "output.has_bypol",
             ns = ns,
             hr(),
             h6("By Polygon Analysis"),
             checkboxInput(ns("use_polygon"), "Analyze by Polygon", FALSE),
             conditionalPanel(
-              condition = sprintf("input['%s']", ns("use_polygon")),
+              condition = "input.use_polygon",
               ns = ns,
               selectInput(ns("polygon"), "Polygon:", choices = NULL)
             )
@@ -45,7 +45,7 @@ foodweb_ui <- function(id) {
       mainPanel(
         width = 9,
         conditionalPanel(
-          condition = sprintf("!output['%s']", ns("data_loaded")),
+          condition = "!output.data_loaded",
           ns = ns,
           div(
             class = "alert alert-info",
@@ -55,7 +55,7 @@ foodweb_ui <- function(id) {
           )
         ),
         conditionalPanel(
-          condition = sprintf("output['%s']", ns("data_loaded")),
+          condition = "output.data_loaded",
           ns = ns,
           plotOutput(ns("foodweb_plot"), height = "800px"),
           hr(),

@@ -17,7 +17,7 @@ mortality_ui <- function(id) {
         actionButton(ns("load_data"), "Load Data", class = "btn-primary btn-block"),
         hr(),
         conditionalPanel(
-          condition = sprintf("output['%s']", ns("data_loaded")),
+          condition = "output.data_loaded",
           ns = ns,
           h5("Analysis Options"),
           selectInput(ns("fg"), "Functional Group:", choices = NULL)
@@ -27,7 +27,7 @@ mortality_ui <- function(id) {
       mainPanel(
         width = 9,
         conditionalPanel(
-          condition = sprintf("!output['%s']", ns("data_loaded")),
+          condition = "!output.data_loaded",
           ns = ns,
           div(
             class = "alert alert-info",
@@ -53,7 +53,7 @@ mortality_ui <- function(id) {
           )
         ),
         conditionalPanel(
-          condition = sprintf("output['%s']", ns("data_loaded")),
+          condition = "output.data_loaded",
           ns = ns,
           plotOutput(ns("mortality_plot"), height = "600px")
         )
