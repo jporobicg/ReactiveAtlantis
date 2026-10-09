@@ -40,7 +40,7 @@ catch_ui <- function(id) {
             class = "alert alert-info",
             style = "margin-top: 50px;",
             icon("info-circle"),
-            " Please load your catch data files to analyze harvest outputs and model skill."
+            " Catch analysis needs a groups CSV, a fisheries CSV, and a catch NetCDF (often a dedicated CATCH output, not the main biology output.nc). Load those files to plot harvest and skill metrics."
           )
         ),
         conditionalPanel(
@@ -68,7 +68,13 @@ catch_server <- function(id) {
     outputOptions(output, "data_loaded", suspendWhenHidden = FALSE)
     
     observeEvent(input$load_data, {
-      req(input$grp_csv, input$fish_csv, input$catch_nc)
+      if(is.null(input$grp_csv) || is.null(input$fish_csv) || is.null(input$catch_nc)){
+        showNotification(
+          "Catch analysis needs a groups CSV, a fisheries CSV, and a catch NetCDF. Those files were not provided.",
+          type = "error", duration = 10
+        )
+        return()
+      }
       
       tryCatch({
         showNotification("Loading catch data...", type = "message", id = "load_catch", duration = NULL)
