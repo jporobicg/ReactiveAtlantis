@@ -186,12 +186,14 @@ recruitment_server <- function(id) {
       )
     })
     
-    yoy_new <- eventReactive(input$recalc, {
+    yoy_new <- reactive({
+      if(is.null(input$recalc) || input$recalc < 1) return(NULL)
       req(yoy_calculated(), input$new_alpha, input$new_beta)
       
       alpha <- input$new_alpha
       beta <- input$new_beta
       original <- yoy_calculated()$original
+      if(is.null(original)) return(NULL)
       
       new_yoy <- alpha * original / (1 + beta * original)
       
@@ -204,16 +206,23 @@ recruitment_server <- function(id) {
     
     output$plot_yoy <- renderPlot({
       req(yoy_calculated())
+      yoy <- yoy_calculated()
+      if(is.null(yoy)){
+        plot.new()
+        title("No YOY column for this group")
+        return(invisible(NULL))
+      }
       
       colors <- RColorBrewer::brewer.pal(n = 8, name = "Set1")
       
-      plot(yoy_calculated()$time, yoy_calculated()$original, type = 'l', 
+      plot(yoy$time, yoy$original, type = 'l', 
            col = colors[1], lwd = 2,
            xlab = "Time step", ylab = "Young of the Year",
            main = paste("YOY and Larvae -", input$fg_yoy))
       
-      if(!is.null(yoy_new())){
-        lines(yoy_new()$time, yoy_new()$new, col = colors[2], lwd = 2)
+      new_vals <- yoy_new()
+      if(!is.null(new_vals)){
+        lines(new_vals$time, new_vals$new, col = colors[2], lwd = 2)
         legend("topleft", c("Original", "New parameters"), 
                col = colors[1:2], lwd = 2, bty = 'n')
       }
@@ -221,17 +230,24 @@ recruitment_server <- function(id) {
     
     output$plot_relative_yoy <- renderPlot({
       req(yoy_calculated())
+      yoy <- yoy_calculated()
+      if(is.null(yoy)){
+        plot.new()
+        title("No YOY column for this group")
+        return(invisible(NULL))
+      }
       
       colors <- RColorBrewer::brewer.pal(n = 8, name = "Set1")
       
-      plot(yoy_calculated()$time, yoy_calculated()$relative, type = 'l', 
+      plot(yoy$time, yoy$relative, type = 'l', 
            col = colors[3], lwd = 2,
            xlab = "Time step", ylab = "Relative YOY",
            main = "Relative YOY (YOY/YOY0)")
       abline(h = 1, lty = 2, col = "gray50")
       
-      if(!is.null(yoy_new())){
-        lines(yoy_new()$time, yoy_new()$relative_new, col = colors[4], lwd = 2)
+      new_vals <- yoy_new()
+      if(!is.null(new_vals)){
+        lines(new_vals$time, new_vals$relative_new, col = colors[4], lwd = 2)
         legend("topright", c("Original", "New parameters"), 
                col = colors[3:4], lwd = 2, bty = 'n')
       }

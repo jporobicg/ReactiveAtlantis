@@ -162,3 +162,38 @@ text2num <- function(text, pattern, FG = NULL, Vector = FALSE, pprey = FALSE, li
     return(pp.mat)
   }
 }
+
+##' Infer cumulative water-column depths from a NetCDF
+##' @param nc Open ncdf4 object
+##' @return Numeric vector starting with 0, or NULL if depths cannot be inferred
+infer_cum_depths <- function(nc){
+  if(!('nominal_dz' %in% names(nc$var))) return(NULL)
+  ndz <- ncdf4::ncvar_get(nc, 'nominal_dz')
+  if(is.null(dim(ndz)) || length(dim(ndz)) != 2) return(NULL)
+  if(nrow(ndz) < ncol(ndz)) ndz <- t(ndz)
+  n_z <- nrow(ndz)
+  if(n_z < 2) return(NULL)
+  water <- ndz[1:(n_z - 1), , drop = FALSE]
+  box_score <- apply(water, 2, function(x){
+    x[!is.finite(x)] <- 0
+    sum(x > 0) * sum(x, na.rm = TRUE)
+  })
+  deep <- which.max(box_score)
+  thick <- water[, deep]
+  thick <- thick[is.finite(thick) & thick > 0]
+  if(length(thick) == 0) return(NULL)
+  c(0, cumsum(rev(thick)))
+}
+
+##' Count water layers implied by a cumulative depth vector
+##' @param depths Numeric cumulative depths
+##' @return Integer count of water layers
+n_water_layers <- function(depths){
+  depths <- depths[is.finite(depths)]
+  if(length(depths) >= 2 && depths[1] == 0 && depths[2] == 0){
+    depths <- depths[-1]
+  } else if(any(depths == 0)){
+    depths <- depths[depths != 0]
+  }
+  length(depths)
+}

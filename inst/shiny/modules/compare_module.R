@@ -19,8 +19,9 @@ compare_ui <- function(id) {
                  accept = ".csv"),
         fileInput(ns("bgm_file"), "BGM File", 
                  accept = ".bgm"),
-        textInput(ns("cum_depths"), "Cumulative Depths (comma-separated)",
-                 value = "0,20,50,150,250,400,650,1000,4300"),
+        textInput(ns("cum_depths"), "Cumulative Depths (comma-separated, optional)",
+                 value = "",
+                 placeholder = "Leave blank to read layers from the NetCDF"),
         actionButton(ns("load_data"), "Load Data", 
                     class = "btn-primary btn-block"),
         hr(),
@@ -112,14 +113,44 @@ compare_server <- function(id) {
       tryCatch({
         showNotification("Loading data...", type = "message", duration = NULL, id = "load_compare")
         
-        cum_depths <- as.numeric(strsplit(input$cum_depths, ",")[[1]])
         grp <- read.csv(input$grp_csv$datapath)
         names(grp) <- tolower(names(grp))
         grp <- grp[grp$isturnedon == 1, c('code', 'name', 'longname', 'grouptype', 'numcohorts')]
         
-        inf_box <- boxes.prop(input$bgm_file$datapath, cum_depths)
         nc_cur <- ncdf4::nc_open(input$nc_current$datapath)
         Time <- time_calc(nc_cur)
+        
+        inferred <- infer_cum_depths(nc_cur)
+        user_raw <- trimws(input$cum_depths)
+        if(nchar(user_raw) == 0){
+          if(is.null(inferred)){
+            stop("Could not read layer thicknesses from the NetCDF. Enter cumulative depths (surface first, include 0).")
+          }
+          cum_depths <- inferred
+          updateTextInput(session, "cum_depths", value = paste(round(cum_depths, 3), collapse = ","))
+        } else {
+          cum_depths <- as.numeric(strsplit(user_raw, ",")[[1]])
+          if(any(!is.finite(cum_depths))){
+            stop("Cumulative depths must be a comma-separated list of numbers.")
+          }
+          nc_z <- if(!is.null(nc_cur$dim$z)) nc_cur$dim$z$len else NA
+          user_n <- n_water_layers(cum_depths)
+          if(is.finite(nc_z) && user_n != (nc_z - 1)){
+            hint <- if(!is.null(inferred)) paste(round(inferred, 3), collapse = ",") else "the model layer thicknesses"
+            stop(paste0("Cumulative depths describe ", user_n, " water layers but the NetCDF has ",
+                        nc_z - 1, " water layers plus sediment (", nc_z, " in z). ",
+                        "Use depths that match the model, for example: ", hint, "."))
+          }
+        }
+        
+        inf_box <- boxes.prop(input$bgm_file$datapath, cum_depths)
+        
+        vol_rows <- nrow(inf_box$Vol)
+        nc_z <- if(!is.null(nc_cur$dim$z)) nc_cur$dim$z$len else NA
+        if(is.finite(nc_z) && vol_rows != nc_z){
+          stop(paste0("Box volumes have ", vol_rows, " layers but the NetCDF has ", nc_z,
+                      ". Check the cumulative depth list."))
+        }
         
         nc_old <- NULL
         Time_old <- NULL
@@ -222,7 +253,10 @@ compare_server <- function(id) {
       } else if (input$analysis_type == "total") {
         plotOutput(ns("plot_total"), height = "600px")
       } else if (input$analysis_type == "age") {
-        plotOutput(ns("plot_age"), height = "1000px")
+        n.coh <- rv$grp$numcohorts[rv$grp$code == input$fg_age]
+        if(length(n.coh) == 0 || is.na(n.coh)) n.coh <- 4
+        plot_h <- paste0(max(400, as.integer(ceiling(n.coh / 3) * 280)), "px")
+        plotOutput(ns("plot_age"), height = plot_h)
       }
     })
     
@@ -316,12 +350,9 @@ compare_server <- function(id) {
       
       n.coh <- rv$grp$numcohorts[rv$grp$code == input$fg_age]
       
-      par(mfrow = n2mfrow(n.coh), cex = 1.2, oma = c(1, 1, 1, 1))
-      for(i in 1:n.coh){
-        plot_cohort(coho, rv$Time, input$show_reserve_n_age, input$show_struct_n_age,
-                   input$show_numbers_age, input$show_biomass_age, input$scaled_age, 
-                   input$limit_axis_age, coh = i, max.coh = n.coh)
-      }
+      plot_cohorts_ggplot(coho, rv$Time, input$show_reserve_n_age, input$show_struct_n_age,
+                         input$show_numbers_age, input$show_biomass_age, input$scaled_age,
+                         input$limit_axis_age, n.coh)
     })
     
     output$dwn_bio <- downloadHandler(
@@ -586,6 +617,61 @@ plot_cohort <- function(coho, Time, rn3a, sn3a, num3a, bio3a, scl3a, limit3a, co
       mtext(2, text = 'Biomass (tons)', line = 2.5)
     }
   }
+}
+
+plot_cohorts_ggplot <- function(coho, Time, rn3a, sn3a, num3a, bio3a, scl3a, limit3a, n.coh){
+  colors <- get_predation_colors()
+  rows <- list()
+  
+  add_series <- function(values, cohort, variable){
+    vals <- unlist(values)
+    if(length(vals) == 0) return()
+    rows[[length(rows) + 1]] <<- data.frame(
+      Time = Time[seq_along(vals)],
+      Value = as.numeric(vals),
+      Cohort = paste0("Cohort ", cohort),
+      Variable = variable
+    )
+  }
+  
+  for(i in 1:n.coh){
+    if(isTRUE(bio3a) && !is.null(coho$Biomass) && length(coho$Biomass) >= i){
+      add_series(coho$Biomass[[i]], i, "Biomass")
+    }
+    if(isTRUE(num3a) && !is.null(coho$Numbers) && length(coho$Numbers) >= i){
+      add_series(coho$Numbers[[i]], i, "Numbers")
+    }
+    if(isTRUE(sn3a) && !is.null(coho$Structural) && length(coho$Structural) >= i){
+      add_series(coho$Structural[[i]], i, "Structural N")
+    }
+    if(isTRUE(rn3a) && !is.null(coho$Reserve) && length(coho$Reserve) >= i){
+      add_series(coho$Reserve[[i]], i, "Reserve N")
+    }
+  }
+  
+  if(length(rows) == 0){
+    plot(Time, rep(1, length(Time)), type = 'n',
+         main = "Select variables to display", xlab = "", ylab = "")
+    return(invisible(NULL))
+  }
+  
+  plot_df <- do.call(rbind, rows)
+  ylab <- if(isTRUE(scl3a)) "Relative Values (X_t/X_0)" else "Value"
+  
+  p <- ggplot2::ggplot(plot_df, ggplot2::aes(x = Time, y = Value, colour = Variable))
+  p <- p + ggplot2::geom_line(linewidth = 0.8, na.rm = TRUE)
+  p <- p + ggplot2::facet_wrap(~ Cohort, ncol = min(3, n.coh), scales = "free_y")
+  p <- p + ggplot2::theme_minimal()
+  p <- p + ggplot2::labs(x = "Date", y = ylab, title = "Values by age class")
+  p <- p + ggplot2::theme(
+    plot.title = ggplot2::element_text(size = 14, face = "bold"),
+    strip.text = ggplot2::element_text(size = 10, face = "bold"),
+    legend.position = "top"
+  )
+  if(isTRUE(scl3a) && isTRUE(limit3a)){
+    p <- p + ggplot2::coord_cartesian(ylim = c(0, 3))
+  }
+  p
 }
 
 to.save.biomass <- function(list_data, Time){

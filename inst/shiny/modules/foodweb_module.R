@@ -25,7 +25,7 @@ foodweb_ui <- function(id) {
                       value = 4, min = 1, max = 10, step = 1),
           numericInput(ns("min_proportion"), "Min Proportion:", 
                       value = 0.01, min = 0.001, max = 1, step = 0.001),
-          numericInput(ns("time_step"), "Time Step:", value = 0),
+          selectInput(ns("time_step"), "Time Step:", choices = NULL),
           selectInput(ns("stock"), "Stock:", choices = NULL),
           conditionalPanel(
             condition = "output.has_bypol",
@@ -104,8 +104,9 @@ foodweb_server <- function(id) {
         
         if(any(names(dat) == 'Group')) names(dat)[which(names(dat) == 'Group')] <- 'Predator'
         
-        time.stp <- round(range(dat$Time), 0)
-        lag <- diff(unique(dat$Time))[1]
+        time.vals <- sort(unique(dat$Time))
+        time.stp <- range(time.vals)
+        lag <- if(length(time.vals) > 1) diff(time.vals)[1] else 1
         grp.dat <- utils::read.csv(input$grp_file$datapath)
         stk <- unique(dat$Stock)
         
@@ -130,7 +131,9 @@ foodweb_server <- function(id) {
         
         updateSelectInput(session, "focal_fg", choices = c('All', as.character(code.fg)))
         updateSelectInput(session, "stock", choices = stk)
-        updateNumericInput(session, "time_step", value = time.stp[1], min = time.stp[1], max = time.stp[2])
+        updateSelectInput(session, "time_step",
+                         choices = setNames(as.character(time.vals), as.character(time.vals)),
+                         selected = as.character(time.vals[1]))
         
         if(!is.null(pol)){
           updateSelectInput(session, "polygon", choices = pol)
@@ -147,11 +150,12 @@ foodweb_server <- function(id) {
     time_prey_data <- reactive({
       req(rv$dat, input$time_step, input$stock)
       
+      tstep <- as.numeric(input$time_step)
       if(input$use_polygon && !is.null(rv$dat.bp)){
         req(input$polygon)
-        rv$dat.bp[rv$dat.bp$Time == input$time_step & rv$dat.bp$Box == input$polygon, c(2, 6:ncol(rv$dat.bp))]
+        rv$dat.bp[rv$dat.bp$Time == tstep & rv$dat.bp$Box == input$polygon, c(2, 6:ncol(rv$dat.bp))]
       } else {
-        rv$dat[rv$dat$Time == input$time_step & rv$dat$Stock == input$stock, c(2, 6:ncol(rv$dat))]
+        rv$dat[rv$dat$Time == tstep & rv$dat$Stock == input$stock, c(2, 6:ncol(rv$dat))]
       }
     })
     
