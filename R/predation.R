@@ -3,6 +3,12 @@
 ##'     time for biomass pool and for age class functional groups. This tool can helps to
 ##'     analyze the predatory pressure from the predator and from the prey
 ##'     perspective.
+##' 
+##' @section Unified Application:
+##' This function launches a separate Shiny app. For a better experience with all
+##' tools integrated in one modern interface, use \code{\link{launch_reactiveatlantis}}
+##' instead.
+##' 
 ##' @title Predation analysis
 ##' @param biom.file Character string with the path to \emph{biomass output}
 ##'     file from the Atlantis simulation. Usually this
@@ -68,6 +74,12 @@
 ##' @author Demiurgo
 ##' @export
 predation <- function(biom.file, groups.csv, diet.file, age.biomass = NULL ){
+    message("\n========================================")
+    message("Note: For an improved experience, use the unified application:")
+    message("  launch_reactiveatlantis()")
+    message("This provides all tools in one modern interface.")
+    message("========================================\n")
+    
     txtHelp <- "<h2>Summary</h2>"
     txtHelp <- paste(txtHelp, "<p>This program is useful for dynamically evaluating and visualizing predator-prey relationships from Atlantis</p>")
     txtHelp <- paste(txtHelp, "<h3>Details</h3>")

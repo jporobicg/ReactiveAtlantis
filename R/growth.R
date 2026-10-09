@@ -75,6 +75,12 @@
 ##' @author Demiurgo
 ##' @export
 growth.pp <- function(ini.nc.file, grp.file, prm.file, out.nc.file){
+    message("\n========================================")
+    message("Note: For an improved experience, use the unified application:")
+    message("  launch_reactiveatlantis()")
+    message("This provides all tools in one modern interface.")
+    message("========================================\n")
+    
     general.col    <- c(RColorBrewer::brewer.pal(9, "Reds") [4 : 9], RColorBrewer::brewer.pal(9, "Purples")[4 : 9],  RColorBrewer::brewer.pal(9, "Blues") [4 : 9])
     color    <- RColorBrewer::brewer.pal(9, "BrBG")[2 : 9]
     color2   <- RColorBrewer::brewer.pal(9, "RdBu")

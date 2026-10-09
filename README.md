@@ -1,116 +1,98 @@
-[![Project Status](http://www.repostatus.org/badges/latest/active.svg)](http://www.repostatus.org/#active)
-[![Build Status](https://travis-ci.org/jporobicg/ReactiveAtlantis.svg?branch=master)](https://travis-ci.org/jporobicg/ReactiveAtlantis)
 # ReactiveAtlantis
-*ReactiveAtlantis* is a R-package builded using the Shiny
-package as the main platform for the reactive programming approach.
 
-*ReactiveAtlantis* has several tools that were created to help in the tuning,
-parameterization and analysis of the processes and parameters most often modified
-during the calibration of Atlantis (e.g. growth rate, predation, recruitment,
-Audzijonyte *et al.* 2017. Among the processes performed by this
-package are:
-* Visualization and analysis of the input, output and initial conditions of an Atlantis model.
-*  Interactive modification of Atlantis configuration files.
-*  Simulation of new parameters to help in the calibration on an Atlantis model.
-*  Execution of a model skill assessment, to evaluate the performance of the model
-  to reflect the observed data.
+Integrated calibration tools for Atlantis ecosystem models.
 
-## Getting Started
-These instructions will give you access to use the R-package *ReactiveAtlantis*. If
-you have some problem for your installation, please let me know and I will try to
-solve it as soon as possible.
+## Overview
 
-### Prerequisites and installation
+ReactiveAtlantis provides a modern, unified web application for tuning, parameterization, 
+and analysis of Atlantis ecosystem models. All tools are accessible through a single 
+interface with consistent styling and deterministic color schemes.
 
-What things you need to install To run *ReactiveAtlantis* on R.
+### Key Features
+
+* **Unified Interface**: All calibration tools in one application
+* **Modern Design**: Clean, readable interface with professional styling
+* **Deterministic Colors**: Consistent color assignments across tools and sessions
+* **Interactive Analysis**: Real-time visualization and parameter exploration
+* **Model Skill Assessment**: Quantitative metrics for model performance
+
+### Available Tools
+
+* Visualization and analysis of input, output, and initial conditions
+* Interactive modification of Atlantis configuration files
+* Parameter simulation and calibration support
+* Model skill assessment against observed data
+
+## Installation
 
 ```R
-# install packages
-install.packages('devtools')   ## you need to do this step just once
-# running
+# Install from GitHub
+install.packages('devtools')
 library("devtools")
 install_github('Atlantis-Ecosystem-Model/ReactiveAtlantis', force=TRUE, dependencies=TRUE)
+
+# Load the package
 library("ReactiveAtlantis")
 ```
 
-## Running *ReactiveAtlantis*
-### Compare outputs and Biomass visualization
+## Running ReactiveAtlantis
+
+### Unified Application (Recommended)
+
+The recommended way to use ReactiveAtlantis is through the unified application, which combines all calibration tools into a single modern interface:
+
 ```R
-nc.current  <- 'your_current_output.nc'
-nc.old      <- 'your_previous_output.nc'
-grp.csv     <- 'your_groups_definition_file.csv'
-bgm.file    <- 'your_spatial_configuration_file.bgm'
-cum.depths  <- c(0, 20, 50, 150, 250, 400, 650, 1000, 4300) ## This should be the cummulative depth of your model
-## individual file
-compare(nc.current, nc.out.old = NULL, grp.csv, bgm.file, cum.depths)
-## compare to previuos run
-compare(nc.current, nc.old, grp.csv, bgm.file, cum.depths)
+library(ReactiveAtlantis)
+launch_reactiveatlantis()
 ```
 
-### Predation analysis from the Atlantis output
+This will open an interactive browser-based application where you can:
+
+* Upload your Atlantis model files through file inputs
+* Navigate between different analysis tools using tabs
+* Visualize results with consistent, modern styling
+* Compare multiple outputs side by side
+
+All calibration tools are accessible from the main navigation:
+* **Compare Outputs** - Visualize and compare biomass between simulations
+* **Predation** - Analyze predator-prey interactions through time
+* **Food Web** - Explore food web structure and trophic levels
+* **Recruitment** - Estimate recruitment and primary production
+* **Growth** - Analyze limitation factors for primary producers
+* **Catch Analysis** - Visualize harvest outputs and model skill assessment
+* **Feeding Matrix** - Calibrate predator-prey availability matrices
+* **Mortality** - Explore natural, fishing, and predation mortality
+
+### Command-Line Usage (Legacy)
+
+The original command-line functions are still available for scripting and batch processing:
+
 ```R
-biom        <- 'your_BiomIndx.txt'
-diet.file   <- 'your_DietCheck.txt'
-bio.age     <- 'your_AgeBiomIndx.txt' ## optional file. just if you want to check the predation by age
-grp.csv     <- 'your_groups_definition_file.csv'
-## Predation by Age
-predation(biom, grp.csv, diet.file, bio.age)
-## No predation by Age
+## Compare outputs and biomass visualization
+compare(nc.current, nc.out.old = NULL, grp.csv, bgm.file, cum.depths)
+
+## Predation analysis
 predation(biom, grp.csv, diet.file, bio.age = NULL)
 
-```
-
-### Exploring predator-prey interactions from the initial conditions
-```R
-prm.file    <- 'your_prm_file.prm'
-nc.initial  <- 'your_initial_conditions.nc'
-grp.csv     <- 'your_groups_definition_file.csv'
-bgm.file    <- 'your_spatial_configuration_file.bgm'
-cum.depths  <- c(0, 20, 50, 150, 250, 400, 650, 1000, 4300) ## This should be the cummulative depth of your model
+## Predator-prey interactions
 feeding.mat(prm.file, grp.file, nc.initial, bgm.file, cum.depths)
-```
 
-### Atlantis food web and trophic level composition
-```R
-grp.csv     <- 'your_groups_definition_file.csv'
-prm.file    <- 'your_prm_file.prm'
-diet.file   <- 'your_DietCheck.txt'
-food.web(diet.file, grp.file)
-## optional you can explore the food web by polygon
-food.web(diet.file, grp.file, diet.file.bypol)
-## diet.file.bypol Detailed diet check file, this can be obtained as an extra output from Atlantis "DetailedDietCheck.txt". To get this file from Atlantis turn on the option "flagdietcheck" on the Run.prm file.
-```
+## Food web and trophic levels
+food.web(diet.file, grp.file, diet.file.bypol = NULL)
 
-### Growth of primary producers and limiting factors
-```R
-nc.initial  <- 'your_initial_conditions.nc'
-nc.current  <- 'your_current_output.nc'
-grp.csv     <- 'your_groups_definition_file.csv'
-prm.file    <- 'your_prm_file.prm'
+## Growth of primary producers
 growth.pp(nc.initial, grp.csv, prm.file, nc.current)
-```
 
-### Analysis of recruitment and primary production
-```R
-nc.initial  <- 'your_initial_conditions.nc'
-nc.current  <- 'your_current_output.nc'
-yoy.file    <- 'your_yoy_file.txt'
-grp.csv     <- 'your_groups_definition_file.csv'
-prm.file    <- 'your_prm_file.prm'
+## Recruitment analysis
 recruitment.cal(nc.initial, nc.current, yoy.file, grp.file, prm.file)
+
+## Harvest outputs and skill assessment
+catch(grp.csv, fsh.csv, catch.nc, ext.catch.by.fleet = NULL, ext.catch.total = NULL)
+
+## Mortality analysis
+mortality(grp.file, prm.file, SpeMort, PredMort)
 ```
 
-### Harvest outputs and model skill assessment
-```R
-
-catch.nc    <- 'your_output_CATCH.nc'
-ext.catch   <- 'external_catch_time_serie.csv'
-cum.depths  <- c(0, 20, 50, 150, 250, 400, 650, 1000, 4300) ## This should be the cummulative depth of your model
-fsh.csv     <- 'your_fisheries_definition_file.csv'
-bgm.file    <- 'your_spatial_configuration_file.bgm'
-grp.csv     <- 'your_groups_definition_file.csv'
-catch(grp.csv, fsh.csv, catch.nc, ext.catch)
-```
 ## Authors
 
 * **Javier Porobic**
