@@ -33,7 +33,23 @@ mortality_ui <- function(id) {
             class = "alert alert-info",
             style = "margin-top: 50px;",
             icon("info-circle"),
-            " Please load your mortality data files to begin analysis."
+            h4("Mortality Analysis"),
+            p("This tool analyzes natural, fishing, and predation mortality from Atlantis model outputs."),
+            hr(),
+            h5("Required Files:"),
+            tags$ul(
+              tags$li(strong("SpecificMort.txt:"), " Specific mortality output file"),
+              tags$li(strong("SpecificPredMort.txt:"), " Predation mortality output file"),
+              tags$li(strong("Groups CSV:"), " Functional groups definition")
+            ),
+            hr(),
+            h5("Generating Mortality Output Files:"),
+            p("These files are optional Atlantis outputs. To generate them, add the following flags to your", 
+              code("run.prm"), "file:"),
+            tags$pre(style = "background-color: #f5f5f5; padding: 10px; border-radius: 4px;",
+              "flagspecmort 1\nflagspecpredmort 1"
+            ),
+            p("Then run your Atlantis simulation. The mortality files will be created in the output directory.")
           )
         ),
         conditionalPanel(
