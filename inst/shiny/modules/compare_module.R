@@ -57,7 +57,6 @@ compare_ui <- function(id) {
 compare_server <- function(id, project = NULL) {
   moduleServer(id, function(input, output, session) {
     ps <- shiny::reactive(project_snapshot(project))
-    rv <- reactiveValues(t_biomass = NULL, rel_bio = NULL, built = FALSE, token = NULL)
 
     output$banner <- renderUI(tool_banner(ps(), "compare"))
 
@@ -70,14 +69,13 @@ compare_server <- function(id, project = NULL) {
       update_select_keep(session, "fg_age", age_select_choices(grp), input$fg_age)
     })
 
-    observe({
-      req(!is.null(project), isTRUE(ps()$ready), ps()$data)
-      miss <- tool_missing(ps()$paths, "compare", ps())
-      token <- paste(unlist(ps()$paths), collapse = "|")
-      if (length(miss) || (isTRUE(rv$built) && identical(rv$token, token))) return()
-      rv$token <- token
+    search_d <- ra_debounce(shiny::reactive(input$search), 400)
+    fg_total_d <- ra_debounce(shiny::reactive(input$fg_total), 250)
+    fg_age_d <- ra_debounce(shiny::reactive(input$fg_age), 250)
+
+    compare_tables <- reactive({
       dat <- ps()$data
-      req(dat$grp)
+      req(isTRUE(ps()$ready), dat$grp)
       t.biomass <- NULL
       if (!is.null(dat$biomindx) && NROW(dat$biomindx) > 0) {
         t.biomass <- tryCatch(
@@ -86,28 +84,28 @@ compare_server <- function(id, project = NULL) {
         )
       }
       if (is.null(t.biomass) || nrow(t.biomass) == 0) {
+        dat <- ensure_project_data(ps(), c("nc_out", "inf_box"))
         req(dat$nc_out, dat$inf_box, dat$time_dates)
         t.biomass <- nc_facet_biomass(dat)
       }
       req(!is.null(t.biomass), nrow(t.biomass) > 0)
       rel.bio <- do.call(rbind.data.frame, by(t.biomass, t.biomass$FG, relative))
-      rv$t_biomass <- t.biomass
-      rv$rel_bio <- rel.bio
-      rv$built <- TRUE
+      list(t_biomass = t.biomass, rel_bio = rel.bio)
     })
 
     filtered <- reactive({
-      req(rv$t_biomass, ps()$data$grp)
-      df <- if (isTRUE(input$relative)) rv$rel_bio else rv$t_biomass
+      tabs <- compare_tables()
+      req(tabs$t_biomass, ps()$data$grp)
+      df <- if (isTRUE(input$relative)) tabs$rel_bio else tabs$t_biomass
       grp <- ps()$data$grp
       if (!is.null(input$group_type) && input$group_type != "All") {
         codes <- grp$code[grp$grouptype == input$group_type]
         keep <- grepl(paste0("\\((", paste(codes, collapse = "|"), ")\\)$"), df$FG)
         df <- df[keep, ]
       }
-      if (!is.null(input$search) && nzchar(trimws(input$search))) {
-        q <- trimws(input$search)
-        df <- df[grepl(q, df$FG, ignore.case = TRUE), ]
+      q <- search_d()
+      if (!is.null(q) && nzchar(trimws(q))) {
+        df <- df[grepl(trimws(q), df$FG, ignore.case = TRUE), ]
       }
       df
     })
@@ -186,7 +184,8 @@ compare_server <- function(id, project = NULL) {
     }
 
     output$plot_facets_gg <- renderPlot({
-      if (!isTRUE(ps()$ready) || is.null(rv$t_biomass)) {
+      tabs <- tryCatch(compare_tables(), error = function(e) NULL)
+      if (!isTRUE(ps()$ready) || is.null(tabs) || is.null(tabs$t_biomass)) {
         plot_message("Load a run to compare biomass")
         return(invisible(NULL))
       }
@@ -200,11 +199,11 @@ compare_server <- function(id, project = NULL) {
 
     output$plot_total <- renderPlot({
       plot_or_message("Load a run and pick a functional group", {
-      dat <- ps()$data
-      req(dat$nc_out, input$fg_total, dat$inf_box, dat$time_dates)
+      dat <- ensure_project_data(ps(), c("nc_out", "inf_box"))
+      req(dat$nc_out, fg_total_d(), dat$inf_box, dat$time_dates)
       mg2t <- 0.00000002
       x.cn <- 5.7
-      total_data <- nitro.weight(dat$nc_out, dat$grp, input$fg_total, By = "Total",
+      total_data <- nitro.weight(dat$nc_out, dat$grp, fg_total_d(), By = "Total",
                                 dat$inf_box, mg2t, x.cn)
       if (isTRUE(input$scaled)) {
         rmv <- which(sapply(total_data, function(x) length(x) == 0 || is.null(x) || is.character(x)))
@@ -222,7 +221,7 @@ compare_server <- function(id, project = NULL) {
                                      xmin = min(dat$time_dates), xmax = max(dat$time_dates))
         }
         if (!isTRUE(input$scaled)) {
-          p <- add_obs_overlay(p, dat$observations, input$fg_total, "Biomass")
+          p <- add_obs_overlay(p, dat$observations, fg_total_d(), "Biomass")
         }
         p
       } else p
@@ -231,11 +230,11 @@ compare_server <- function(id, project = NULL) {
 
     output$plot_age <- renderPlot({
       plot_or_message("Load a run and pick an age-structured group", {
-      dat <- ps()$data
-      req(dat$nc_out, input$fg_age, dat$inf_box, dat$time_dates)
+      dat <- ensure_project_data(ps(), c("nc_out", "inf_box"))
+      req(dat$nc_out, fg_age_d(), dat$inf_box, dat$time_dates)
       mg2t <- 0.00000002
       x.cn <- 5.7
-      coho <- nitro.weight(dat$nc_out, dat$grp, FG = input$fg_age, By = "Cohort",
+      coho <- nitro.weight(dat$nc_out, dat$grp, FG = fg_age_d(), By = "Cohort",
                           dat$inf_box, mg2t, x.cn)
       if (isTRUE(input$scaled_age)) {
         rmv <- which(sapply(coho, function(x) length(x) == 0 || is.null(x) || is.character(x)))
@@ -243,7 +242,7 @@ compare_server <- function(id, project = NULL) {
         coho.tmp <- lapply(coho.tmp, function(x) lapply(x, function(x) x / x[1]))
         coho[-rmv] <- coho.tmp
       }
-      n.coh <- dat$grp$numcohorts[dat$grp$code == input$fg_age]
+      n.coh <- dat$grp$numcohorts[dat$grp$code == fg_age_d()]
       p <- plot_cohorts_ggplot(coho, dat$time_dates, FALSE, FALSE,
                               isTRUE(input$show_numbers_age), isTRUE(input$show_biomass_age),
                               isTRUE(input$scaled_age), isTRUE(input$limit_axis_age), n.coh)
@@ -260,11 +259,11 @@ compare_server <- function(id, project = NULL) {
 
     output$plot_age_bars <- renderPlot({
       plot_or_message("Load a run and pick an age-structured group", {
-      dat <- ps()$data
-      req(dat$nc_out, input$fg_age, dat$inf_box, dat$time_dates)
+      dat <- ensure_project_data(ps(), c("nc_out", "inf_box"))
+      req(dat$nc_out, fg_age_d(), dat$inf_box, dat$time_dates)
       mg2t <- 0.00000002
       x.cn <- 5.7
-      coho <- nitro.weight(dat$nc_out, dat$grp, FG = input$fg_age, By = "Cohort",
+      coho <- nitro.weight(dat$nc_out, dat$grp, FG = fg_age_d(), By = "Cohort",
                           dat$inf_box, mg2t, x.cn)
       use_num <- isTRUE(input$show_numbers_age) && !isTRUE(input$show_biomass_age)
       src <- if (use_num) coho$Numbers else coho$Biomass
@@ -291,14 +290,14 @@ compare_server <- function(id, project = NULL) {
       pal <- get_mortality_colors(n.coh)
       names(pal) <- sprintf("Age%02d", seq_len(n.coh))
       p <- p + ggplot2::scale_fill_manual(values = pal)
-      p <- p + ggplot2::labs(title = paste("Age structure —", input$fg_age),
+      p <- p + ggplot2::labs(title = paste("Age structure —", fg_age_d()),
                              x = "Year", y = ylab)
-      p + theme_reactiveatlantis()
+      p <- p + theme_reactiveatlantis()
+      ra_scale_x_year(p, plot_df$Time)
       })
     })
 
-    keep_outputs_alive(output, c("banner", "plot_facets_gg", "plot_total",
-                                 "plot_age", "plot_age_bars"))
+    keep_outputs_alive(output, "banner")
   })
 }
 
@@ -409,9 +408,9 @@ bio.age <- function(age.grp, nc.out, ctg, mg2t, x.cn, inf.box, Time){
     cohort <- NULL
     for(coh in 1:age.grp[age, 'numcohorts']){
       name.fg <- paste0(age.grp$name[age], coh)
-      b.coh <- (ncdf4::ncvar_get(nc.out, paste0(name.fg, '_ResN')) +
-                ncdf4::ncvar_get(nc.out, paste0(name.fg, '_StructN'))) *
-               ncdf4::ncvar_get(nc.out, paste0(name.fg, '_Nums')) * mg2t * x.cn
+      b.coh <- (nc_get(nc.out, paste0(name.fg, '_ResN')) +
+                nc_get(nc.out, paste0(name.fg, '_StructN'))) *
+               nc_get(nc.out, paste0(name.fg, '_Nums')) * mg2t * x.cn
       b.coh <- colSums(apply(apply(b.coh, 2, colSums, na.rm = TRUE), 1, 
                             function(x) x * bound), na.rm = TRUE)
       cohort <- cbind(cohort, b.coh)
@@ -431,7 +430,7 @@ bio.pool <- function(pol.grp, nc.out, ctg, mg2t, x.cn, box.info, Time){
   
   for(pool in 1:nrow(pol.grp)){
     name.fg <- paste0(pol.grp$name[pool], '_N')
-    biom <- ncdf4::ncvar_get(nc.out, name.fg)
+    biom <- nc_get(nc.out, name.fg)
     
     if(length(dim(biom)) == 3){
       if(pol.grp$grouptype[pool] == 'LG_INF'){
@@ -464,7 +463,7 @@ bio.pwn <- function(pwn.grp, nc.out, ctg, mg2t, x.cn, box.info, Time){
     cohort <- NULL
     for(coh in 1:pwn.grp[pwn, 'numcohorts']){
       name.fg <- paste0(pwn.grp$name[pwn], '_N', coh)
-      b.coh <- ncdf4::ncvar_get(nc.out, name.fg) * mg2t * x.cn
+      b.coh <- nc_get(nc.out, name.fg) * mg2t * x.cn
       
       if(length(dim(b.coh)) > 2){
         b.coh <- apply(b.coh, 3, '*', box.info$Vol)
@@ -499,9 +498,9 @@ nitro.weight <- function(nc.out, grp, FG, By = 'Total', box.info, mg2t, x.cn, po
     n.coh <- grp[pos.fg, 'numcohorts']
     for(coh in 1:n.coh){
       name.fg <- paste0(grp$name[pos.fg], coh)
-      nums <- ncdf4::ncvar_get(nc.out, paste0(name.fg, '_Nums'))
-      resN <- ncdf4::ncvar_get(nc.out, paste0(name.fg, '_ResN'))
-      strN <- ncdf4::ncvar_get(nc.out, paste0(name.fg, '_StructN'))
+      nums <- nc_get(nc.out, paste0(name.fg, '_Nums'))
+      resN <- nc_get(nc.out, paste0(name.fg, '_ResN'))
+      strN <- nc_get(nc.out, paste0(name.fg, '_StructN'))
       
       resN[which(resN <= 1e-8, arr.ind = TRUE)] <- NA
       resN[which(nums <= 1e-8, arr.ind = TRUE)] <- NA
@@ -543,7 +542,7 @@ nitro.weight <- function(nc.out, grp, FG, By = 'Total', box.info, mg2t, x.cn, po
     type <- 'AgeClass'
   } else if (grp[pos.fg, 'numcohorts'] == 1){
     name.fg <- paste0(grp$name[pos.fg], '_N')
-    biom <- ncdf4::ncvar_get(nc.out, name.fg)
+    biom <- nc_get(nc.out, name.fg)
     
     if(length(dim(biom)) == 3){
       if(grp$grouptype[pos.fg] == 'LG_INF'){
@@ -566,7 +565,7 @@ nitro.weight <- function(nc.out, grp, FG, By = 'Total', box.info, mg2t, x.cn, po
     n.coh <- grp[pos.fg, 'numcohorts']
     for(coh in 1:n.coh){
       name.fg <- paste0(grp$name[pos.fg],'_N', coh)
-      biom <- ncdf4::ncvar_get(nc.out, name.fg)
+      biom <- nc_get(nc.out, name.fg)
       if(length(dim(biom)) > 2){
         biom <- apply(biom, 3, '*', box.info$Vol)
       } else {

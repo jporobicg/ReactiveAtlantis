@@ -39,6 +39,7 @@ source(file.path(mod, "foodweb_module.R"), local = TRUE)
 source(file.path(mod, "mortality_module.R"), local = TRUE)
 source(file.path(mod, "compare_module.R"), local = TRUE)
 source(file.path(mod, "project_store.R"), local = TRUE)
+source(file.path(mod, "nc_cache.R"), local = TRUE)
 source(file.path(mod, "analysis_helpers.R"), local = TRUE)
 source(file.path(mod, "overview_module.R"), local = TRUE)
 source(file.path(mod, "feeding_module.R"), local = TRUE)
@@ -54,6 +55,10 @@ make_project <- function(..., ensemble = NULL) {
   args <- list(...)
   for (nm in names(args)) paths[[nm]] <- args[[nm]]
   loaded <- load_project(paths)
+  loaded <- ensure_project_data(
+    list(ready = !is.null(loaded$grp), paths = paths, data = loaded),
+    c("nc_out", "nc_old", "nc_catch", "nc_init", "nc_prod", "diet", "inf_box")
+  )
   st <- list(
     ready = !is.null(loaded$grp),
     paths = normalize_paths(paths),
@@ -1380,9 +1385,119 @@ test_that("app.R sources the new analysis modules", {
   txt <- paste(vapply(parsed, function(e) paste(deparse(e), collapse = " "), character(1)),
                collapse = "\n")
   expect_true(grepl("analysis_helpers.R", txt, fixed = TRUE))
+  expect_true(grepl("nc_cache.R", txt, fixed = TRUE))
   expect_true(grepl("spatial_ui", txt, fixed = TRUE))
   expect_true(grepl("consumption_ui", txt, fixed = TRUE))
   expect_true(grepl("physics_ui", txt, fixed = TRUE))
   expect_true(grepl("ensemble_ui", txt, fixed = TRUE))
+})
+
+test_that("lite load_project does not open NetCDF or DietCheck", {
+  tmpdir <- tempfile("lite_")
+  dir.create(tmpdir)
+  on.exit(unlink(tmpdir, recursive = TRUE), add = TRUE)
+  write_synthetic_atlantis_run(tmpdir)
+  found <- detect_project_files(tmpdir)
+  t_load <- system.time(loaded <- load_project(found), gcFirst = FALSE)
+  expect_lt(t_load[["elapsed"]], 2)
+  expect_null(loaded$nc_out)
+  expect_null(loaded$nc_prod)
+  expect_null(loaded$nc_catch)
+  expect_null(loaded$diet_time)
+  expect_true(isTRUE(loaded$diet_deferred))
+  expect_false(is.null(loaded$grp))
+  snap <- list(ready = TRUE, paths = found, data = loaded, gen = 1L)
+  expect_true(role_is_loaded(snap, "output_nc"))
+  expect_true(role_is_loaded(snap, "dietcheck"))
+  html <- paste(as.character(role_checklist_ui(snap)), collapse = " ")
+  expect_true(grepl("data-status=\"loaded\"", html))
+  expect_gte(length(gregexpr("data-status=\"loaded\"", html)[[1]]), 10)
+  opened <- ensure_project_data(snap, "nc_out")
+  expect_true(inherits(opened$nc_out, "ncdf4"))
+})
+
+test_that("nc_get and biomass_by_box cache by path+mtime", {
+  tmpdir <- tempfile("cache_")
+  dir.create(tmpdir)
+  on.exit(unlink(tmpdir, recursive = TRUE), add = TRUE)
+  nc_path <- file.path(tmpdir, "output.nc")
+  write_timing_biology_nc(nc_path)
+  grp <- data.frame(
+    code = "G01", name = "g01", numcohorts = 5, grouptype = "FISH",
+    isturnedon = 1, stringsAsFactors = FALSE
+  )
+  ra_cache_clear()
+  nc <- nc_handle(nc_path)
+  key <- file_cache_key(nc_path, "g011_StructN")
+  expect_true(grepl(as.character(as.numeric(file.mtime(nc_path))), key, fixed = TRUE))
+  t1 <- system.time(a1 <- nc_get(nc, "g011_StructN"), gcFirst = FALSE)
+  t2 <- system.time(a2 <- nc_get(nc, "g011_StructN"), gcFirst = FALSE)
+  expect_identical(a1, a2)
+  expect_lt(t2[["elapsed"]], 0.05)
+  if (t1[["elapsed"]] > 0.02) expect_lt(t2[["elapsed"]], t1[["elapsed"]] / 2)
+  ra_cache_clear()
+  nc2 <- nc_handle(nc_path)
+  t_bio1 <- system.time(b1 <- biomass_by_box(nc2, grp, "G01"), gcFirst = FALSE)
+  t_bio2 <- system.time(b2 <- biomass_by_box(nc2, grp, "G01"), gcFirst = FALSE)
+  expect_equal(b1$Biomass, b2$Biomass)
+  expect_lt(t_bio2[["elapsed"]], 0.05)
+  if (t_bio1[["elapsed"]] > 0.02) expect_lt(t_bio2[["elapsed"]], t_bio1[["elapsed"]] / 2)
+  message(sprintf(
+    "[ra-time] biomass_by_box first %.3fs cached %.3fs; nc_get first %.3fs cached %.3fs",
+    t_bio1[["elapsed"]], t_bio2[["elapsed"]], t1[["elapsed"]], t2[["elapsed"]]
+  ))
+})
+
+test_that("consumption uses year breaks not month-year labels", {
+  dates <- as.Date(c("1965-01-01", "1965-07-01", "1966-01-01", "1967-01-01",
+                     "1968-01-01"))
+  df <- data.frame(Date = dates, Tonnes = 1:5, series = "Total")
+  p <- ggplot2::ggplot(df, ggplot2::aes(x = Date, y = Tonnes, fill = series))
+  p <- p + ggplot2::geom_area()
+  p <- ra_scale_x_year(p, df$Date)
+  built <- ggplot2::ggplot_build(p)
+  labs <- built$layout$panel_params[[1]]$x$get_labels()
+  labs <- labs[!is.na(labs) & nzchar(labs)]
+  expect_true(length(labs) >= 1)
+  expect_true(all(grepl("^[0-9]{4}$", labs)))
+  expect_false(any(grepl("-[0-9]{2}$", labs)))
+})
+
+test_that("problem_cohorts reads only first and last time slices", {
+  tmpdir <- tempfile("ends_")
+  dir.create(tmpdir)
+  on.exit(unlink(tmpdir, recursive = TRUE), add = TRUE)
+  nc_path <- file.path(tmpdir, "output.nc")
+  write_timing_biology_nc(nc_path, n_z = 4, n_b = 8, n_t = 20, n_grp = 2, n_coh = 3)
+  grp <- data.frame(
+    code = c("G01", "G02"), name = c("g01", "g02"), numcohorts = c(3, 3),
+    grouptype = "FISH", isturnedon = 1, stringsAsFactors = FALSE
+  )
+  ra_cache_clear()
+  nc <- nc_handle(nc_path)
+  t_coh <- system.time(tbl <- problem_cohorts(nc, grp, ACCEPT_BAND), gcFirst = FALSE)
+  expect_gt(nrow(tbl), 0)
+  expect_true(all(c("Initial", "Final", "Relative") %in% names(tbl)))
+  expect_lt(t_coh[["elapsed"]], 3)
+  ends <- nc_get_time_ends(nc, "g011_StructN")
+  expect_equal(ends$n_t, 20)
+  expect_equal(length(dim(ends$first)), 3)
+  expect_equal(dim(ends$first)[3], 1)
+})
+
+test_that("hidden-tab plots are not kept alive after load", {
+  mods <- file.path(root, "inst", "shiny", "modules")
+  src <- paste(vapply(
+    c("consumption_module.R", "spatial_module.R", "compare_module.R",
+      "recruitment_module.R", "growth_module.R", "feeding_module.R",
+      "predation_module.R", "foodweb_module.R", "catch_module.R",
+      "physics_module.R", "mortality_module.R"),
+    function(f) paste(readLines(file.path(mods, f)), collapse = "\n"),
+    character(1)
+  ), collapse = "\n")
+  expect_false(grepl('keep_outputs_alive\\(output, c\\("banner", "', src))
+  expect_true(grepl("ensure_project_data", src, fixed = TRUE))
+  expect_true(grepl("ra_debounce", src, fixed = TRUE))
+  expect_true(grepl("ra_scale_x_year", src, fixed = TRUE))
 })
 

@@ -34,21 +34,12 @@ predation_server <- function(id, project = NULL) {
     output$banner <- renderUI(tool_banner(ps(), "predation"))
 
     observe({
-      req(isTRUE(ps()$ready), diet_dat()$grp)
-      dat <- diet_dat()
-      update_select_keep(session, "fg", fg_select_choices(dat$grp, on_only = FALSE), input$fg)
-      stocks <- if (!is.null(dat$diet_time) && "Stock" %in% names(dat$diet_time)) {
-        unique(dat$diet_time$Stock)
-      } else 0
-      update_select_keep(session, "stock", as.character(stocks), input$stock)
-      times <- if (!is.null(dat$diet_full)) sort(unique(dat$diet_full$Time)) else 0
-      step <- if (length(times) > 1) min(diff(times)) else 1
-      shiny::updateSliderInput(session, "time_age",
-                               min = min(times), max = max(times),
-                               value = keep_numeric(input$time_age, min(times), max(times),
-                                                    min(times)),
-                               step = step)
+      req(isTRUE(ps()$ready), ps()$data$grp)
+      update_select_keep(session, "fg", fg_select_choices(ps()$data$grp, on_only = FALSE),
+                         input$fg)
     })
+
+    fg_d <- ra_debounce(shiny::reactive(input$fg), 250)
 
     new_bio <- reactive({
       dat <- diet_dat()
@@ -67,15 +58,25 @@ predation_server <- function(id, project = NULL) {
 
     predator_df <- reactive({
       dat <- diet_dat()
-      req(dat$diet_time, input$fg)
-      diet_through_time_predator(dat$diet_time, new_bio(), input$fg, input$stock,
+      req(dat$diet_time, fg_d())
+      if (!is.null(dat$diet_full)) {
+        times <- sort(unique(dat$diet_full$Time))
+        step <- if (length(times) > 1) min(diff(times)) else 1
+        shiny::updateSliderInput(session, "time_age",
+                                 min = min(times), max = max(times), step = step)
+      }
+      stocks <- if (!is.null(dat$diet_time) && "Stock" %in% names(dat$diet_time)) {
+        unique(dat$diet_time$Stock)
+      } else 0
+      update_select_keep(session, "stock", as.character(stocks), input$stock)
+      diet_through_time_predator(dat$diet_time, new_bio(), fg_d(), input$stock,
                                  input$threshold, FALSE)
     })
 
     prey_df <- reactive({
       dat <- diet_dat()
-      req(dat$diet_time, input$fg)
-      diet_through_time_prey(dat$diet_time, new_bio(), input$fg, input$threshold, FALSE)
+      req(dat$diet_time, fg_d())
+      diet_through_time_prey(dat$diet_time, new_bio(), fg_d(), input$threshold, FALSE)
     })
 
     to_year <- function(df) {
@@ -95,8 +96,9 @@ predation_server <- function(id, project = NULL) {
       p <- ggplot2::ggplot(agg, ggplot2::aes(x = Time, y = consum, fill = series))
       p <- p + ggplot2::geom_area(position = if (isTRUE(input$scaled)) "fill" else "stack")
       p <- p + ggplot2::scale_fill_manual(values = pal, name = "Prey")
-      p <- p + ggplot2::labs(title = paste("Diet of", input$fg), x = "Year", y = ylab)
-      p + theme_reactiveatlantis()
+      p <- p + ggplot2::labs(title = paste("Diet of", fg_d()), x = "Year", y = ylab)
+      p <- p + theme_reactiveatlantis()
+      ra_scale_x_year(p, df$Time)
     })
 
     prey_plot <- reactive({
@@ -110,8 +112,9 @@ predation_server <- function(id, project = NULL) {
       p <- ggplot2::ggplot(agg, ggplot2::aes(x = Time, y = eff.pred, fill = series))
       p <- p + ggplot2::geom_area(position = if (isTRUE(input$scaled)) "fill" else "stack")
       p <- p + ggplot2::scale_fill_manual(values = pal, name = "Predator")
-      p <- p + ggplot2::labs(title = paste("Predators of", input$fg), x = "Year", y = ylab)
-      p + theme_reactiveatlantis()
+      p <- p + ggplot2::labs(title = paste("Predators of", fg_d()), x = "Year", y = ylab)
+      p <- p + theme_reactiveatlantis()
+      ra_scale_x_year(p, df$Time)
     })
 
     output$plot_pred_gg <- renderPlot({
@@ -134,8 +137,8 @@ predation_server <- function(id, project = NULL) {
     output$plot_age <- renderPlot({
       plot_or_message("Load DietCheck.txt to plot diet by age", {
       dat <- diet_dat()
-      req(dat$diet_full, input$fg, input$time_age)
-      df <- age_diet_slice(dat$diet_full, input$fg, input$stock, input$time_age, input$threshold)
+      req(dat$diet_full, fg_d(), input$time_age)
+      df <- age_diet_slice(dat$diet_full, fg_d(), input$stock, input$time_age, input$threshold)
       req(nrow(df) > 0)
       pal <- get_fg_colors(unique(as.character(df$variable)), dat$fg_palette)
       df$Age <- sprintf("Age%02d", as.integer(df$Cohort))
@@ -148,7 +151,7 @@ predation_server <- function(id, project = NULL) {
       })
     })
 
-    keep_outputs_alive(output, c("banner", "plot_pred_gg", "plot_prey_gg", "plot_age"))
+    keep_outputs_alive(output, "banner")
   })
 }
 

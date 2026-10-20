@@ -27,6 +27,11 @@ keep_outputs_alive <- function(output, names) {
   }
 }
 
+##' Debounce a reactive; 250 ms for group selects, 400 ms for search boxes
+ra_debounce <- function(r, millis = 250) {
+  shiny::debounce(r, millis)
+}
+
 ##' DT without Bootstrap 5 CSS (missing on some Debian DT builds)
 ra_datatable <- function(data, ..., filter = "none") {
   dots <- list(...)
@@ -55,6 +60,26 @@ plot_or_message <- function(msg, expr) {
     plot_message(msg)
     invisible(NULL)
   })
+}
+
+ra_scale_x_year <- function(p, x) {
+  x <- x[!is.na(x)]
+  if (length(x) == 0) return(p)
+  xr <- range(x)
+  if (inherits(x, "Date") || inherits(x, "POSIXt")) {
+    x <- as.Date(x)
+    xr <- range(x)
+    y0 <- as.integer(format(xr[1], "%Y"))
+    y1 <- as.integer(format(xr[2], "%Y"))
+    span <- max(1L, y1 - y0)
+    step <- max(1L, as.integer(round(span / 4)))
+    yrs <- seq(y0, y1, by = step)
+    if (tail(yrs, 1) != y1) yrs <- c(yrs, y1)
+    br <- as.Date(sprintf("%d-01-01", unique(yrs)))
+    p + ggplot2::scale_x_date(breaks = br, date_labels = "%Y")
+  } else {
+    p + ggplot2::scale_x_continuous(breaks = pretty(as.numeric(xr), n = 5))
+  }
 }
 
 keep_numeric <- function(current, min_v, max_v, fallback = min_v) {

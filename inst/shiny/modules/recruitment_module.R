@@ -70,100 +70,32 @@ recruitment_server <- function(id, project = NULL) {
       update_select_keep(session, "box", as.character(seq(0, max(0, rv$n_box - 1))), input$box)
     })
 
-    observe({
-      req(!is.null(project), isTRUE(ps()$ready), ps()$data)
-      miss <- tool_missing(ps()$paths, "recruitment", ps())
-      token <- paste(unlist(ps()$paths), collapse = "|")
-      if (length(miss) || (isTRUE(rv$built) && identical(rv$token, token))) return()
-      rv$token <- token
+    rec_built <- reactive({
       dat <- ps()$data
-      req(dat$nc_out, dat$grp, dat$prm_bio, dat$yoy)
-      grp <- dat$grp
-      prm <- dat$prm_bio
-      nc.out <- dat$nc_out
-
-      sp.dat <- with(grp, which(isturnedon == 1 & numcohorts > 1))
-      options(warn = -1)
-      rec <- text2num(prm, "^flagrecruit", FG = "look")
-      options(warn = 0)
-      rec <- rec[complete.cases(rec), ]
-      rec <- cbind(rec, Alpha = NA, Beta = NA, KSPA = NA, FSP = NA, Time.sp = NA,
-                   XCN = NA, XRS = NA, Rec.SNW = NA, Rec.RNW = NA)
-      sps <- gsub(pattern = "^flagrecruit", "", rec$FG)
-      rec$FG <- sps
-      prm_num <- function(pat) {
-        val <- tryCatch(suppressWarnings(text2num(prm, pat, FG = "look")[1, 2]),
-                        error = function(e) NA_real_)
-        if (length(val) == 0) NA_real_ else as.numeric(val)
-      }
-      xcn <- prm_num("X_CN")
-      xrs <- prm_num("X_RS")
-      fspb_list <- list()
-      for (fg.r in seq_along(sps)) {
-        if (!sps[fg.r] %in% grp$code[sp.dat]) next()
-        rec$XCN[fg.r] <- xcn
-        rec$XRS[fg.r] <- xrs
-        rec$Time.sp[fg.r] <- prm_num(paste0(sps[fg.r], "_Time_Spawn"))
-        if (rec$Value[fg.r] %in% c(3, 10)) {
-          rec$Alpha[fg.r] <- prm_num(paste0("BHalpha_", sps[fg.r]))
-          rec$Beta[fg.r] <- prm_num(paste0("BHbeta_", sps[fg.r]))
-        }
-        if (rec$Value[fg.r] == 3) {
-          rec$KSPA[fg.r] <- prm_num(paste0("KSPA_", sps[fg.r]))
-          rec$FSP[fg.r] <- prm_num(paste0("FSP_", sps[fg.r]))
-          rec$Rec.SNW[fg.r] <- prm_num(paste0("KWSR_", sps[fg.r]))
-          rec$Rec.RNW[fg.r] <- prm_num(paste0("KWRR_", sps[fg.r]))
-          fspb.tmp <- tryCatch(suppressWarnings(
-            text2num(prm, paste0("FSPB_", sps[fg.r]), FG = sps[fg.r], Vector = TRUE)
-          ), error = function(e) NULL)
-          if (!is.null(fspb.tmp)) fspb_list[[sps[fg.r]]] <- as.numeric(fspb.tmp)
-        }
-      }
-      rv$fspb <- fspb_list
-
-      pp.pos <- with(grp, which(grouptype %in% c("MED_ZOO", "LG_ZOO", "LG_PHY", "SM_PHY",
-                                                 "PHYTOBEN", "DINOFLAG", "TURF") &
-                                isturnedon == 1))
-      pp.list <- list()
-      if (length(pp.pos) > 0) {
-        pp.fg <- grp$name[pp.pos]
-        pp.cod <- as.character(grp$code[pp.pos])
-        for (l.pp in seq_along(pp.fg)) {
-          vn <- paste0(pp.fg[l.pp], "_N")
-          arr <- tryCatch(ncdf4::ncvar_get(nc.out, vn), error = function(e) NULL)
-          if (is.null(arr)) next
-          pp.list[[pp.cod[l.pp]]] <- arr
-        }
-      }
-      quiet_nc <- function(name) {
-        tryCatch({
-          capture.output(val <- ncdf4::ncvar_get(nc.out, name))
-          val
-        }, error = function(e) NULL)
-      }
-      pp.list[["Light"]] <- quiet_nc("Light")
-      pp.list[["Eddy"]] <- quiet_nc("eddy")
-
-      n_box <- 1
-      if (!is.null(nc.out$dim$b)) n_box <- nc.out$dim$b$len
-      rv$rec_params <- rec
-      rv$pp_list <- pp.list
-      rv$n_box <- n_box
+      req(isTRUE(ps()$ready), dat$grp, dat$prm_bio)
+      built <- build_rec_params(dat$grp, dat$prm_bio)
+      rv$rec_params <- built$rec
+      rv$fspb <- built$fspb
       rv$built <- TRUE
+      built
     })
 
+    fg_yoy_d <- ra_debounce(shiny::reactive(input$fg_yoy), 250)
+    fg_growth_d <- ra_debounce(shiny::reactive(input$fg_growth), 250)
+
     fill_bh_inputs <- function(fg) {
-      rec_row <- which(rv$rec_params$FG == fg)
+      rec <- rec_built()$rec
+      rec_row <- which(rec$FG == fg)
       if (length(rec_row) == 0) return()
-      updateTextInput(session, "new_alpha", value = sci_txt(rv$rec_params$Alpha[rec_row[1]]))
-      updateTextInput(session, "new_beta", value = sci_txt(rv$rec_params$Beta[rec_row[1]]))
-      rv$alpha_use <- rv$rec_params$Alpha[rec_row[1]]
-      rv$beta_use <- rv$rec_params$Beta[rec_row[1]]
+      updateTextInput(session, "new_alpha", value = sci_txt(rec$Alpha[rec_row[1]]))
+      updateTextInput(session, "new_beta", value = sci_txt(rec$Beta[rec_row[1]]))
+      rv$alpha_use <- rec$Alpha[rec_row[1]]
+      rv$beta_use <- rec$Beta[rec_row[1]]
     }
 
-    observeEvent(input$fg_yoy, {
-      req(rv$rec_params, input$fg_yoy)
-      fill_bh_inputs(input$fg_yoy)
+    observeEvent(fg_yoy_d(), {
+      req(rec_built()$rec, fg_yoy_d())
+      fill_bh_inputs(fg_yoy_d())
     }, ignoreInit = FALSE)
 
     observeEvent(input$recalc, {
@@ -173,8 +105,8 @@ recruitment_server <- function(id, project = NULL) {
 
     yoy_series <- reactive({
       dat <- ps()$data
-      req(dat$yoy, input$fg_yoy)
-      col <- find_yoy_column(dat$yoy, input$fg_yoy)
+      req(dat$yoy, fg_yoy_d())
+      col <- find_yoy_column(dat$yoy, fg_yoy_d())
       if (is.na(col)) return(NULL)
       val <- as.numeric(dat$yoy[[col]])
       tdays <- as.numeric(dat$yoy$Time)
@@ -185,22 +117,23 @@ recruitment_server <- function(id, project = NULL) {
     })
 
     rec_overlay <- reactive({
-      dat <- ps()$data
-      req(input$fg_yoy, rv$rec_params)
+      dat <- ensure_project_data(ps(), "nc_out")
+      rec <- rec_built()$rec
+      req(fg_yoy_d(), rec)
       yoy <- yoy_series()
-      rec_row <- rv$rec_params[rv$rec_params$FG == input$fg_yoy, , drop = FALSE]
+      rec_row <- rec[rec$FG == fg_yoy_d(), , drop = FALSE]
       alpha0 <- if (nrow(rec_row) && is.finite(rec_row$Alpha[1])) rec_row$Alpha[1] else NA_real_
       beta0 <- if (nrow(rec_row) && is.finite(rec_row$Beta[1])) rec_row$Beta[1] else NA_real_
       alpha_n <- rv$alpha_use
       if (is.null(alpha_n) || !is.finite(alpha_n)) alpha_n <- parse_sci(input$new_alpha)
       beta_n <- rv$beta_use
       if (is.null(beta_n) || !is.finite(beta_n)) beta_n <- parse_sci(input$new_beta)
-      spawn_ssb <- spawn_ssb_for_fg(dat, rec_row, input$fg_yoy, rv$fspb[[input$fg_yoy]])
+      spawn_ssb <- spawn_ssb_for_fg(dat, rec_row, fg_yoy_d(), rec_built()$fspb[[fg_yoy_d()]])
       recruitment_overlay(yoy, spawn_ssb, alpha0, beta0, alpha_n, beta_n, rec_row)
     })
 
     yoy_dates <- function(time) {
-      days_as_date(time, ps()$data$origin)
+      days_as_date(time, ensure_project_data(ps(), "nc_out")$origin)
     }
 
     output$plot_yoy <- renderPlot({
@@ -208,7 +141,7 @@ recruitment_server <- function(id, project = NULL) {
       yoy <- yoy_series()
       if (is.null(yoy)) {
         plot.new()
-        title(paste("No YOY column for", input$fg_yoy, "(expected CODE.0 in YOY.txt)"))
+        title(paste("No YOY column for", fg_yoy_d(), "(expected CODE.0 in YOY.txt)"))
         return(invisible(NULL))
       }
       ov <- rec_overlay()
@@ -242,12 +175,13 @@ recruitment_server <- function(id, project = NULL) {
       p <- p + ggplot2::geom_point(size = 1.6, na.rm = TRUE)
       p <- p + ggplot2::scale_color_manual(values = pal)
       p <- p + ggplot2::labs(
-        title = paste("YOY and larvae —", input$fg_yoy),
+        title = paste("YOY and larvae —", fg_yoy_d()),
         subtitle = paste("YOY column", yoy$column, "·", length(yoy$original), "time steps"),
         x = "Year", y = "Young of the year / larvae"
       )
       p <- p + theme_reactiveatlantis()
-      add_obs_overlay(p, ps()$data$observations, input$fg_yoy, "Recruitment")
+      p <- ra_scale_x_year(p, df$Time)
+      add_obs_overlay(p, ps()$data$observations, fg_yoy_d(), "Recruitment")
       })
     })
 
@@ -256,7 +190,7 @@ recruitment_server <- function(id, project = NULL) {
       yoy <- yoy_series()
       if (is.null(yoy)) {
         plot.new()
-        title(paste("No YOY column for", input$fg_yoy))
+        title(paste("No YOY column for", fg_yoy_d()))
         return(invisible(NULL))
       }
       ov <- rec_overlay()
@@ -274,7 +208,8 @@ recruitment_server <- function(id, project = NULL) {
       p <- p + ggplot2::geom_hline(yintercept = 1, linetype = 2, colour = "#8D99AE")
       p <- p + ggplot2::scale_color_manual(values = pal)
       p <- p + ggplot2::labs(title = "Relative YOY (YOY/YOY0)", x = "Year", y = "Relative YOY")
-      p + theme_reactiveatlantis()
+      p <- p + theme_reactiveatlantis()
+      ra_scale_x_year(p, df$Time)
       })
     })
 
@@ -286,32 +221,41 @@ recruitment_server <- function(id, project = NULL) {
         title("Load SSB.txt to plot spawning stock biomass")
         return(invisible(NULL))
       }
-      req(input$fg_yoy)
-      if (!(input$fg_yoy %in% names(dat$ssb))) {
+      req(fg_yoy_d())
+      if (!(fg_yoy_d() %in% names(dat$ssb))) {
         plot.new()
-        title(paste("No SSB column for", input$fg_yoy))
+        title(paste("No SSB column for", fg_yoy_d()))
         return(invisible(NULL))
       }
       tcol <- if ("Time" %in% names(dat$ssb)) dat$ssb$Time else seq_len(nrow(dat$ssb))
       df <- data.frame(
         Time = yoy_dates(tcol),
-        Value = as.numeric(dat$ssb[[input$fg_yoy]]),
+        Value = as.numeric(dat$ssb[[fg_yoy_d()]]),
         stringsAsFactors = FALSE
       )
       p <- ggplot2::ggplot(df, ggplot2::aes(x = Time, y = Value))
       p <- p + ggplot2::geom_line(linewidth = 0.9, colour = "#0B3C5D", na.rm = TRUE)
-      p <- p + ggplot2::labs(title = paste("SSB —", input$fg_yoy), x = "Year", y = "SSB")
+      p <- p + ggplot2::labs(title = paste("SSB —", fg_yoy_d()), x = "Year", y = "SSB")
       p <- p + theme_reactiveatlantis()
-      add_obs_overlay(p, dat$observations, input$fg_yoy, "SSB")
+      p <- ra_scale_x_year(p, df$Time)
+      add_obs_overlay(p, dat$observations, fg_yoy_d(), "SSB")
       })
     })
 
     output$plot_pp_growth <- renderPlot({
       plot_or_message("Load output.nc to plot zooplankton and primary producers", {
-      req(rv$pp_list, input$fg_growth, input$box)
-      fg_data <- rv$pp_list[[input$fg_growth]]
+      dat <- ensure_project_data(ps(), "nc_out")
+      req(dat$nc_out, dat$grp, fg_growth_d(), input$box)
+      grp <- dat$grp
+      g <- grp[as.character(grp$code) == as.character(fg_growth_d()), , drop = FALSE]
+      req(nrow(g) > 0)
+      vn <- paste0(g$name[1], "_N")
+      fg_data <- tryCatch(nc_get(dat$nc_out, vn), error = function(e) NULL)
       if (is.null(fg_data)) return()
-      Time <- ps()$data$time_dates
+      n_box <- if (!is.null(dat$nc_out$dim$b)) dat$nc_out$dim$b$len else 1
+      rv$n_box <- n_box
+      update_select_keep(session, "box", as.character(seq(0, max(0, n_box - 1))), input$box)
+      Time <- dat$time_dates
       rows <- list()
       if (length(dim(fg_data)) == 3) {
         box_num <- as.numeric(input$box) + 1
@@ -342,16 +286,57 @@ recruitment_server <- function(id, project = NULL) {
       p <- p + ggplot2::geom_line(linewidth = 0.8, na.rm = TRUE)
       p <- p + ggplot2::facet_wrap(~ Layer, ncol = 1, scales = "free_y")
       p <- p + ggplot2::labs(
-        title = paste(input$fg_growth, "— box", input$box),
+        title = paste(fg_growth_d(), "— box", input$box),
         x = "Year", y = ylab
       )
-      p + theme_reactiveatlantis() + ggplot2::theme(legend.position = "none")
+      p <- p + theme_reactiveatlantis() + ggplot2::theme(legend.position = "none")
+      ra_scale_x_year(p, plot_df$Time)
       })
     })
 
-    keep_outputs_alive(output, c("banner", "plot_yoy", "plot_relative_yoy",
-                                 "plot_ssb", "plot_pp_growth"))
+    keep_outputs_alive(output, "banner")
   })
+}
+
+build_rec_params <- function(grp, prm) {
+  sp.dat <- with(grp, which(isturnedon == 1 & numcohorts > 1))
+  options(warn = -1)
+  rec <- text2num(prm, "^flagrecruit", FG = "look")
+  options(warn = 0)
+  rec <- rec[complete.cases(rec), ]
+  rec <- cbind(rec, Alpha = NA, Beta = NA, KSPA = NA, FSP = NA, Time.sp = NA,
+               XCN = NA, XRS = NA, Rec.SNW = NA, Rec.RNW = NA)
+  sps <- gsub(pattern = "^flagrecruit", "", rec$FG)
+  rec$FG <- sps
+  prm_num <- function(pat) {
+    val <- tryCatch(suppressWarnings(text2num(prm, pat, FG = "look")[1, 2]),
+                    error = function(e) NA_real_)
+    if (length(val) == 0) NA_real_ else as.numeric(val)
+  }
+  xcn <- prm_num("X_CN")
+  xrs <- prm_num("X_RS")
+  fspb_list <- list()
+  for (fg.r in seq_along(sps)) {
+    if (!sps[fg.r] %in% grp$code[sp.dat]) next()
+    rec$XCN[fg.r] <- xcn
+    rec$XRS[fg.r] <- xrs
+    rec$Time.sp[fg.r] <- prm_num(paste0(sps[fg.r], "_Time_Spawn"))
+    if (rec$Value[fg.r] %in% c(3, 10)) {
+      rec$Alpha[fg.r] <- prm_num(paste0("BHalpha_", sps[fg.r]))
+      rec$Beta[fg.r] <- prm_num(paste0("BHbeta_", sps[fg.r]))
+    }
+    if (rec$Value[fg.r] == 3) {
+      rec$KSPA[fg.r] <- prm_num(paste0("KSPA_", sps[fg.r]))
+      rec$FSP[fg.r] <- prm_num(paste0("FSP_", sps[fg.r]))
+      rec$Rec.SNW[fg.r] <- prm_num(paste0("KWSR_", sps[fg.r]))
+      rec$Rec.RNW[fg.r] <- prm_num(paste0("KWRR_", sps[fg.r]))
+      fspb.tmp <- tryCatch(suppressWarnings(
+        text2num(prm, paste0("FSPB_", sps[fg.r]), FG = sps[fg.r], Vector = TRUE)
+      ), error = function(e) NULL)
+      if (!is.null(fspb.tmp)) fspb_list[[sps[fg.r]]] <- as.numeric(fspb.tmp)
+    }
+  }
+  list(rec = rec, fspb = fspb_list)
 }
 
 sci_txt <- function(x) {
@@ -444,7 +429,7 @@ recruitment_overlay <- function(yoy, spawn_ssb, alpha0, beta0, alpha_n, beta_n,
 }
 
 nc_time_days <- function(nc) {
-  t <- tryCatch(ncdf4::ncvar_get(nc, "t"), error = function(e) NULL)
+  t <- tryCatch(nc_get(nc, "t"), error = function(e) NULL)
   if (is.null(t)) return(NULL)
   units <- tryCatch(ncdf4::ncatt_get(nc, "t", "units")$value, error = function(e) "")
   if (is.character(units) && grepl("second", units, ignore.case = TRUE)) {
@@ -497,10 +482,10 @@ spawn_from_nc <- function(nc, grp, rec_row, fg_code, fspb_vec = NULL) {
       vn <- paste0(name, "_N", coh)
       if (!vn %in% vars) vn <- paste0(name, "_N")
       if (!vn %in% vars) next
-      nums <- tryCatch(ncdf4::ncvar_get(nc, vn), error = function(e) NULL)
-      if (is.null(nums)) next
       for (j in seq_along(idx)) {
-        nsl <- as.numeric(arr_at_times(nums, idx[j]))
+        nums <- tryCatch(nc_get_at_t(nc, vn, idx[j]), error = function(e) NULL)
+        if (is.null(nums)) next
+        nsl <- as.numeric(nums)
         nsl <- nsl * as.numeric(nsl > 1e-16)
         spawn_tot[j] <- spawn_tot[j] + sum(nsl * fspb, na.rm = TRUE)
         ssb_tot[j] <- ssb_tot[j] + sum(nsl, na.rm = TRUE)
@@ -510,14 +495,14 @@ spawn_from_nc <- function(nc, grp, rec_row, fg_code, fspb_vec = NULL) {
       r_var <- paste0(name, coh, "_ResN")
       s_var <- paste0(name, coh, "_StructN")
       if (!all(c(n_var, r_var, s_var) %in% vars)) next
-      nums <- tryCatch(ncdf4::ncvar_get(nc, n_var), error = function(e) NULL)
-      rn <- tryCatch(ncdf4::ncvar_get(nc, r_var), error = function(e) NULL)
-      sn <- tryCatch(ncdf4::ncvar_get(nc, s_var), error = function(e) NULL)
-      if (is.null(nums) || is.null(rn) || is.null(sn)) next
       for (j in seq_along(idx)) {
-        nsl <- as.numeric(arr_at_times(nums, idx[j]))
-        rsl <- as.numeric(arr_at_times(rn, idx[j]))
-        ssl <- as.numeric(arr_at_times(sn, idx[j]))
+        nums <- tryCatch(nc_get_at_t(nc, n_var, idx[j]), error = function(e) NULL)
+        rn <- tryCatch(nc_get_at_t(nc, r_var, idx[j]), error = function(e) NULL)
+        sn <- tryCatch(nc_get_at_t(nc, s_var, idx[j]), error = function(e) NULL)
+        if (is.null(nums) || is.null(rn) || is.null(sn)) next
+        nsl <- as.numeric(nums)
+        rsl <- as.numeric(rn)
+        ssl <- as.numeric(sn)
         mask <- as.numeric(nsl > 1e-16)
         nsl <- nsl * mask
         rsl <- rsl * mask

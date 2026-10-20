@@ -33,7 +33,7 @@ overview_server <- function(id, project) {
     })
 
     cohorts <- shiny::reactive({
-      dat <- ps()$data
+      dat <- ensure_project_data(ps(), "nc_out")
       if (is.null(dat) || is.null(dat$grp) || is.null(dat$nc_out)) return(NULL)
       problem_cohorts(dat$nc_out, dat$grp, ACCEPT_BAND)
     })
@@ -50,12 +50,12 @@ overview_server <- function(id, project) {
         ))
       }
       dat <- ps()$data
+      ## Cards stay cheap: BiomIndx health only. Problem-cohort counts wait for the table.
       sm <- summarise_run(dat$grp, dat$nc_out, dat$biomindx, dat$time_dates)
       flags <- tryCatch(health(), error = function(e) NULL)
       n_ext <- if (is.null(flags)) NA else sum(flags$Flag == "Extinct (<1%)")
       n_exp <- if (is.null(flags)) NA else sum(flags$Flag == "Exploding (>10x)")
-      coh <- tryCatch(cohorts(), error = function(e) NULL)
-      n_coh <- if (is.null(coh)) NA else sum(coh$Flag == "Outside band")
+      n_coh <- NA
 
       bslib::layout_column_wrap(
         width = 1/6,
@@ -132,6 +132,6 @@ overview_server <- function(id, project) {
       ra_datatable(tbl, options = list(pageLength = 15, order = list(list(7, "desc"))))
     })
 
-    keep_outputs_alive(output, c("cards", "run_window", "health_table", "cohort_table"))
+    keep_outputs_alive(output, c("cards", "run_window", "health_table"))
   })
 }

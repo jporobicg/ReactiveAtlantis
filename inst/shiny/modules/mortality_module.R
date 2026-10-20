@@ -28,10 +28,12 @@ mortality_server <- function(id, project = NULL) {
                          input$fg)
     })
 
+    fg_d <- ra_debounce(shiny::reactive(input$fg), 250)
+
     mort_data <- reactive({
       dat <- ps()$data
-      req(dat$spe_mort, dat$pred_mort, dat$grp, input$fg)
-      FG <- input$fg
+      req(dat$spe_mort, dat$pred_mort, dat$grp, fg_d())
+      FG <- fg_d()
       if (FG %in% dat$grp$longname) {
         FG <- dat$grp$code[dat$grp$longname == FG][1]
       }
@@ -65,13 +67,14 @@ mortality_server <- function(id, project = NULL) {
       p <- p + ggplot2::facet_wrap(~ Age, ncol = 2, scales = "free_y")
       p <- p + ggplot2::scale_fill_manual(values = type_pal, name = "Mortality")
       p <- p + ggplot2::labs(
-        title = paste("Mortality by age —", input$fg),
+        title = paste("Mortality by age —", fg_d()),
         x = "Year", y = "Mortality"
       )
-      p + theme_reactiveatlantis()
+      p <- p + theme_reactiveatlantis()
+      ra_scale_x_year(p, mort$Time)
     }
 
-    keep_outputs_alive(output, c("banner", "mortality_plot_gg"))
+    keep_outputs_alive(output, "banner")
   })
 }
 

@@ -11,9 +11,9 @@
 time_calc <- function(ncfile){
   orign <- unlist(strsplit(ncdf4::ncatt_get(ncfile, 't')$units, ' ', fixed = TRUE))
   if(orign[1] == 'seconds') {
-    Time <- ncdf4::ncvar_get(ncfile, 't') / 86400
+    Time <- nc_get(ncfile, 't') / 86400
   } else {
-    Time <- ncdf4::ncvar_get(ncfile, 't')
+    Time <- nc_get(ncfile, 't')
   }
   Time <- as.Date(Time, origin = orign[3])
   return(Time)
@@ -168,7 +168,7 @@ text2num <- function(text, pattern, FG = NULL, Vector = FALSE, pprey = FALSE, li
 ##' @return Numeric vector starting with 0, or NULL if depths cannot be inferred
 infer_cum_depths <- function(nc){
   if(!('nominal_dz' %in% names(nc$var))) return(NULL)
-  ndz <- ncdf4::ncvar_get(nc, 'nominal_dz')
+  ndz <- nc_get(nc, 'nominal_dz')
   if(is.null(dim(ndz)) || length(dim(ndz)) != 2) return(NULL)
   z_len <- if(!is.null(nc$dim$z)) nc$dim$z$len else NA
   if(is.finite(z_len)){

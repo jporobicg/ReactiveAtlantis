@@ -33,13 +33,16 @@ catch_server <- function(id, project = NULL) {
 
     output$banner <- renderUI(tool_banner(ps(), "catch"))
 
+    fg_d <- ra_debounce(shiny::reactive(input$fg), 250)
+    view_d <- ra_debounce(shiny::reactive(input$view), 250)
+
     observe({
       req(isTRUE(ps()$ready), ps()$data$grp)
       dat <- ps()$data
       grp <- dat$grp
       fish <- dat$fish
       if (is.null(fish) || NROW(fish) == 0) {
-        fish <- fisheries_from_catch_nc(dat$nc_catch)
+        fish <- tryCatch(fisheries_from_catch_nc(dat$nc_catch), error = function(e) NULL)
       }
       if (!is.null(fish) && NROW(fish) > 0) {
         fish_labels <- if ("name" %in% names(fish)) {
@@ -58,30 +61,30 @@ catch_server <- function(id, project = NULL) {
     })
 
     catch_time <- reactive({
-      dat <- ps()$data
+      dat <- ensure_project_data(ps(), "nc_catch")
       req(dat$nc_catch)
       t <- tryCatch(time_calc(dat$nc_catch), error = function(e) NULL)
       if (!is.null(t)) return(t)
-      raw <- ncdf4::ncvar_get(dat$nc_catch, "t")
+      raw <- nc_get(dat$nc_catch, "t")
       as.Date(as.numeric(raw) / 86400, origin = "1970-01-01")
     })
 
     nc_vars <- reactive({
-      dat <- ps()$data
+      dat <- ensure_project_data(ps(), "nc_catch")
       req(dat$nc_catch)
       names(dat$nc_catch$var)
     })
 
     catch_result <- reactive({
-      dat <- ps()$data
-      req(dat$nc_catch, dat$grp, input$view)
+      dat <- ensure_project_data(ps(), "nc_catch")
+      req(dat$nc_catch, dat$grp, view_d())
       if (is.null(dat$fish) || NROW(dat$fish) == 0) {
         dat$fish <- fisheries_from_catch_nc(dat$nc_catch)
       }
       req(dat$fish)
-      quantity <- if (identical(input$view, "numbers")) "numbers" else "biomass"
+      quantity <- if (identical(view_d(), "numbers")) "numbers" else "biomass"
       fishery_code <- input$fishery
-      fg_code <- input$fg
+      fg_code <- fg_d()
       if (identical(fg_code, "All")) fg_code <- ""
       if (identical(quantity, "biomass")) {
         req(fishery_code)
@@ -102,9 +105,13 @@ catch_server <- function(id, project = NULL) {
     })
 
     fleet_stack <- reactive({
-      dat <- ps()$data
-      req(dat$nc_catch, dat$grp, dat$fish, input$fg)
-      fg_code <- input$fg
+      dat <- ensure_project_data(ps(), "nc_catch")
+      req(dat$nc_catch, dat$grp, input$fg)
+      if (is.null(dat$fish) || NROW(dat$fish) == 0) {
+        dat$fish <- fisheries_from_catch_nc(dat$nc_catch)
+      }
+      req(dat$fish)
+      fg_code <- fg_d()
       if (identical(fg_code, "All")) fg_code <- ""
       rows <- list()
       for (i in seq_len(nrow(dat$fish))) {
@@ -149,7 +156,7 @@ catch_server <- function(id, project = NULL) {
     }
 
     make_catch_plot <- function() {
-      view <- input$view
+      view <- view_d()
       pal <- ps()$data$fg_palette
       xlab <- if (isTRUE(input$by_year)) "Year" else "Date"
 
@@ -164,11 +171,12 @@ catch_server <- function(id, project = NULL) {
         p <- p + ggplot2::geom_area(position = "stack", alpha = 0.92)
         p <- p + ggplot2::scale_fill_manual(values = colors)
         p <- p + ggplot2::labs(
-          title = paste("Catch by fleet —", input$fg),
+          title = paste("Catch by fleet —", fg_d()),
           x = xlab, y = "Catch (tons)"
         )
         p <- p + theme_reactiveatlantis()
-        return(observed_overlay(p, input$fg, agg))
+        p <- ra_scale_x_year(p, agg$years)
+        return(observed_overlay(p, fg_d(), agg))
       }
 
       res <- catch_result()
@@ -188,7 +196,8 @@ catch_server <- function(id, project = NULL) {
           x = xlab, y = ylab
         )
         p <- p + theme_reactiveatlantis()
-        fg_one <- input$fg
+        p <- ra_scale_x_year(p, agg$years)
+        fg_one <- fg_d()
         if (!is.null(fg_one) && fg_one != "All") {
           p <- observed_overlay(p, fg_one, agg)
         }
@@ -205,10 +214,11 @@ catch_server <- function(id, project = NULL) {
         p <- p + ggplot2::facet_wrap(~ series, scales = "free_y")
       }
       p <- p + ggplot2::labs(
-        title = paste("Catch numbers —", input$fg),
+        title = paste("Catch numbers —", fg_d()),
         x = xlab, y = ylab
       )
-      p + theme_reactiveatlantis()
+      p <- p + theme_reactiveatlantis()
+      ra_scale_x_year(p, catch_df$years)
     }
 
     output$catch_plot_gg <- renderPlot({
@@ -228,7 +238,7 @@ catch_server <- function(id, project = NULL) {
       if (!isTRUE(res$ok) || is.null(dat$ext_catch)) {
         return(ra_datatable(data.frame(Note = "Load an external catch CSV to score skill.")))
       }
-      fg <- input$fg
+      fg <- fg_d()
       if (is.null(fg) || identical(fg, "All") || !(fg %in% names(dat$ext_catch))) {
         return(ra_datatable(data.frame(Note = paste("No observed series for", fg))))
       }
@@ -249,7 +259,7 @@ catch_server <- function(id, project = NULL) {
       ra_datatable(skill, options = list(pageLength = 10, dom = "t"))
     })
 
-    keep_outputs_alive(output, c("banner", "catch_plot_gg", "skill_table"))
+    keep_outputs_alive(output, "banner")
   })
 }
 
@@ -427,7 +437,7 @@ prefer_catch_vars <- function(matched, fish_row, quantity) {
 }
 
 sum_nc_var <- function(nc.data, varname) {
-  data <- ncdf4::ncvar_get(nc.data, varname)
+  data <- nc_get(nc.data, varname)
   d <- dim(data)
   if (is.null(d) || length(d) == 1) {
     as.numeric(data)

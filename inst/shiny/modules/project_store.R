@@ -409,7 +409,7 @@ file_too_big <- function(path) {
   is.finite(sz) && sz > eager_table_max_bytes()
 }
 
-##' Read DietCheck when load skipped a huge file; path still counts as loaded
+##' Read DietCheck when load skipped it; path still counts as loaded
 ensure_diet <- function(dat, paths = NULL) {
   if (is.null(dat)) return(dat)
   if (!is.null(dat$diet_time) || !is.null(dat$diet_full)) return(dat)
@@ -417,9 +417,16 @@ ensure_diet <- function(dat, paths = NULL) {
   if (!is.null(paths)) p <- as_path(normalize_paths(paths)$dietcheck)
   if (!path_ok(p) && path_ok(dat$paths$dietcheck)) p <- as_path(dat$paths$dietcheck)
   if (!path_ok(p)) return(dat)
-  diet_raw <- tryCatch(read_space_table(p), error = function(e) NULL)
-  if (is.null(diet_raw)) return(dat)
-  agg <- tryCatch(preaggregate_diet(diet_raw), error = function(e) NULL)
+  agg <- if (exists("diet_cached", mode = "function")) {
+    tryCatch(diet_cached(p), error = function(e) NULL)
+  } else {
+    NULL
+  }
+  if (is.null(agg)) {
+    diet_raw <- tryCatch(read_space_table(p), error = function(e) NULL)
+    if (is.null(diet_raw)) return(dat)
+    agg <- tryCatch(preaggregate_diet(diet_raw), error = function(e) NULL)
+  }
   if (is.null(agg)) return(dat)
   dat$diet_full <- agg$diet_full
   dat$diet_time <- agg$diet_time
@@ -491,27 +498,8 @@ load_project <- function(paths) {
     out$fish <- normalise_fisheries(utils::read.csv(paths$fisheries, stringsAsFactors = FALSE))
   }
 
-  if (path_ok(paths$output_nc)) {
-    out$nc_out <- tryCatch(ncdf4::nc_open(paths$output_nc), error = function(e) {
-      add_err(paste("Output NetCDF:", e$message)); NULL
-    })
-    if (!is.null(out$nc_out)) {
-      out$time_dates <- tryCatch(time_calc(out$nc_out), error = function(e) NULL)
-      out$origin <- nc_time_origin(out$nc_out)
-    }
-  }
-  if (path_ok(paths$output_nc_old)) {
-    out$nc_old <- tryCatch(ncdf4::nc_open(paths$output_nc_old), error = function(e) NULL)
-  }
-  if (path_ok(paths$catch_nc)) {
-    out$nc_catch <- tryCatch(ncdf4::nc_open(paths$catch_nc), error = function(e) NULL)
-  }
-  if (path_ok(paths$init_nc)) {
-    out$nc_init <- tryCatch(ncdf4::nc_open(paths$init_nc), error = function(e) NULL)
-  }
-  if (path_ok(paths$prod_nc)) {
-    out$nc_prod <- tryCatch(ncdf4::nc_open(paths$prod_nc), error = function(e) NULL)
-  }
+  ## Heavy NetCDF / DietCheck stay on disk until a tab asks (ensure_project_data).
+  if (path_ok(paths$bgm)) out$bgm_path <- paths$bgm
 
   if (path_ok(paths$biomindx)) {
     out$biomindx <- tryCatch(read_space_table(paths$biomindx), error = function(e) {
@@ -519,18 +507,7 @@ load_project <- function(paths) {
     })
   }
   if (path_ok(paths$dietcheck)) {
-    if (file_too_big(paths$dietcheck)) {
-      out$diet_deferred <- TRUE
-    } else {
-      diet_raw <- tryCatch(read_space_table(paths$dietcheck), error = function(e) {
-        add_err(paste("DietCheck:", e$message)); NULL
-      })
-      if (!is.null(diet_raw)) {
-        agg <- preaggregate_diet(diet_raw)
-        out$diet_full <- agg$diet_full
-        out$diet_time <- agg$diet_time
-      }
-    }
+    out$diet_deferred <- TRUE
   }
   if (path_ok(paths$ext_catch)) {
     out$ext_catch <- tryCatch(utils::read.csv(paths$ext_catch, stringsAsFactors = FALSE),
@@ -561,21 +538,6 @@ load_project <- function(paths) {
   if (path_ok(paths$run_prm)) {
     out$prm_run <- tryCatch(readLines(paths$run_prm, warn = FALSE), error = function(e) NULL)
   }
-  if (path_ok(paths$bgm) && !is.null(out$nc_out)) {
-    depths <- infer_cum_depths(out$nc_out)
-    if (!is.null(depths)) {
-      out$inf_box <- tryCatch(boxes.prop(paths$bgm, depths), error = function(e) NULL)
-    }
-    out$bgm_path <- paths$bgm
-  } else if (path_ok(paths$bgm)) {
-    out$bgm_path <- paths$bgm
-  }
-  if (is.null(out$inf_box) && !is.null(out$nc_out)) {
-    n_box <- if (!is.null(out$nc_out$dim$b)) out$nc_out$dim$b$len else 1
-    n_z <- if (!is.null(out$nc_out$dim$z)) out$nc_out$dim$z$len else 2
-    out$inf_box <- dummy_inf_box(n_box, n_z)
-  }
-
   out
 }
 

@@ -39,41 +39,17 @@ feeding_server <- function(id, project = NULL) {
 
     output$banner <- renderUI(tool_banner(ps(), "feeding"))
 
-    observe({
-      req(rv$ava_mat)
-      update_select_keep(session, "predator", c("(all)", rownames(rv$ava_mat)),
-                         input$predator)
-      update_select_keep(session, "prey", c("(all)", colnames(rv$ava_mat)),
-                         input$prey)
-    })
-
-    observe({
-      req(!is.null(project), isTRUE(ps()$ready), ps()$data)
-      miss <- tool_missing(ps()$paths, "feeding", ps())
-      token <- paste(unlist(ps()$paths), collapse = "|")
-      if (length(miss) || (isTRUE(rv$built) && identical(rv$token, token))) return()
-      rv$token <- token
+    pprey_mat <- reactive({
       dat <- ps()$data
-      req(dat$grp, dat$prm_bio)
-      paths <- tryCatch(normalize_paths(ps()$paths), error = function(e) empty_paths())
-      if (!is.null(dat$paths)) {
-        dp <- tryCatch(normalize_paths(dat$paths), error = function(e) NULL)
-        if (!is.null(dp) && path_ok(dp$init_nc)) paths$init_nc <- dp$init_nc
-      }
-      init_path <- paths$init_nc
+      req(isTRUE(ps()$ready), dat$grp, dat$prm_bio)
       grp <- dat$grp
       if (any(grepl("invertype", names(grp)))) {
         names(grp)[which(grepl("invertype", names(grp)))] <- "grouptype"
       }
-      prm <- dat$prm_bio
       options(warn = -1)
-      ava_mat <- text2num(prm, "pPREY", Vector = TRUE, pprey = TRUE)
+      ava_mat <- text2num(dat$prm_bio, "pPREY", Vector = TRUE, pprey = TRUE)
       options(warn = 0)
-      if (is.null(ava_mat) || !is.matrix(ava_mat) || nrow(ava_mat) == 0) {
-        shiny::showNotification("Could not find a pPREY matrix in the biology parameter file.",
-                                type = "error", duration = 10)
-        return()
-      }
+      if (is.null(ava_mat) || !is.matrix(ava_mat) || nrow(ava_mat) == 0) return(NULL)
       n_col <- ncol(ava_mat)
       expected <- c(as.character(grp$code), "DLsed", "DRsed", "DCsed")
       if (n_col == length(expected)) {
@@ -83,8 +59,22 @@ feeding_server <- function(id, project = NULL) {
       } else if (is.null(colnames(ava_mat))) {
         colnames(ava_mat) <- paste0("Prey", seq_len(n_col))
       }
+      ava_mat
+    })
 
-      built <- tryCatch({
+    gape_built <- reactive({
+      ava_mat <- pprey_mat()
+      req(ava_mat)
+      dat <- ensure_project_data(ps(), "nc_init")
+      grp <- dat$grp
+      prm <- dat$prm_bio
+      paths <- tryCatch(normalize_paths(ps()$paths), error = function(e) empty_paths())
+      if (!is.null(dat$paths)) {
+        dp <- tryCatch(normalize_paths(dat$paths), error = function(e) NULL)
+        if (!is.null(dp) && path_ok(dp$init_nc)) paths$init_nc <- dp$init_nc
+      }
+      init_path <- paths$init_nc
+      tryCatch({
         bio <- feed_bio_struct(init_path, grp)
         gape_out <- gape.func(grp, bio$Struct, bio$Biom.N, prm)
         overlap_mat <- Over.mat.func(ava_mat, gape_out[[1]])
@@ -106,31 +96,33 @@ feeding_server <- function(id, project = NULL) {
         }
         real.feed <- real.feed * ava_mat
         list(overlap = overlap_mat, real = real.feed,
-             pressure = predation_pressure_matrix(real.feed))
+             pressure = predation_pressure_matrix(real.feed),
+             bugs = gape_mismatch_table(ava_mat, overlap_mat))
       }, error = function(e) {
-        shiny::showNotification(paste("Feeding matrix:", e$message), type = "error", duration = 10)
-        NULL
+        list(overlap = NULL, real = NULL,
+             pressure = predation_pressure_matrix(ava_mat), bugs = NULL)
       })
-      rv$ava_mat <- ava_mat
-      if (!is.null(built)) {
-        rv$overlap_mat <- built$overlap
-        rv$real_feed <- built$real
-        rv$pressure <- built$pressure
-        rv$bugs <- gape_mismatch_table(ava_mat, built$overlap)
-      } else {
-        ## Still render predation pressure from pPREY if gape overlap fails
-        rv$pressure <- predation_pressure_matrix(ava_mat)
-      }
-      rv$built <- TRUE
     })
 
+    observe({
+      ava <- pprey_mat()
+      req(ava)
+      update_select_keep(session, "predator", c("(all)", rownames(ava)),
+                         input$predator)
+      update_select_keep(session, "prey", c("(all)", colnames(ava)),
+                         input$prey)
+    })
+
+    pred_search_d <- ra_debounce(shiny::reactive(input$pred_search), 400)
+    prey_search_d <- ra_debounce(shiny::reactive(input$prey_search), 400)
+
     filtered_mats <- reactive({
-      req(rv$ava_mat)
-      ava <- rv$ava_mat
+      ava <- pprey_mat()
+      req(ava)
       pred_keep <- seq_len(nrow(ava))
       prey_keep <- seq_len(ncol(ava))
-      q_pred <- if (is.null(input$pred_search)) "" else trimws(input$pred_search)
-      q_prey <- if (is.null(input$prey_search)) "" else trimws(input$prey_search)
+      q_pred <- if (is.null(pred_search_d())) "" else trimws(pred_search_d())
+      q_prey <- if (is.null(prey_search_d())) "" else trimws(prey_search_d())
       rn <- rownames(ava)
       if (is.null(rn)) rn <- as.character(seq_len(nrow(ava)))
       cn <- colnames(ava)
@@ -160,17 +152,9 @@ feeding_server <- function(id, project = NULL) {
       if (!searching && length(prey_keep) == 0) prey_keep <- seq_len(ncol(ava))
       list(
         ava = ava[pred_keep, prey_keep, drop = FALSE],
-        overlap = if (is.null(rv$overlap_mat) || length(pred_keep) == 0 || length(prey_keep) == 0) {
-          NULL
-        } else rv$overlap_mat[pred_keep, prey_keep, drop = FALSE],
-        real = if (is.null(rv$real_feed) || length(pred_keep) == 0 || length(prey_keep) == 0) {
-          NULL
-        } else rv$real_feed[pred_keep, prey_keep, drop = FALSE],
-        pressure = if (is.null(rv$pressure) || length(pred_keep) == 0 || length(prey_keep) == 0) {
-          NULL
-        } else {
-          rv$pressure[prey_keep, pred_keep, drop = FALSE]
-        },
+        need_gape = !identical(input$view_type, "availability"),
+        pred_keep = pred_keep,
+        prey_keep = prey_keep,
         empty_search = searching && (length(pred_keep) == 0 || length(prey_keep) == 0)
       )
     })
@@ -183,7 +167,17 @@ feeding_server <- function(id, project = NULL) {
                  theme_reactiveatlantis())
       }
       req(mats$ava, input$view_type)
-      bugs <- if (is.null(mats$overlap)) NULL else gape_mismatch(mats$ava, mats$overlap)
+      gape <- if (isTRUE(mats$need_gape)) gape_built() else NULL
+      overlap <- if (is.null(gape) || is.null(gape$overlap) || length(mats$pred_keep) == 0) {
+        NULL
+      } else gape$overlap[mats$pred_keep, mats$prey_keep, drop = FALSE]
+      real <- if (is.null(gape) || is.null(gape$real) || length(mats$pred_keep) == 0) {
+        NULL
+      } else gape$real[mats$pred_keep, mats$prey_keep, drop = FALSE]
+      pressure <- if (is.null(gape) || is.null(gape$pressure) || length(mats$pred_keep) == 0) {
+        NULL
+      } else gape$pressure[mats$prey_keep, mats$pred_keep, drop = FALSE]
+      bugs <- if (is.null(overlap)) NULL else gape_mismatch(mats$ava, overlap)
       hl_pred <- if (is.null(input$predator) || input$predator %in% c("", "(all)")) NULL else input$predator
       hl_prey <- if (is.null(input$prey) || input$prey %in% c("", "(all)")) NULL else input$prey
       if (input$view_type == "availability") {
@@ -192,7 +186,7 @@ feeding_server <- function(id, project = NULL) {
                        highlight_pred = hl_pred, highlight_prey = hl_prey,
                        mismatch = if (is.null(bugs)) NULL else t(bugs))
       } else if (input$view_type == "overlap") {
-        t.o.mat <- t(mats$overlap * mats$ava)
+        t.o.mat <- t(overlap * mats$ava)
         t.o.mat[t.o.mat > 0] <- 1
         plot_feed_overlap(t.o.mat, hl_pred, hl_prey)
       } else if (input$view_type == "mismatch") {
@@ -202,14 +196,14 @@ feeding_server <- function(id, project = NULL) {
         }
         plot_feed_mismatch(t(bugs))
       } else if (input$view_type == "effective") {
-        rff <- log(mats$real)
+        rff <- log(real)
         rff[!is.finite(rff)] <- NA
         plot_feed_tile(t(rff), "Effective predation (log scale)",
                        pal = "YlGnBu", legend = "Predation\nLn()",
                        highlight_pred = hl_pred, highlight_prey = hl_prey,
                        mismatch = if (is.null(bugs)) NULL else t(bugs))
       } else {
-        press <- mats$pressure
+        press <- pressure
         if (is.null(press) || !is.matrix(press)) {
           return(ggplot2::ggplot() +
                    ggplot2::labs(title = "Predation pressure needs gape overlap (initial.nc + KLP/KUP)") +
@@ -230,18 +224,24 @@ feeding_server <- function(id, project = NULL) {
 
     output$detail_plot <- renderPlot({
       plot_or_message("Select a predator row for the detail chart", {
-      req(rv$ava_mat)
+      ava_mat <- pprey_mat()
+      req(ava_mat)
       pred <- input$predator
       if (is.null(pred) || pred %in% c("", "(all)")) {
         plot.new()
         title("Select a predator row for availability, gape overlap and effective predation")
         return(invisible(NULL))
       }
-      if (!pred %in% rownames(rv$ava_mat)) return()
-      prey <- colnames(rv$ava_mat)
-      ava <- as.numeric(rv$ava_mat[pred, ])
-      ov <- if (is.null(rv$overlap_mat)) rep(NA_real_, length(prey)) else as.numeric(rv$overlap_mat[pred, ])
-      eff <- if (is.null(rv$real_feed)) rep(NA_real_, length(prey)) else as.numeric(rv$real_feed[pred, ])
+      if (!pred %in% rownames(ava_mat)) return()
+      prey <- colnames(ava_mat)
+      ava <- as.numeric(ava_mat[pred, ])
+      gape <- tryCatch(gape_built(), error = function(e) NULL)
+      ov <- if (is.null(gape) || is.null(gape$overlap)) {
+        rep(NA_real_, length(prey))
+      } else as.numeric(gape$overlap[pred, ])
+      eff <- if (is.null(gape) || is.null(gape$real)) {
+        rep(NA_real_, length(prey))
+      } else as.numeric(gape$real[pred, ])
       df <- rbind(
         data.frame(Prey = prey, Value = ava, Metric = "Availability (pPREY)"),
         data.frame(Prey = prey, Value = ov, Metric = "Gape overlap"),
@@ -262,14 +262,20 @@ feeding_server <- function(id, project = NULL) {
     })
 
     output$bug_table <- DT::renderDataTable({
-      bugs <- rv$bugs
+      if (identical(input$view_type, "availability")) {
+        return(ra_datatable(data.frame(
+          Note = "Switch to gape mismatch to list pPREY > 0 cells with zero overlap."
+        )))
+      }
+      gape <- tryCatch(gape_built(), error = function(e) NULL)
+      bugs <- if (is.null(gape)) NULL else gape$bugs
       if (is.null(bugs) || nrow(bugs) == 0) {
         return(ra_datatable(data.frame(Note = "No pPREY > 0 cells with zero gape overlap.")))
       }
       ra_datatable(bugs, options = list(pageLength = 8, dom = "tip"))
     })
 
-    keep_outputs_alive(output, c("banner", "feeding_plot_gg", "detail_plot", "bug_table"))
+    keep_outputs_alive(output, "banner")
   })
 }
 
@@ -278,8 +284,12 @@ feeding_server <- function(id, project = NULL) {
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
 
 feed_bio_struct <- function(nc.file, groups.csv){
-  nc.out <- ncdf4::nc_open(nc.file)
-  on.exit(ncdf4::nc_close(nc.out), add = TRUE)
+  path <- as_path(nc.file)
+  ck <- paste0("feedbio|", file_cache_key(path))
+  hit <- ra_cache_get(ck)
+  if (!is.null(hit)) return(hit)
+  nc.out <- nc_handle(nc.file)
+  if (is.null(nc.out)) stop("Could not open initial conditions NetCDF")
   
   active <- which(groups.csv$isturnedon == 1)
   is.off <- which(groups.csv$isturnedon == 0)
@@ -304,13 +314,13 @@ feed_bio_struct <- function(nc.file, groups.csv){
     if(groups.csv$numcohorts[code] == 1 || TY[code] %in% special){
       for(coh in 1:groups.csv$numcohorts[code]){
         if(TY[code] %in% special && groups.csv$numcohorts[code] > 1){
-          N.tot <- ncdf4::ncvar_get(nc.out, paste0(FG[code], "_N", coh))
+          N.tot <- nc_get(nc.out, paste0(FG[code], "_N", coh))
         } else {
-          N.tot <- ncdf4::ncvar_get(nc.out, paste0(FG[code], "_N"))
+          N.tot <- nc_get(nc.out, paste0(FG[code], "_N"))
         }
         if(all(is.na(N.tot)) || all(N.tot == 0) || sum(N.tot, na.rm = TRUE) == 0){
-          water.t <- ncdf4::ncvar_get(nc.out, 'volume')
-          w.depth <- ncdf4::ncvar_get(nc.out, 'nominal_dz')
+          water.t <- nc_get(nc.out, 'volume')
+          w.depth <- nc_get(nc.out, 'nominal_dz')
           w.depth[is.na(w.depth)] <- 0
           w.m2 <- colSums(water.t, na.rm = TRUE) / apply(w.depth, 2, function(x) max(x, na.rm = TRUE))
           w.m2[is.infinite(w.m2)] <- NA
@@ -326,11 +336,11 @@ feed_bio_struct <- function(nc.file, groups.csv){
           if(length(dim(N.tot)) >= 3){
             N.tot <- N.tot[, , 1]
           } else if(!is.null(unit) && unit == "mg N m-3"){
-            water.t <- ncdf4::ncvar_get(nc.out, 'volume')
+            water.t <- nc_get(nc.out, 'volume')
             N.tot <- N.tot * water.t
           } else if(!is.null(unit) && unit == 'mg N m-2'){
-            water.t <- ncdf4::ncvar_get(nc.out, 'volume')
-            w.depth <- ncdf4::ncvar_get(nc.out, 'nominal_dz')
+            water.t <- nc_get(nc.out, 'volume')
+            w.depth <- nc_get(nc.out, 'nominal_dz')
             w.depth[is.na(w.depth)] <- 0
             w.m2 <- colSums(water.t, na.rm = TRUE) / apply(w.depth, 2, function(x) max(x, na.rm = TRUE))
             w.m2[is.infinite(w.m2)] <- NA
@@ -341,15 +351,15 @@ feed_bio_struct <- function(nc.file, groups.csv){
       }
     } else if(groups.csv$numcohorts[code] > 1){
       for(cohort in 1:groups.csv$numcohorts[code]){
-        StructN <- ncdf4::ncvar_get(nc.out, paste0(FG[code], cohort, "_StructN"))
+        StructN <- nc_get(nc.out, paste0(FG[code], cohort, "_StructN"))
         if(all(is.na(StructN))){
           StructN <- ncdf4::ncatt_get(nc.out, paste0(FG[code], cohort, "_StructN"), attname = "_FillValue")$value
         }
-        ReservN <- ncdf4::ncvar_get(nc.out, paste0(FG[code], cohort, "_ResN"))
+        ReservN <- nc_get(nc.out, paste0(FG[code], cohort, "_ResN"))
         if(all(is.na(ReservN))){
           ReservN <- ncdf4::ncatt_get(nc.out, paste0(FG[code], cohort, "_ResN"), attname = "_FillValue")$value
         }
-        Numb <- ncdf4::ncvar_get(nc.out, paste0(FG[code], cohort, "_Nums"))
+        Numb <- nc_get(nc.out, paste0(FG[code], cohort, "_Nums"))
         if(length(dim(ReservN)) > 2){
           StructN <- StructN[, , 1]
           ReservN <- ReservN[, , 1]
@@ -369,7 +379,9 @@ feed_bio_struct <- function(nc.file, groups.csv){
     Struct <- Struct[-is.off, , drop = FALSE]
     Biom.N <- Biom.N[-is.off, , drop = FALSE]
   }
-  list(Struct = Struct, Biom.N = Biom.N)
+  out <- list(Struct = Struct, Biom.N = Biom.N)
+  ra_cache_set(ck, out)
+  out
 }
 
 gape.func <- function(groups.csv, Struct, Biom.N, prm){

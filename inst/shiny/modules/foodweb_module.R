@@ -34,20 +34,10 @@ foodweb_server <- function(id, project = NULL) {
     output$banner <- renderUI(tool_banner(ps(), "foodweb"))
 
     observe({
-      req(isTRUE(ps()$ready), diet_dat()$grp, diet_dat()$diet_time)
-      dat <- diet_dat()
-      times <- sort(unique(dat$diet_time$Time))
-      stocks <- if ("Stock" %in% names(dat$diet_time)) unique(dat$diet_time$Stock) else 0
-      grp <- dat$grp
+      req(isTRUE(ps()$ready), ps()$data$grp)
+      grp <- ps()$data$grp
       code.fg <- grp$code[if ("ispredator" %in% names(grp)) grp$ispredator > 0 else TRUE]
       update_select_keep(session, "focal_fg", c("All", as.character(code.fg)), input$focal_fg)
-      update_select_keep(session, "stock", as.character(stocks), input$stock)
-      step <- if (length(times) > 1) min(diff(times)) else 1
-      shiny::updateSliderInput(session, "time_step",
-                               min = min(times), max = max(times),
-                               value = keep_numeric(input$time_step, min(times), max(times),
-                                                    times[1]),
-                               step = step)
     })
 
     output$time_step_label <- renderText({
@@ -62,8 +52,15 @@ foodweb_server <- function(id, project = NULL) {
 
     time_prey_data <- reactive({
       dat <- diet_dat()
-      req(dat$diet_time, input$time_step)
-      tstep <- nearest_time(as.numeric(input$time_step), sort(unique(dat$diet_time$Time)))
+      req(dat$diet_time)
+      times <- sort(unique(dat$diet_time$Time))
+      stocks <- if ("Stock" %in% names(dat$diet_time)) unique(dat$diet_time$Stock) else 0
+      update_select_keep(session, "stock", as.character(stocks), input$stock)
+      step <- if (length(times) > 1) min(diff(times)) else 1
+      shiny::updateSliderInput(session, "time_step",
+                               min = min(times), max = max(times), step = step)
+      req(input$time_step)
+      tstep <- nearest_time(as.numeric(input$time_step), times)
       dt <- dat$diet_time[Time == tstep]
       if ("Stock" %in% names(dt) && !is.null(input$stock)) {
         dt <- dt[Stock == as.numeric(input$stock)]
@@ -152,7 +149,7 @@ foodweb_server <- function(id, project = NULL) {
       ra_datatable(table, options = list(pageLength = 15, dom = "tip"))
     })
 
-    keep_outputs_alive(output, c("banner", "time_step_label", "network_gg", "trophic_table"))
+    keep_outputs_alive(output, "banner")
   })
 }
 

@@ -95,10 +95,11 @@ ensemble_server <- function(id, project = NULL) {
         title = paste(ylab, "—", input$fg),
         x = "Year", y = ylab
       )
-      p + theme_reactiveatlantis()
+      p <- p + theme_reactiveatlantis()
+      ra_scale_x_year(p, df$Date)
       })
     })
 
-    keep_outputs_alive(output, c("banner", "empty_state", "ens_plot"))
+    keep_outputs_alive(output, c("banner", "empty_state"))
   })
 }

@@ -78,12 +78,10 @@ problem_cohorts <- function(nc, grp, band = ACCEPT_BAND) {
       for (comp in c("StructN", "ResN")) {
         vn <- paste0(age$name[i], coh, "_", comp)
         if (!vn %in% vars) next
-        arr <- tryCatch(ncdf4::ncvar_get(nc, vn), error = function(e) NULL)
-        if (is.null(arr)) next
-        d <- dim(arr)
-        nt <- if (is.null(d)) length(arr) else d[length(d)]
-        first <- mean(as.numeric(time_slice(arr, 1)), na.rm = TRUE)
-        last <- mean(as.numeric(time_slice(arr, nt)), na.rm = TRUE)
+        ends <- tryCatch(nc_get_time_ends(nc, vn), error = function(e) NULL)
+        if (is.null(ends) || is.null(ends$first) || is.null(ends$last)) next
+        first <- mean(as.numeric(ends$first), na.rm = TRUE)
+        last <- mean(as.numeric(ends$last), na.rm = TRUE)
         ratio <- last / pmax(first, 1e-12)
         flag <- if (!is.finite(ratio)) {
           "No data"
@@ -367,8 +365,8 @@ read_bgm_polygons <- function(bgm_path) {
 nc_volume <- function(nc) {
   if (is.null(nc)) return(NULL)
   vars <- names(nc$var)
-  if ("volume" %in% vars) return(ncdf4::ncvar_get(nc, "volume"))
-  if ("vol" %in% vars) return(ncdf4::ncvar_get(nc, "vol"))
+  if ("volume" %in% vars) return(nc_get(nc, "volume"))
+  if ("vol" %in% vars) return(nc_get(nc, "vol"))
   NULL
 }
 
@@ -381,6 +379,10 @@ add_nc_arrays <- function(acc, arr) {
 }
 
 biomass_by_box <- function(nc, grp, fg_code, mg2t = 0.00000002, x.cn = 5.7) {
+  path <- tryCatch(nc$filename, error = function(e) "anon")
+  ck <- paste("bbox", file_cache_key(path, fg_code), mg2t, x.cn, sep = "|")
+  hit <- ra_cache_get(ck)
+  if (!is.null(hit)) return(hit)
   row <- grp[grp$code == fg_code, , drop = FALSE]
   if (nrow(row) == 0) {
     stop("Unknown functional group: ", fg_code)
@@ -396,9 +398,9 @@ biomass_by_box <- function(nc, grp, fg_code, mg2t = 0.00000002, x.cn = 5.7) {
       r_var <- paste0(name, coh, "_ResN")
       s_var <- paste0(name, coh, "_StructN")
       if (!all(c(n_var, r_var, s_var) %in% vars)) next
-      nums <- ncdf4::ncvar_get(nc, n_var)
-      resn <- ncdf4::ncvar_get(nc, r_var)
-      strn <- ncdf4::ncvar_get(nc, s_var)
+      nums <- nc_get(nc, n_var)
+      resn <- nc_get(nc, r_var)
+      strn <- nc_get(nc, s_var)
       cell <- (resn + strn) * nums
       bt <- sum_layers_to_box_time(cell)
       acc <- if (is.null(acc)) bt else acc + bt
@@ -413,7 +415,7 @@ biomass_by_box <- function(nc, grp, fg_code, mg2t = 0.00000002, x.cn = 5.7) {
     }
     if (!vname %in% vars && paste0(name, "_N") %in% vars) vname <- paste0(name, "_N")
     if (!vname %in% vars) stop("No nitrogen tracer for ", fg_code)
-    biom <- ncdf4::ncvar_get(nc, vname)
+    biom <- nc_get(nc, vname)
     vol <- nc_volume(nc)
     if (!is.null(vol) && length(dim(biom)) == 3) {
       if (length(dim(vol)) == 2) {
@@ -438,6 +440,7 @@ biomass_by_box <- function(nc, grp, fg_code, mg2t = 0.00000002, x.cn = 5.7) {
     Code = fg_code,
     stringsAsFactors = FALSE
   )
+  ra_cache_set(ck, df)
   df
 }
 
@@ -495,6 +498,10 @@ prod_eat_name <- function(nc_vars, code, name, n_cohorts = 1, grouptype = NULL) 
 
 consumed_tonnes <- function(nc_prod, nc_out, grp, fg_code,
                             mg2t = 0.00000002, x.cn = 5.7) {
+  prod_path <- tryCatch(nc_prod$filename, error = function(e) "anon")
+  ck <- paste("eat", file_cache_key(prod_path, fg_code), mg2t, x.cn, sep = "|")
+  hit <- ra_cache_get(ck)
+  if (!is.null(hit)) return(hit)
   row <- grp[grp$code == fg_code, , drop = FALSE]
   if (nrow(row) == 0) stop("Unknown functional group: ", fg_code)
   name <- as.character(row$name[1])
@@ -508,7 +515,7 @@ consumed_tonnes <- function(nc_prod, nc_out, grp, fg_code,
   }
   eat <- NULL
   for (vn in vns) {
-    arr <- ncdf4::ncvar_get(nc_prod, vn)
+    arr <- nc_get(nc_prod, vn)
     eat <- add_nc_arrays(eat, arr)
   }
   vol <- nc_volume(nc_prod)
@@ -524,7 +531,9 @@ consumed_tonnes <- function(nc_prod, nc_out, grp, fg_code,
   } else {
     tonnes <- sum_space(eat) * mg2t * x.cn
   }
-  list(variable = vns[1], variables = vns, tonnes = as.numeric(tonnes))
+  out <- list(variable = vns[1], variables = vns, tonnes = as.numeric(tonnes))
+  ra_cache_set(ck, out)
+  out
 }
 
 consumption_by_prey <- function(tonnes, diet_time, predator, stock = NULL) {
@@ -559,8 +568,14 @@ consumption_as_prey <- function(nc_prod, nc_out, grp, prey_code, diet_time,
   empty <- data.frame(Time = numeric(), Predator = character(), Tonnes = numeric(),
                       stringsAsFactors = FALSE)
   if (is.null(diet_time) || !prey_code %in% names(diet_time)) return(empty)
+  prod_path <- tryCatch(nc_prod$filename, error = function(e) "anon")
+  ck <- paste("asprey", file_cache_key(prod_path, prey_code), mg2t, x.cn, sep = "|")
+  hit <- ra_cache_get(ck)
+  if (!is.null(hit)) return(hit)
   dt <- data.table::as.data.table(diet_time)
-  preds <- unique(as.character(dt$Predator))
+  prop_col <- dt[[prey_code]]
+  preds <- unique(as.character(dt$Predator[is.finite(as.numeric(prop_col)) &
+                                            as.numeric(prop_col) > 0]))
   rows <- list()
   for (pr in preds) {
     tot <- tryCatch(consumed_tonnes(nc_prod, nc_out, grp, pr, mg2t, x.cn),
@@ -576,8 +591,9 @@ consumption_as_prey <- function(nc_prod, nc_out, grp, prey_code, diet_time,
       stringsAsFactors = FALSE
     )
   }
-  if (length(rows) == 0) return(empty)
-  do.call(rbind, rows)
+  out <- if (length(rows) == 0) empty else do.call(rbind, rows)
+  ra_cache_set(ck, out)
+  out
 }
 
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
@@ -603,7 +619,7 @@ match_nc_var <- function(nc_vars, candidates) {
 }
 
 physics_long <- function(nc, varname, box = NULL) {
-  arr <- ncdf4::ncvar_get(nc, varname)
+  arr <- nc_get(nc, varname)
   d <- dim(arr)
   if (is.null(d)) {
     return(data.frame(Time = seq_along(arr), Layer = 0, Box = 0,
@@ -645,7 +661,7 @@ layer_thickness <- function(nc) {
   vars <- names(nc$var)
   vn <- match_nc_var(vars, c("nominal_dz", "dz", "nhgt"))
   if (is.na(vn)) return(NULL)
-  arr <- ncdf4::ncvar_get(nc, vn)
+  arr <- nc_get(nc, vn)
   list(name = vn, array = arr)
 }
 
@@ -675,7 +691,7 @@ load_run_lite <- function(folder, label = NULL) {
     out$ssb <- tryCatch(read_space_table(paths$ssb), error = function(e) NULL)
   }
   if (path_ok(paths$catch_nc)) {
-    out$catch_nc <- tryCatch(ncdf4::nc_open(paths$catch_nc), error = function(e) NULL)
+    out$catch_nc <- nc_handle(paths$catch_nc)
   }
   out
 }
@@ -705,12 +721,12 @@ catch_total_for_code <- function(nc, code) {
   if (length(hits) == 0) return(NULL)
   acc <- NULL
   for (vn in hits) {
-    s <- sum_space(ncdf4::ncvar_get(nc, vn))
+    s <- sum_space(nc_get(nc, vn))
     acc <- if (is.null(acc)) s else acc + s
   }
   t_days <- tryCatch({
     units <- ncdf4::ncatt_get(nc, "t")$units
-    raw <- as.numeric(ncdf4::ncvar_get(nc, "t"))
+    raw <- as.numeric(nc_get(nc, "t"))
     if (isTRUE(grepl("^seconds", units, ignore.case = TRUE))) raw / 86400 else raw
   }, error = function(e) seq_along(acc) - 1)
   data.frame(Time = as.numeric(t_days), Value = as.numeric(acc), stringsAsFactors = FALSE)

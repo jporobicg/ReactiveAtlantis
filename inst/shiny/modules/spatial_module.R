@@ -28,11 +28,10 @@ spatial_server <- function(id, project = NULL) {
 
     observe({
       req(isTRUE(ps()$ready), ps()$data$grp)
-      n_t <- if (!is.null(ps()$data$time_dates)) length(ps()$data$time_dates) else 1
       update_select_keep(session, "fg", fg_select_choices(ps()$data$grp), input$fg)
-      shiny::updateSliderInput(session, "time_i", min = 1, max = max(1, n_t),
-                               value = keep_numeric(input$time_i, 1, max(1, n_t), 1))
     })
+
+    fg_d <- ra_debounce(shiny::reactive(input$fg), 250)
 
     polys <- reactive({
       dat <- ps()$data
@@ -41,9 +40,12 @@ spatial_server <- function(id, project = NULL) {
     })
 
     box_bio <- reactive({
-      dat <- ps()$data
-      req(dat$nc_out, dat$grp, input$fg)
-      biomass_by_box(dat$nc_out, dat$grp, input$fg)
+      dat <- ensure_project_data(ps(), "nc_out")
+      req(dat$nc_out, dat$grp, fg_d())
+      bio <- biomass_by_box(dat$nc_out, dat$grp, fg_d())
+      n_t <- if (nrow(bio) > 0) max(bio$Time) else 1
+      shiny::updateSliderInput(session, "time_i", min = 1, max = max(1, n_t))
+      bio
     })
 
     output$time_lab <- renderText({
@@ -64,7 +66,7 @@ spatial_server <- function(id, project = NULL) {
       req(nrow(poly) > 0, nrow(bio) > 0, input$time_i)
       snap <- bio[bio$Time == input$time_i, ]
       poly$Biomass <- snap$Biomass[match(poly$boxid, snap$Box)]
-      pal <- get_fg_colors(input$fg, ps()$data$fg_palette)
+      pal <- get_fg_colors(fg_d(), ps()$data$fg_palette)
       p <- ggplot2::ggplot(poly, ggplot2::aes(x = x, y = y, group = boxid, fill = Biomass))
       p <- p + ggplot2::geom_polygon(colour = "#F7F4EC", linewidth = 0.25)
       p <- p + ggplot2::coord_equal()
@@ -77,7 +79,7 @@ spatial_server <- function(id, project = NULL) {
           fill = NA, colour = "#0B3C5D", linewidth = 0.9, inherit.aes = FALSE
         )
       }
-      p <- p + ggplot2::labs(title = paste("Biomass by box —", input$fg),
+      p <- p + ggplot2::labs(title = paste("Biomass by box —", fg_d()),
                              x = NULL, y = NULL)
       p + theme_reactiveatlantis() +
         ggplot2::theme(axis.text = ggplot2::element_blank(),
@@ -89,11 +91,12 @@ spatial_server <- function(id, project = NULL) {
       plot_or_message("Load a run to plot biomass in each box", {
       bio <- box_bio()
       req(nrow(bio) > 0)
-      tdates <- ps()$data$time_dates
+      dat <- ensure_project_data(ps(), "nc_out")
+      tdates <- dat$time_dates
       if (!is.null(tdates) && length(tdates) >= max(bio$Time)) {
         bio$Date <- tdates[bio$Time]
       } else {
-        bio$Date <- days_as_date(bio$Time, ps()$data$origin)
+        bio$Date <- days_as_date(bio$Time, dat$origin)
       }
       poly <- tryCatch(polys(), error = function(e) NULL)
       bio$Boundary <- FALSE
@@ -114,10 +117,11 @@ spatial_server <- function(id, project = NULL) {
       }
       p <- p + ggplot2::labs(title = "Biomass through time in each box",
                              x = "Year", y = "Biomass (tons)", colour = "Box")
-      p + theme_reactiveatlantis()
+      p <- p + theme_reactiveatlantis()
+      ra_scale_x_year(p, bio$Date)
       })
     })
 
-    keep_outputs_alive(output, c("banner", "time_lab", "map_plot", "box_ts"))
+    keep_outputs_alive(output, "banner")
   })
 }

@@ -27,7 +27,7 @@ physics_server <- function(id, project = NULL) {
     ps <- shiny::reactive(project_snapshot(project))
 
     available <- reactive({
-      dat <- ps()$data
+      dat <- ensure_project_data(ps(), "nc_out")
       req(dat$nc_out)
       vars <- names(dat$nc_out$var)
       found <- vapply(PHYSICS_CANDIDATES, function(cands) match_nc_var(vars, cands),
@@ -37,19 +37,17 @@ physics_server <- function(id, project = NULL) {
 
     output$banner <- renderUI(tool_banner(ps(), "physics"))
 
-    observe({
-      req(isTRUE(ps()$ready), ps()$data$nc_out)
-      tr <- available()
-      if (length(tr) == 0) return()
-      n_box <- if (!is.null(ps()$data$nc_out$dim$b)) ps()$data$nc_out$dim$b$len else 1
-      update_select_keep(session, "tracer", tr, input$tracer)
-      update_select_keep(session, "box", as.character(seq(0, max(0, n_box - 1))), input$box)
-    })
-
     output$tracer_plot <- renderPlot({
       plot_or_message("Load output.nc to plot temperature, salt and nutrients", {
-      dat <- ps()$data
-      req(dat$nc_out, input$tracer)
+      dat <- ensure_project_data(ps(), "nc_out")
+      req(dat$nc_out)
+      tr <- available()
+      if (length(tr) > 0) {
+        n_box <- if (!is.null(dat$nc_out$dim$b)) dat$nc_out$dim$b$len else 1
+        update_select_keep(session, "tracer", tr, input$tracer)
+        update_select_keep(session, "box", as.character(seq(0, max(0, n_box - 1))), input$box)
+      }
+      req(input$tracer)
       box <- if (isTRUE(input$all_boxes)) NULL else as.integer(input$box)
       df <- physics_long(dat$nc_out, input$tracer, box = box)
       req(nrow(df) > 0)
@@ -72,13 +70,14 @@ physics_server <- function(id, project = NULL) {
                       if (isTRUE(input$all_boxes)) "— mean of boxes" else paste("— box", input$box)),
         x = "Year", y = input$tracer
       )
-      p + theme_reactiveatlantis() + ggplot2::theme(legend.position = "none")
+      p <- p + theme_reactiveatlantis() + ggplot2::theme(legend.position = "none")
+      ra_scale_x_year(p, df$Date)
       })
     })
 
     output$dz_plot <- renderPlot({
       plot_or_message("Load output.nc to plot layer thickness", {
-      dat <- ps()$data
+      dat <- ensure_project_data(ps(), "nc_out")
       req(dat$nc_out)
       dz <- layer_thickness(dat$nc_out)
       if (is.null(dz)) {
@@ -117,7 +116,8 @@ physics_server <- function(id, project = NULL) {
         p <- p + ggplot2::geom_line()
         p <- p + ggplot2::labs(title = paste("Layer thickness through time — box", input$box),
                                x = "Year", y = "Thickness (m)")
-        p + theme_reactiveatlantis()
+        p <- p + theme_reactiveatlantis()
+        ra_scale_x_year(p, df$Date)
       } else {
         plot.new()
         title("Unexpected nominal_dz shape")
@@ -125,6 +125,6 @@ physics_server <- function(id, project = NULL) {
       })
     })
 
-    keep_outputs_alive(output, c("banner", "tracer_plot", "dz_plot"))
+    keep_outputs_alive(output, "banner")
   })
 }

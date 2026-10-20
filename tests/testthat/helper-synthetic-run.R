@@ -108,6 +108,45 @@ write_synthetic_catch_nc <- function(path) {
   ncdf4::nc_close(nc)
 }
 
+##' Larger NetCDF for cache/timing tests (still small enough for CI)
+write_timing_biology_nc <- function(path, n_z = 7, n_b = 30, n_t = 40,
+                                    n_grp = 4, n_coh = 5) {
+  dim_z <- ncdf4::ncdim_def("z", "layer", seq_len(n_z))
+  dim_b <- ncdf4::ncdim_def("b", "box", seq_len(n_b))
+  t_vals <- (seq_len(n_t) - 1) * 365
+  dim_t <- ncdf4::ncdim_def("t", "days since 1965-01-01", t_vals)
+  mk <- function(name, units = "mg N m-3") {
+    ncdf4::ncvar_def(name, units, list(dim_z, dim_b, dim_t), -999, prec = "float")
+  }
+  vars <- list(mk("volume", "m3"), mk("Temp", "degC"), mk("Light", "W m-2"))
+  grp_names <- sprintf("g%02d", seq_len(n_grp))
+  for (nm in grp_names) {
+    for (coh in seq_len(n_coh)) {
+      vars <- c(vars, list(
+        mk(paste0(nm, coh, "_StructN")),
+        mk(paste0(nm, coh, "_ResN")),
+        mk(paste0(nm, coh, "_Nums"), "individuals")
+      ))
+    }
+  }
+  nc <- ncdf4::nc_create(path, vars, force_v4 = TRUE)
+  ncdf4::ncatt_put(nc, "t", "units", "days since 1965-01-01")
+  fill <- array(1, dim = c(n_z, n_b, n_t))
+  fill[, , n_t] <- 1.2
+  ncdf4::ncvar_put(nc, "volume", array(1e6, dim = c(n_z, n_b, n_t)))
+  ncdf4::ncvar_put(nc, "Temp", fill)
+  ncdf4::ncvar_put(nc, "Light", fill * 40)
+  for (nm in grp_names) {
+    for (coh in seq_len(n_coh)) {
+      ncdf4::ncvar_put(nc, paste0(nm, coh, "_StructN"), fill * (10 + coh))
+      ncdf4::ncvar_put(nc, paste0(nm, coh, "_ResN"), fill * 5)
+      ncdf4::ncvar_put(nc, paste0(nm, coh, "_Nums"), fill * 80)
+    }
+  }
+  ncdf4::nc_close(nc)
+  invisible(path)
+}
+
 ##' Write a complete tiny Atlantis output folder for browser tests
 write_synthetic_atlantis_run <- function(dir) {
   if (!dir.exists(dir)) dir.create(dir, recursive = TRUE)

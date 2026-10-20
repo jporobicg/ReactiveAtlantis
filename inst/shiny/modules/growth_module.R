@@ -31,111 +31,35 @@ growth_server <- function(id, project = NULL) {
     output$banner <- renderUI(tool_banner(ps(), "growth"))
 
     observe({
-      req(rv$built, rv$cod_fg)
-      update_select_keep(session, "fg", rv$cod_fg, input$fg)
-      update_select_keep(session, "box", as.character(seq(0, max(0, rv$n_box - 1))), input$box)
-      update_select_keep(session, "layer", as.character(seq(0, max(0, rv$n_layer - 1))), input$layer)
-    })
-
-    observe({
-      req(!is.null(project), isTRUE(ps()$ready), ps()$data)
-      miss <- tool_missing(ps()$paths, "growth", ps())
-      token <- paste(unlist(ps()$paths), collapse = "|")
-      if (length(miss) || (isTRUE(rv$built) && identical(rv$token, token))) return()
-      rv$token <- token
-      dat <- ps()$data
-      req(dat$nc_out, dat$grp, dat$prm_bio)
-      grp <- dat$grp
-      prm <- dat$prm_bio
-      nc.out <- dat$nc_out
-
+      req(isTRUE(ps()$ready), ps()$data$grp)
+      grp <- ps()$data$grp
       pp.grp <- with(grp, which(grouptype %in% c("PHYTOBEN", "SM_PHY", "LG_PHY", "SEAGRASS",
                                                  "DINOFLAG", "TURF", "MICROPHTYBENTHOS") &
                                 isturnedon == 1))
-      if (length(pp.grp) == 0) {
-        shiny::showNotification("No primary producers found in the groups CSV.", type = "error")
-        return()
-      }
-      cod.fg <- as.character(grp$code[pp.grp])
-      nam.fg <- as.character(grp$name[pp.grp])
-
-      options(warn = -1)
-      flagnut <- text2num(prm, "flagnut ", FG = "look")
-      if (nrow(flagnut) == 0) flagnut <- data.frame(FG = "flagnut", Value = 0)
-      KN <- KS <- KI <- NULL
-      for (i in seq_along(pp.grp)) {
-        KN <- rbind(KN, text2num(prm, paste0("KN_", cod.fg[i]), FG = cod.fg[i]))
-        KS <- rbind(KS, text2num(prm, paste0("KS_", cod.fg[i]), FG = cod.fg[i]))
-        KI <- rbind(KI, text2num(prm, paste0("KI_", cod.fg[i]), FG = cod.fg[i]))
-      }
-      ed.scl <- text2num(prm, "eddy_scale", FG = "look")
-      if (nrow(ed.scl) > 0) ed.scl <- ed.scl[1, 2] else ed.scl <- 1
-      options(warn = 0)
-
-      nc_get <- function(name) {
-        tryCatch(ncdf4::ncvar_get(nc.out, name), error = function(e) NULL)
-      }
-      no3 <- nc_get("NO3")
-      nh3 <- nc_get("NH3")
-      if (is.null(no3) && is.null(nh3)) {
-        shiny::showNotification("NO3/NH3 not found in output.nc.", type = "error")
-        return()
-      }
-      DIN <- if (is.null(nh3)) no3 else if (is.null(no3)) nh3 else no3 + nh3
-      Si <- nc_get("Si")
-      l.eddy <- nc_get("eddy")
-      if (!is.null(l.eddy)) l.eddy <- l.eddy * ed.scl
-      IRR <- nc_get("Light")
-      if (is.null(IRR)) {
-        shiny::showNotification("Light not found in output.nc.", type = "error")
-        return()
-      }
-
-      l.light <- l.nut <- list()
-      for (fg in seq_along(nam.fg)) {
-        din_lim <- DIN / (KN$Value[fg] + DIN)
-        if (!is.null(Si) && !is.null(KS) && fg <= nrow(KS) && is.finite(KS$Value[fg])) {
-          si_lim <- Si / (KS$Value[fg] + Si)
-          if (flagnut$Value[1] == 0) {
-            l.nut[[fg]] <- pmin(din_lim, si_lim, na.rm = TRUE)
-          } else if (flagnut$Value[1] == 1) {
-            l.nut[[fg]] <- sqrt(din_lim * si_lim)
-          } else if (flagnut$Value[1] == 2) {
-            l.nut[[fg]] <- 2 / (din_lim + si_lim)
-          } else {
-            l.nut[[fg]] <- din_lim
-          }
-        } else {
-          l.nut[[fg]] <- din_lim
-        }
-        ki <- if (!is.null(KI) && fg <= nrow(KI)) KI$Value[fg] else 1
-        l.light[[fg]] <- pmin((IRR / ki), 1, na.rm = TRUE)
-      }
-
-      n.box <- if (length(dim(IRR)) >= 2) dim(IRR)[2] else 1
-      n.lay <- if (length(dim(IRR)) >= 1) dim(IRR)[1] else 1
-      rv$l_nut <- l.nut
-      rv$l_light <- l.light
-      rv$l_eddy <- l.eddy
-      rv$cod_fg <- cod.fg
-      rv$n_box <- n.box
-      rv$n_layer <- n.lay
-      rv$built <- TRUE
+      update_select_keep(session, "fg", as.character(grp$code[pp.grp]), input$fg)
     })
+
+    fg_d <- ra_debounce(shiny::reactive(input$fg), 250)
 
     output$growth_plot <- renderPlot({
       plot_or_message("Load output.nc with Light and a biology .prm to plot growth limitation", {
-      req(rv$built, input$fg, input$box)
-      fg_idx <- which(rv$cod_fg == input$fg)
+      dat <- ensure_project_data(ps(), "nc_out")
+      req(dat$nc_out, dat$grp, dat$prm_bio, fg_d(), input$box)
+      lim <- growth_limitation_for_fg(dat$nc_out, dat$prm_bio, dat$grp, fg_d())
+      req(!is.null(lim))
+      n_box <- lim$n_box
+      n_layer <- lim$n_layer
+      update_select_keep(session, "box", as.character(seq(0, max(0, n_box - 1))), input$box)
+      update_select_keep(session, "layer", as.character(seq(0, max(0, n_layer - 1))), input$layer)
       box_idx <- as.numeric(input$box) + 1
-      if (length(fg_idx) == 0 || box_idx > rv$n_box) return()
+      if (box_idx > n_box) return()
 
-      nut_data <- rv$l_nut[[fg_idx]]
-      light_data <- rv$l_light[[fg_idx]]
-      eddy_data <- rv$l_eddy
+      nut_data <- lim$nut
+      light_data <- lim$light
+      eddy_data <- lim$eddy
       n_layers <- dim(nut_data)[1]
       n_time <- dim(nut_data)[3]
-      Time <- ps()$data$time_dates
+      Time <- dat$time_dates
       if (is.null(Time) || length(Time) != n_time) Time <- seq_len(n_time)
 
       layers <- if (isTRUE(input$all_layers)) seq_len(n_layers) else {
@@ -179,21 +103,82 @@ growth_server <- function(id, project = NULL) {
         p <- p + ggplot2::coord_cartesian(ylim = c(0, 1))
       }
       p <- p + ggplot2::labs(
-        title = paste(input$fg, "— box", input$box),
+        title = paste(fg_d(), "— box", input$box),
         x = "Year", y = ylab, colour = "Limitation factor"
       )
-      p + theme_reactiveatlantis(base_size = 16) +
+      p <- p + theme_reactiveatlantis(base_size = 16) +
         ggplot2::theme(
           axis.text = ggplot2::element_text(size = 13),
           axis.title = ggplot2::element_text(size = 14),
           legend.text = ggplot2::element_text(size = 13),
           strip.text = ggplot2::element_text(size = 14)
         )
+      ra_scale_x_year(p, Time)
       })
     })
 
-    keep_outputs_alive(output, c("banner", "growth_plot"))
+    keep_outputs_alive(output, "banner")
   })
+}
+
+growth_limitation_for_fg <- function(nc, prm, grp, fg_code) {
+  path <- tryCatch(nc$filename, error = function(e) "anon")
+  ck <- paste("growthlim", file_cache_key(path, fg_code), sep = "|")
+  hit <- ra_cache_get(ck)
+  if (!is.null(hit)) return(hit)
+  pp.grp <- with(grp, which(grouptype %in% c("PHYTOBEN", "SM_PHY", "LG_PHY", "SEAGRASS",
+                                             "DINOFLAG", "TURF", "MICROPHTYBENTHOS") &
+                            isturnedon == 1))
+  if (length(pp.grp) == 0) return(NULL)
+  fg_idx <- which(as.character(grp$code[pp.grp]) == as.character(fg_code))
+  if (length(fg_idx) == 0) return(NULL)
+  fg_idx <- fg_idx[1]
+  options(warn = -1)
+  flagnut <- text2num(prm, "flagnut ", FG = "look")
+  if (nrow(flagnut) == 0) flagnut <- data.frame(FG = "flagnut", Value = 0)
+  code <- as.character(grp$code[pp.grp][fg_idx])
+  KN <- text2num(prm, paste0("KN_", code), FG = code)
+  KS <- text2num(prm, paste0("KS_", code), FG = code)
+  KI <- text2num(prm, paste0("KI_", code), FG = code)
+  ed.scl <- text2num(prm, "eddy_scale", FG = "look")
+  if (nrow(ed.scl) > 0) ed.scl <- ed.scl[1, 2] else ed.scl <- 1
+  options(warn = 0)
+  no3 <- nc_get(nc, "NO3")
+  nh3 <- nc_get(nc, "NH3")
+  if (is.null(no3) && is.null(nh3)) return(NULL)
+  DIN <- if (is.null(nh3)) no3 else if (is.null(no3)) nh3 else no3 + nh3
+  Si <- nc_get(nc, "Si")
+  l.eddy <- nc_get(nc, "eddy")
+  if (!is.null(l.eddy)) l.eddy <- l.eddy * ed.scl
+  IRR <- nc_get(nc, "Light")
+  if (is.null(IRR)) return(NULL)
+  kn <- if (!is.null(KN) && nrow(KN) > 0) KN$Value[1] else 1
+  din_lim <- DIN / (kn + DIN)
+  if (!is.null(Si) && !is.null(KS) && nrow(KS) > 0 && is.finite(KS$Value[1])) {
+    si_lim <- Si / (KS$Value[1] + Si)
+    if (flagnut$Value[1] == 0) {
+      l.nut <- pmin(din_lim, si_lim, na.rm = TRUE)
+    } else if (flagnut$Value[1] == 1) {
+      l.nut <- sqrt(din_lim * si_lim)
+    } else if (flagnut$Value[1] == 2) {
+      l.nut <- 2 / (din_lim + si_lim)
+    } else {
+      l.nut <- din_lim
+    }
+  } else {
+    l.nut <- din_lim
+  }
+  ki <- if (!is.null(KI) && nrow(KI) > 0) KI$Value[1] else 1
+  l.light <- pmin((IRR / ki), 1, na.rm = TRUE)
+  out <- list(
+    nut = l.nut,
+    light = l.light,
+    eddy = l.eddy,
+    n_box = if (length(dim(IRR)) >= 2) dim(IRR)[2] else 1,
+    n_layer = if (length(dim(IRR)) >= 1) dim(IRR)[1] else 1
+  )
+  ra_cache_set(ck, out)
+  out
 }
 
 eddy_time_series <- function(eddy, box_idx, n_time) {
