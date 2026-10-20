@@ -135,13 +135,13 @@ calc_mort <- function(SpeMort, PredMort, FG){
   P.mort <- paste(as.character(FG), c(0:9), 'S0', 'M2', sep = '.')
   
   Fmort <- SpeMort[, c(1, which(colnames(SpeMort) %in% F.mort))]
-  colnames(Fmort) <- c('Time', paste0('Age0', 1:(ncol(Fmort) - 1)))
+  colnames(Fmort) <- c('Time', format_age_labels(ncol(Fmort) - 1))
   
   Nmort <- SpeMort[, c(1, which(colnames(SpeMort) %in% N.mort))]
-  colnames(Nmort) <- c('Time', paste0('Age0', 1:(ncol(Nmort) - 1)))
+  colnames(Nmort) <- c('Time', format_age_labels(ncol(Nmort) - 1))
   
   Pmort <- SpeMort[, c(1, which(colnames(SpeMort) %in% P.mort))]
-  colnames(Pmort) <- c('Time', paste0('Age0', 1:(ncol(Pmort) - 1)))
+  colnames(Pmort) <- c('Time', format_age_labels(ncol(Pmort) - 1))
   
   Fmort$Mtype <- 'Fishing Mortality'
   Nmort$Mtype <- 'Natural Mortality'

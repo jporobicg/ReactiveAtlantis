@@ -589,7 +589,7 @@ plot_total_data <- function(total, Time, rn2, sn2, num2, bio2, scl2, limit2){
       )
     
     if(scl2 && limit2){
-      p <- p + ylim(0, 3)
+      p <- p + ggplot2::coord_cartesian(ylim = relative_axis_ylim(bio_df$Value))
     }
     
     return(p)
@@ -605,7 +605,7 @@ plot_cohort <- function(coho, Time, rn3a, sn3a, num3a, bio3a, scl3a, limit3a, co
   if(bio3a && !is.null(coho$Biomass)){
     bms <- unlist(coho$Biomass[[coh]])
     
-    ylim <- if(limit3a && scl3a) c(0, 3) else range(bms, na.rm = TRUE)
+    ylim <- if(limit3a && scl3a) relative_axis_ylim(bms) else range(bms, na.rm = TRUE)
     
     plot(Time, bms, type = 'l', xlab = '', ylab = '', 
          ylim = ylim, bty = 'n', lwd = 2, col = colors[1],
@@ -669,7 +669,7 @@ plot_cohorts_ggplot <- function(coho, Time, rn3a, sn3a, num3a, bio3a, scl3a, lim
     legend.position = "top"
   )
   if(isTRUE(scl3a) && isTRUE(limit3a)){
-    p <- p + ggplot2::coord_cartesian(ylim = c(0, 3))
+    p <- p + ggplot2::coord_cartesian(ylim = relative_axis_ylim(plot_df$Value))
   }
   p
 }
