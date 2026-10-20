@@ -21,12 +21,10 @@ library(stats)
 if (requireNamespace("plotly", quietly = TRUE)) library(plotly)
 if (requireNamespace("visNetwork", quietly = TRUE)) library(visNetwork)
 
-max_upload_mb <- getOption("reactiveatlantis.max_upload_mb", default = 4096)
+max_upload_mb <- getOption("reactiveatlantis.max_upload_mb", default = 8192)
 requested_upload <- as.numeric(max_upload_mb) * 1024^2
-current_upload <- getOption("shiny.maxRequestSize")
-if (is.null(current_upload) || is.na(current_upload) || current_upload < requested_upload) {
-  options(shiny.maxRequestSize = requested_upload)
-}
+current_upload <- suppressWarnings(as.numeric(getOption("shiny.maxRequestSize")))
+options(shiny.maxRequestSize = max(c(requested_upload, current_upload), na.rm = TRUE))
 
 app_dir <- getwd()
 source(file.path(app_dir, "modules", "theme.R"))

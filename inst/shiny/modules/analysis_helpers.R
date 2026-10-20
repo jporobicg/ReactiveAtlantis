@@ -121,6 +121,72 @@ acceptable_band_layer <- function(p, lo = 0.5, hi = 1.5, xmin, xmax) {
 }
 
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
+## ~                 YOY.txt                     ~ ##
+## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
+
+##' Read Atlantis YOY.txt (whitespace-separated; columns Time, CODE.0)
+##'
+##' Atlantis writes extra spaces between columns. \code{read.csv(sep = " ")}
+##' then invents empty \code{X} columns and can collapse the file to one row,
+##' which plots as a flat line with relative YOY of 1. This reader collapses
+##' whitespace and keeps every time step.
+read_yoy_table <- function(path) {
+  n_data <- max(0L, length(readLines(path, warn = FALSE)) - 1L)
+  raw <- tryCatch(
+    data.table::fread(path, header = TRUE, strip.white = TRUE, fill = TRUE,
+                      showProgress = FALSE, data.table = FALSE,
+                      check.names = FALSE, blank.lines.skip = TRUE),
+    error = function(e) NULL
+  )
+  if (is.null(raw) || ncol(raw) < 1 || (n_data > 2 && nrow(raw) <= 1)) {
+    raw <- utils::read.table(path, header = TRUE, check.names = FALSE,
+                             stringsAsFactors = FALSE, comment.char = "#",
+                             fill = TRUE, strip.white = TRUE)
+  }
+  names(raw) <- sub("^\ufeff", "", trimws(as.character(names(raw))))
+  keep <- nzchar(names(raw)) & !grepl("^X\\.?[0-9]*$", names(raw)) &
+    !grepl("^V[0-9]+$", names(raw))
+  raw <- raw[, keep, drop = FALSE]
+  empty <- vapply(raw, function(col) all(is.na(col) | !nzchar(as.character(col))),
+                  logical(1))
+  if (any(empty) && !all(empty)) raw <- raw[, !empty, drop = FALSE]
+  if (ncol(raw) == 0) stop("YOY file has no columns.")
+  tname <- names(raw)[tolower(names(raw)) %in% c("time", "t", "day", "days")]
+  if (length(tname) > 0) {
+    names(raw)[names(raw) == tname[1]] <- "Time"
+  } else {
+    raw$Time <- seq_len(nrow(raw)) - 1L
+  }
+  raw$Time <- as.numeric(raw$Time)
+  ## Seconds since a date origin, not model days (14975 is a long run in days)
+  if (length(raw$Time) > 0 && is.finite(max(raw$Time, na.rm = TRUE)) &&
+      max(raw$Time, na.rm = TRUE) > 1e6) {
+    raw$Time <- raw$Time / 86400
+  }
+  raw
+}
+
+find_yoy_column <- function(yoy, code) {
+  if (is.null(yoy) || ncol(yoy) == 0) return(NA_character_)
+  nms <- trimws(names(yoy))
+  nms <- nms[tolower(nms) != "time"]
+  code <- trimws(as.character(code)[1])
+  cands <- c(
+    paste0(code, ".0"), paste0(code, "_0"), paste0("X", code, ".0"),
+    paste0(code, ".0.0"), paste0("Time.", code), paste0("Time ", code),
+    code
+  )
+  hit <- cands[cands %in% nms]
+  if (length(hit) > 0) return(hit[1])
+  ci <- nms[tolower(nms) %in% tolower(cands)]
+  if (length(ci) > 0) return(ci[1])
+  rx <- paste0("^", gsub("([.|()\\^$*+?{}])", "\\\\\\1", code), "[._]0$")
+  g <- grep(rx, nms, ignore.case = TRUE, value = TRUE)
+  if (length(g) > 0) return(g[1])
+  NA_character_
+}
+
+## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
 ## ~                 Observations                ~ ##
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
 

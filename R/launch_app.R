@@ -8,7 +8,7 @@
 ##' @param launch.browser Whether to launch browser automatically (defaults to TRUE)
 ##' @param max_upload_mb Maximum Shiny upload size in megabytes. Applied only
 ##'   when it is larger than the current \code{shiny.maxRequestSize} option.
-##'   Default is 4096 (4 GB).
+##'   Default is 8192 (8 GB).
 ##' @param project_dir Optional local folder. The app scans it for Atlantis
 ##'   files (BiomIndx, DietCheck, CATCH.nc, groups CSV, and so on) so large
 ##'   outputs do not need to be uploaded through the browser.
@@ -23,7 +23,7 @@
 ##' }
 launch_reactiveatlantis <- function(host = "127.0.0.1", port = NULL,
                                     launch.browser = TRUE,
-                                    max_upload_mb = 4096,
+                                    max_upload_mb = 8192,
                                     project_dir = NULL) {
   app_dir <- system.file("shiny", package = "ReactiveAtlantis")
   
@@ -45,7 +45,7 @@ launch_reactiveatlantis <- function(host = "127.0.0.1", port = NULL,
 ##' @param max_upload_mb Requested limit in megabytes
 ##' @return The effective \code{shiny.maxRequestSize} in bytes, invisibly
 ##' @author Javier Porobic
-apply_max_upload_mb <- function(max_upload_mb = 4096) {
+apply_max_upload_mb <- function(max_upload_mb = 8192) {
   requested <- as.numeric(max_upload_mb) * 1024^2
   if (length(requested) != 1 || !is.finite(requested) || requested <= 0) {
     stop("max_upload_mb must be a single positive number.", call. = FALSE)

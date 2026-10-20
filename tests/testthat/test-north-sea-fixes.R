@@ -41,6 +41,7 @@ source(file.path(mod, "project_store.R"), local = TRUE)
 source(file.path(mod, "analysis_helpers.R"), local = TRUE)
 source(file.path(mod, "overview_module.R"), local = TRUE)
 source(file.path(mod, "feeding_module.R"), local = TRUE)
+source(file.path(mod, "growth_module.R"), local = TRUE)
 source(file.path(mod, "recruitment_module.R"), local = TRUE)
 source(file.path(mod, "spatial_module.R"), local = TRUE)
 source(file.path(mod, "consumption_module.R"), local = TRUE)
@@ -136,6 +137,10 @@ test_that("upload limit does not shrink a larger existing option", {
   options(shiny.maxRequestSize = 100 * 1024^2)
   apply_max_upload_mb(500)
   expect_equal(getOption("shiny.maxRequestSize"), 500 * 1024^2)
+
+  options(shiny.maxRequestSize = NULL)
+  apply_max_upload_mb()
+  expect_gt(getOption("shiny.maxRequestSize"), 553 * 1024^2)
 })
 
 test_that("functional-group colours are keyed by Code and stay put", {
@@ -1026,8 +1031,22 @@ test_that("recruitment_server overlays Recruitment observations on YOY", {
   make_cod_groups_csv(grp_path)
   make_biology_nc(nc_path)
   make_obs_csv(obs_path)
-  writeLines(c("flagrecruitCOD 3", "BHalpha_COD 1.5", "BHbeta_COD 0.01", "pPREY1COD 1", "0"),
-             prm_path)
+  writeLines(c(
+    "flagrecruitCOD 3",
+    "BHalpha_COD 7.3e9",
+    "BHbeta_COD 4.5e11",
+    "COD_Time_Spawn 0",
+    "KSPA_COD 0",
+    "FSP_COD 1",
+    "KWSR_COD 0.07",
+    "KWRR_COD 0.5",
+    "X_CN 5.7",
+    "X_RS 2.65",
+    "FSPB_COD 2",
+    "0 1",
+    "pPREY1COD 1",
+    "0"
+  ), prm_path)
   utils::write.table(
     data.frame(Time = c(0, 365, 730), COD.0 = c(20, 22, 18)),
     yoy_path, row.names = FALSE, quote = FALSE
@@ -1043,13 +1062,150 @@ test_that("recruitment_server overlays Recruitment observations on YOY", {
   shiny::testServer(recruitment_server, args = list(project = proj), {
     body <- paste(as.character(output$body$html), collapse = " ")
     expect_true(grepl("ssb", body, ignore.case = TRUE) || grepl("Spawning", body))
-    session$setInputs(analysis_type = "yoy", fg_yoy = "COD", new_alpha = 1.5, new_beta = 0.01)
+    session$setInputs(analysis_type = "yoy", fg_yoy = "COD")
+    ys <- yoy_series()
+    expect_equal(ys$column, "COD.0")
+    expect_false(isTRUE(all.equal(ys$relative, rep(1, length(ys$relative)))))
+    expect_equal(sci_txt(rv$rec_params$Alpha[rv$rec_params$FG == "COD"][1]), "7.3e9")
+    session$setInputs(new_alpha = "8e9", new_beta = "4.5e11")
+    session$setInputs(recalc = 1)
+    expect_equal(rv$alpha_use, 8e9)
+    ov <- rec_overlay()
+    expect_true(length(ov$larvae_old) > 0)
+    expect_true(length(ov$larvae_new) > 0)
+    expect_false(isTRUE(all.equal(ov$larvae_old, ov$larvae_new)))
     host <- paste(as.character(output$analysis_output$html), collapse = " ")
     expect_true(grepl("plot_yoy", host) || nchar(host) > 0)
     session$setInputs(analysis_type = "ssb")
     ssb_host <- paste(as.character(output$analysis_output$html), collapse = " ")
     expect_true(grepl("plot_ssb", ssb_host) || nchar(ssb_host) > 0)
   })
+})
+
+test_that("YOY.txt columns CODE.0 are matched and extra spaces do not flatten the series", {
+  tmpdir <- tempfile()
+  dir.create(tmpdir)
+  on.exit(unlink(tmpdir, recursive = TRUE), add = TRUE)
+  yoy_path <- file.path(tmpdir, "outputNorthSeaYOY.txt")
+  writeLines(c(
+    "Time  COD.0  HAD.0",
+    "0.00  10000  2.0",
+    "365.00  15000  2.5",
+    "730.00  8000  3.0",
+    "1095.00  20000  1.0"
+  ), yoy_path)
+  yoy <- read_yoy_table(yoy_path)
+  expect_true("Time" %in% names(yoy))
+  expect_equal(find_yoy_column(yoy, "COD"), "COD.0")
+  expect_equal(find_yoy_column(yoy, "HAD"), "HAD.0")
+  expect_equal(length(yoy$Time), 4)
+  expect_equal(yoy[[find_yoy_column(yoy, "COD")]], c(10000, 15000, 8000, 20000))
+  rel <- yoy$COD.0 / yoy$COD.0[1]
+  expect_false(isTRUE(all.equal(rel, rep(1, 4))))
+  expect_equal(sci_txt(7.3e9), "7.3e9")
+  expect_equal(sci_txt(4.5e11), "4.5e11")
+  expect_equal(parse_sci("7.3e9"), 7.3e9)
+  expect_equal(parse_sci("7.3e+09"), 7.3e9)
+  expect_equal(parse_sci("4.5e11"), 4.5e11)
+})
+
+test_that("YOY Time COD headers and a 14975-day series keep their values", {
+  tmpdir <- tempfile()
+  dir.create(tmpdir)
+  on.exit(unlink(tmpdir, recursive = TRUE), add = TRUE)
+  yoy_path <- file.path(tmpdir, "outputNorthSeaYOY.txt")
+  days <- c(seq(0, 14600, by = 365), 14975)
+  yoy_cod <- 10000 + 5000 * sin(days / 2000)
+  lines <- c("Time COD HAD",
+             paste(sprintf("%.2f", days), sprintf("%.6e", yoy_cod), "2.0"))
+  writeLines(lines, yoy_path)
+  yoy <- read_yoy_table(yoy_path)
+  expect_equal(find_yoy_column(yoy, "COD"), "COD")
+  expect_equal(length(yoy$Time), length(days))
+  expect_equal(max(yoy$Time), 14975)
+  expect_false(isTRUE(all.equal(yoy$COD, rep(yoy$COD[1], length(yoy$COD)))))
+  rel <- yoy$COD / yoy$COD[1]
+  expect_false(isTRUE(all.equal(rel, rep(1, length(rel)))))
+})
+
+test_that("BH overlay uses new alpha/beta not a recycled YOY constant", {
+  spawn <- c(10, 20, 30, 40)
+  ssb <- c(100, 120, 90, 80)
+  old <- unlist(BH.rec(spawn, 7.3e9, 4.5e11, ssb, "N"))
+  new <- unlist(BH.rec(spawn, 8e9, 4.5e11, ssb, "N"))
+  expect_equal(length(old), 4)
+  expect_false(isTRUE(all.equal(old, new)))
+  expect_true(all(new > old))
+  rec_row <- data.frame(Alpha = 7.3e9, Beta = 4.5e11, Rec.SNW = NA_real_,
+                        Rec.RNW = NA_real_, XCN = NA_real_)
+  yoy <- list(time = c(0, 365, 730, 1095), original = c(20, 22, 18, 25))
+  spawn_ssb <- list(time = c(0, 365, 730, 1095), spawn = spawn, ssb = ssb, ver = "N")
+  ov0 <- recruitment_overlay(yoy, spawn_ssb, 7.3e9, 4.5e11, 7.3e9, 4.5e11, rec_row)
+  ov1 <- recruitment_overlay(yoy, spawn_ssb, 7.3e9, 4.5e11, 8e9, 4.5e11, rec_row)
+  expect_false(isTRUE(all.equal(ov0$larvae_old, ov1$larvae_new)))
+  expect_false(isTRUE(all.equal(ov1$yoy_new, yoy$original)))
+})
+
+test_that("spawn_from_nc uses cod1_Nums at spawn times from output.nc", {
+  tmpdir <- tempfile()
+  dir.create(tmpdir)
+  on.exit(unlink(tmpdir, recursive = TRUE), add = TRUE)
+  grp_path <- file.path(tmpdir, "grp.csv")
+  nc_path <- file.path(tmpdir, "output.nc")
+  make_cod_groups_csv(grp_path)
+  make_biology_nc(nc_path)
+  grp <- utils::read.csv(grp_path, stringsAsFactors = FALSE)
+  names(grp) <- tolower(names(grp))
+  nc <- ncdf4::nc_open(nc_path)
+  on.exit(ncdf4::nc_close(nc), add = TRUE)
+  rec_row <- data.frame(FG = "COD", Value = 3, Time.sp = 0, FSP = 1, KSPA = 0,
+                        XRS = 2.65, XCN = 5.7, Rec.SNW = 0.07, Rec.RNW = 0.5,
+                        Alpha = 7.3e9, Beta = 4.5e11)
+  sp <- spawn_from_nc(nc, grp, rec_row, "COD", c(0, 1))
+  expect_true(length(sp$ssb) >= 2)
+  expect_true(any(sp$ssb > 0))
+  expect_equal(sp$time[1], 0)
+  dat <- list(nc_out = nc, grp = grp, ssb = NULL, biomindx = NULL)
+  got <- spawn_ssb_for_fg(dat, rec_row, "COD", c(0, 1))
+  expect_equal(got$ver, "N")
+  expect_true(length(got$spawn) >= 2)
+})
+
+test_that("feeding predator row filters the matrix and pressure is a matrix", {
+  ava <- matrix(c(0.2, 0, 0.1, 0.4), nrow = 2,
+                dimnames = list(c("pPREY1COD1", "pPREY1HAD1"), c("COD", "HAD")))
+  ov <- matrix(c(1, 0, 1, 1), nrow = 2, dimnames = dimnames(ava))
+  press <- predation_pressure_matrix(ava * ov)
+  expect_equal(dim(press), c(2, 2))
+  expect_true(all(is.finite(press)))
+  expect_equal(unname(colSums(press)), c(100, 100), tolerance = 1e-8)
+  sub <- ava["pPREY1COD1", , drop = FALSE]
+  expect_equal(nrow(sub), 1)
+  expect_equal(colnames(sub), c("COD", "HAD"))
+  p <- plot_feed_tile(t(ava), "Availability", "YlOrRd", "A",
+                      highlight_pred = "pPREY1COD1", highlight_prey = NULL)
+  expect_s3_class(p, "ggplot")
+  p2 <- plot_feed_overlap(t(ov * ava > 0), "pPREY1COD1", "HAD")
+  expect_s3_class(p2, "ggplot")
+})
+
+test_that("growth limitation plot has labelled factors and a 0-1 axis", {
+  Time <- as.Date("1970-01-01") + c(0, 365, 730)
+  plot_df <- rbind(
+    data.frame(Time = Time, Value = c(0.2, 0.4, 0.3), Series = "Light", Layer = "Layer 0"),
+    data.frame(Time = Time, Value = c(0.5, 0.6, 0.55), Series = "Nutrient", Layer = "Layer 0"),
+    data.frame(Time = Time, Value = c(0.8, 0.7, 0.9), Series = "Eddy / space", Layer = "Layer 0")
+  )
+  pal <- c(Light = "#C4A35A", Nutrient = "#1D7874", `Eddy / space` = "#A33B20")
+  p <- ggplot2::ggplot(plot_df, ggplot2::aes(x = Time, y = Value, colour = Series))
+  p <- p + ggplot2::geom_line()
+  p <- p + ggplot2::scale_color_manual(values = pal)
+  p <- p + ggplot2::coord_cartesian(ylim = c(0, 1))
+  p <- p + theme_reactiveatlantis(base_size = 16)
+  built <- ggplot2::ggplot_build(p)
+  y_range <- built$layout$panel_params[[1]]$y$continuous_range
+  expect_equal(y_range[1], 0, tolerance = 0.05)
+  expect_equal(y_range[2], 1, tolerance = 0.05)
 })
 
 test_that("app.R sources the new analysis modules", {

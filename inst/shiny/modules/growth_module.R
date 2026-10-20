@@ -7,12 +7,14 @@ growth_ui <- function(id) {
   tagList(uiOutput(ns("body")))
 }
 
-growth_body_ui <- function(ns, cod_fg, n_box) {
+growth_body_ui <- function(ns, cod_fg, n_box, n_layer) {
   layout_sidebar(
     sidebar = sidebar(
       width = 280, open = "open",
       selectInput(ns("fg"), "Primary producer", choices = cod_fg),
       selectInput(ns("box"), "Box", choices = seq(0, max(0, n_box - 1))),
+      selectInput(ns("layer"), "Layer", choices = seq(0, max(0, n_layer - 1))),
+      checkboxInput(ns("all_layers"), "All layers (facets)", FALSE),
       checkboxInput(ns("log_scale"), "Logarithmic", FALSE)
     ),
     uiOutput(ns("plot_host"))
@@ -23,7 +25,7 @@ growth_server <- function(id, project = NULL) {
   moduleServer(id, function(input, output, session) {
     rv <- reactiveValues(
       l_nut = NULL, l_light = NULL, l_eddy = NULL,
-      cod_fg = NULL, n_box = NULL, built = FALSE, token = NULL
+      cod_fg = NULL, n_box = NULL, n_layer = NULL, built = FALSE, token = NULL
     )
 
     output$body <- renderUI({
@@ -36,7 +38,7 @@ growth_server <- function(id, project = NULL) {
         return(bslib::card(bslib::card_header("Growth"),
                            bslib::card_body("Reading limitation factors from the run…")))
       }
-      growth_body_ui(session$ns, rv$cod_fg, rv$n_box)
+      growth_body_ui(session$ns, rv$cod_fg, rv$n_box, rv$n_layer)
     })
 
     observe({
@@ -74,31 +76,54 @@ growth_server <- function(id, project = NULL) {
       if (nrow(ed.scl) > 0) ed.scl <- ed.scl[1, 2] else ed.scl <- 1
       options(warn = 0)
 
-      DIN <- ncdf4::ncvar_get(nc.out, "NO3") + ncdf4::ncvar_get(nc.out, "NH3")
-      Si <- ncdf4::ncvar_get(nc.out, "Si")
-      l.eddy <- ncdf4::ncvar_get(nc.out, "eddy") * ed.scl
-      IRR <- ncdf4::ncvar_get(nc.out, "Light")
+      nc_get <- function(name) {
+        tryCatch(ncdf4::ncvar_get(nc.out, name), error = function(e) NULL)
+      }
+      no3 <- nc_get("NO3")
+      nh3 <- nc_get("NH3")
+      if (is.null(no3) && is.null(nh3)) {
+        shiny::showNotification("NO3/NH3 not found in output.nc.", type = "error")
+        return()
+      }
+      DIN <- if (is.null(nh3)) no3 else if (is.null(no3)) nh3 else no3 + nh3
+      Si <- nc_get("Si")
+      l.eddy <- nc_get("eddy")
+      if (!is.null(l.eddy)) l.eddy <- l.eddy * ed.scl
+      IRR <- nc_get("Light")
+      if (is.null(IRR)) {
+        shiny::showNotification("Light not found in output.nc.", type = "error")
+        return()
+      }
 
       l.light <- l.nut <- list()
       for (fg in seq_along(nam.fg)) {
-        if (flagnut$Value[1] == 0) {
-          l.nut[[fg]] <- pmin((DIN / (KN$Value[fg] + DIN)), (Si / (KS$Value[fg] + Si)), na.rm = TRUE)
-        } else if (flagnut$Value[1] == 1) {
-          l.nut[[fg]] <- sqrt((DIN / (KN$Value[fg] + DIN)) * (Si / (KS$Value[fg] + Si)))
-        } else if (flagnut$Value[1] == 2) {
-          l.nut[[fg]] <- 2 / ((DIN / (KN$Value[fg] + DIN)) + (Si / (KS$Value[fg] + Si)))
+        din_lim <- DIN / (KN$Value[fg] + DIN)
+        if (!is.null(Si) && !is.null(KS) && fg <= nrow(KS) && is.finite(KS$Value[fg])) {
+          si_lim <- Si / (KS$Value[fg] + Si)
+          if (flagnut$Value[1] == 0) {
+            l.nut[[fg]] <- pmin(din_lim, si_lim, na.rm = TRUE)
+          } else if (flagnut$Value[1] == 1) {
+            l.nut[[fg]] <- sqrt(din_lim * si_lim)
+          } else if (flagnut$Value[1] == 2) {
+            l.nut[[fg]] <- 2 / (din_lim + si_lim)
+          } else {
+            l.nut[[fg]] <- din_lim
+          }
         } else {
-          l.nut[[fg]] <- (DIN / (KN$Value[fg] + DIN))
+          l.nut[[fg]] <- din_lim
         }
-        l.light[[fg]] <- pmin((IRR / KI$Value[fg]), 1, na.rm = TRUE)
+        ki <- if (!is.null(KI) && fg <= nrow(KI)) KI$Value[fg] else 1
+        l.light[[fg]] <- pmin((IRR / ki), 1, na.rm = TRUE)
       }
 
-      n.box <- dim(IRR)[2]
+      n.box <- if (length(dim(IRR)) >= 2) dim(IRR)[2] else 1
+      n.lay <- if (length(dim(IRR)) >= 1) dim(IRR)[1] else 1
       rv$l_nut <- l.nut
       rv$l_light <- l.light
       rv$l_eddy <- l.eddy
       rv$cod_fg <- cod.fg
       rv$n_box <- n.box
+      rv$n_layer <- n.lay
       rv$built <- TRUE
     })
 
@@ -121,53 +146,76 @@ growth_server <- function(id, project = NULL) {
       Time <- project$data$time_dates
       if (is.null(Time) || length(Time) != n_time) Time <- seq_len(n_time)
 
+      layers <- if (isTRUE(input$all_layers)) seq_len(n_layers) else {
+        ly <- as.integer(input$layer) + 1L
+        if (!is.finite(ly) || ly < 1 || ly > n_layers) 1L else ly
+      }
+      eddy_ts <- eddy_time_series(eddy_data, box_idx, n_time)
       rows <- list()
-      for (layer in seq_len(n_layers)) {
-        nut_layer <- nut_data[layer, box_idx, ]
-        light_layer <- light_data[layer, box_idx, ]
-        eddy_layer <- eddy_data[box_idx, ]
-        growth_layer <- nut_layer * light_layer
+      for (layer in layers) {
+        nut_layer <- as.numeric(nut_data[layer, box_idx, ])
+        light_layer <- as.numeric(light_data[layer, box_idx, ])
+        growth_layer <- pmin(nut_layer * light_layer, 1)
+        eddy_layer <- eddy_ts
         if (isTRUE(input$log_scale)) {
-          nut_layer <- log(nut_layer + 1e-10)
-          light_layer <- log(light_layer + 1e-10)
-          eddy_layer <- log(eddy_layer + 1e-10)
-          growth_layer <- log(growth_layer + 1e-10)
+          nut_layer <- log(pmax(nut_layer, 1e-10))
+          light_layer <- log(pmax(light_layer, 1e-10))
+          eddy_layer <- log(pmax(eddy_layer, 1e-10))
+          growth_layer <- log(pmax(growth_layer, 1e-10))
         }
-        rows[[length(rows) + 1]] <- data.frame(
-          Time = Time,
-          Value = as.numeric(growth_layer),
-          Series = "Growth",
-          Layer = paste("Layer", layer - 1)
-        )
-        rows[[length(rows) + 1]] <- data.frame(
-          Time = Time, Value = as.numeric(nut_layer), Series = "Nutrients",
-          Layer = paste("Layer", layer - 1)
-        )
-        rows[[length(rows) + 1]] <- data.frame(
-          Time = Time, Value = as.numeric(light_layer), Series = "Light",
-          Layer = paste("Layer", layer - 1)
-        )
-        if (layer == 1) {
-          rows[[length(rows) + 1]] <- data.frame(
-            Time = Time,
-            Value = rep(mean(eddy_layer, na.rm = TRUE), n_time),
-            Series = "Eddy",
-            Layer = paste("Layer", layer - 1)
-          )
-        }
+        lab <- paste("Layer", layer - 1)
+        rows[[length(rows) + 1]] <- data.frame(Time = Time, Value = growth_layer,
+                                               Series = "Growth (light × nutrient)", Layer = lab)
+        rows[[length(rows) + 1]] <- data.frame(Time = Time, Value = nut_layer,
+                                               Series = "Nutrient", Layer = lab)
+        rows[[length(rows) + 1]] <- data.frame(Time = Time, Value = light_layer,
+                                               Series = "Light", Layer = lab)
+        rows[[length(rows) + 1]] <- data.frame(Time = Time, Value = eddy_layer,
+                                               Series = "Eddy / space", Layer = lab)
       }
       plot_df <- do.call(rbind, rows)
-      pal <- c(Growth = "#0B3C5D", Nutrients = "#1D7874", Light = "#C4A35A", Eddy = "#A33B20")
-      ylab <- if (isTRUE(input$log_scale)) "log(Limitation)" else "Limitation"
+      pal <- c(`Growth (light × nutrient)` = "#0B3C5D", Nutrient = "#1D7874",
+               Light = "#C4A35A", `Eddy / space` = "#A33B20")
+      ylab <- if (isTRUE(input$log_scale)) "log(Limitation)" else "Limitation (0–1)"
       p <- ggplot2::ggplot(plot_df, ggplot2::aes(x = Time, y = Value, colour = Series))
-      p <- p + ggplot2::geom_line(linewidth = 0.85, na.rm = TRUE)
-      p <- p + ggplot2::facet_wrap(~ Layer, ncol = 1, scales = "free_y")
+      p <- p + ggplot2::geom_line(linewidth = 1, na.rm = TRUE)
+      if (length(layers) > 1) {
+        p <- p + ggplot2::facet_wrap(~ Layer, ncol = 1)
+      }
       p <- p + ggplot2::scale_color_manual(values = pal)
+      if (!isTRUE(input$log_scale)) {
+        p <- p + ggplot2::coord_cartesian(ylim = c(0, 1))
+      }
       p <- p + ggplot2::labs(
         title = paste(input$fg, "— box", input$box),
-        x = "Year", y = ylab
+        x = "Year", y = ylab, colour = "Limitation factor"
       )
-      p + theme_reactiveatlantis()
+      p + theme_reactiveatlantis(base_size = 16) +
+        ggplot2::theme(
+          axis.text = ggplot2::element_text(size = 13),
+          axis.title = ggplot2::element_text(size = 14),
+          legend.text = ggplot2::element_text(size = 13),
+          strip.text = ggplot2::element_text(size = 14)
+        )
     })
   })
+}
+
+eddy_time_series <- function(eddy, box_idx, n_time) {
+  if (is.null(eddy)) return(rep(NA_real_, n_time))
+  d <- dim(eddy)
+  if (is.null(d) || length(d) == 1) {
+    v <- as.numeric(eddy)
+    if (length(v) == n_time) return(v)
+    return(rep(mean(v, na.rm = TRUE), n_time))
+  }
+  if (length(d) == 2) {
+    if (d[2] == n_time) return(as.numeric(eddy[min(box_idx, d[1]), ]))
+    if (d[1] == n_time) return(as.numeric(eddy[, min(box_idx, d[2])]))
+    return(rep(mean(eddy[min(box_idx, d[1]), ], na.rm = TRUE), n_time))
+  }
+  ## z, b, t
+  b <- min(box_idx, d[2])
+  v <- apply(eddy[, b, , drop = FALSE], 3, mean, na.rm = TRUE)
+  as.numeric(v)
 }

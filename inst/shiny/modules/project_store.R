@@ -311,8 +311,9 @@ load_project <- function(paths) {
     })
   }
   if (path_ok(paths$yoy)) {
-    out$yoy <- tryCatch(utils::read.csv(paths$yoy, sep = " ", stringsAsFactors = FALSE),
-                        error = function(e) NULL)
+    out$yoy <- tryCatch(read_yoy_table(paths$yoy), error = function(e) {
+      add_err(paste("YOY:", e$message)); NULL
+    })
   }
   if (path_ok(paths$ssb)) {
     out$ssb <- tryCatch(read_space_table(paths$ssb), error = function(e) NULL)
@@ -354,7 +355,7 @@ project_sidebar_ui <- function(id) {
       shiny::actionButton(ns("load_project"), "Load run", class = "btn btn-primary btn-sm")
     ),
     shiny::p(class = "ra-muted",
-             "A local folder path avoids browser upload limits for large NetCDF and DietCheck files."),
+             "Prefer a local folder. Uploads are optional and some browsers stop around 500 MB; a North Sea output.nc is larger than that."),
     shiny::textAreaInput(ns("extra_folders"), "Other run folders (one per line)",
                          rows = 3, placeholder = "/path/to/run2\n/path/to/run3"),
     shiny::h6("Loaded files"),
@@ -365,7 +366,8 @@ project_sidebar_ui <- function(id) {
       open = FALSE,
       bslib::accordion_panel(
         "Attach individual files",
-        shiny::p(class = "ra-muted", "Used when a folder is not available on this machine."),
+        shiny::p(class = "ra-muted",
+                 "Optional. Skip this when the folder path above already has the run. Large NetCDF files should be loaded from disk, not uploaded."),
         shiny::fileInput(ns("up_groups"), "Groups CSV", accept = ".csv"),
         shiny::fileInput(ns("up_fish"), "Fisheries CSV", accept = ".csv"),
         shiny::fileInput(ns("up_output"), "Output .nc", accept = ".nc"),
