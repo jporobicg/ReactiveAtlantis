@@ -4,8 +4,9 @@
 
 FILE_ROLES <- c(
   "groups", "fisheries", "output_nc", "output_nc_old", "catch_nc", "init_nc",
-  "biomindx", "dietcheck", "diet_bypol", "ssb", "yoy",
-  "bio_prm", "run_prm", "bgm", "specific_mort", "specific_pred_mort", "ext_catch"
+  "prod_nc", "biomindx", "dietcheck", "diet_bypol", "ssb", "yoy",
+  "bio_prm", "run_prm", "bgm", "specific_mort", "specific_pred_mort",
+  "ext_catch", "obs_csv"
 )
 
 FILE_LABELS <- c(
@@ -23,9 +24,11 @@ FILE_LABELS <- c(
   bio_prm = "Biology .prm",
   run_prm = "Run .prm",
   bgm = "BGM geometry",
+  prod_nc = "Production NetCDF (PROD)",
   specific_mort = "SpecificMort.txt",
   specific_pred_mort = "SpecificPredMort.txt",
-  ext_catch = "External catch CSV"
+  ext_catch = "External catch CSV",
+  obs_csv = "Observations CSV"
 )
 
 TOOL_REQUIREMENTS <- list(
@@ -37,7 +40,11 @@ TOOL_REQUIREMENTS <- list(
   growth = c("groups", "output_nc", "bio_prm"),
   catch = c("groups", "fisheries", "catch_nc"),
   feeding = c("groups", "bio_prm", "init_nc"),
-  mortality = c("groups", "specific_mort", "specific_pred_mort")
+  mortality = c("groups", "specific_mort", "specific_pred_mort"),
+  spatial = c("groups", "output_nc", "bgm"),
+  consumption = c("groups", "prod_nc"),
+  physics = c("output_nc"),
+  ensemble = c("groups")
 )
 
 empty_paths <- function() {
@@ -61,6 +68,7 @@ classify_csv <- function(path) {
       any(c("numcohorts", "isturnedon", "grouptype", "longname") %in% hdr)) {
     return("groups")
   }
+  if (all(c("code", "year", "value") %in% hdr)) return("obs")
   if ("index" %in% hdr && "code" %in% hdr) return("fisheries")
   NA_character_
 }
@@ -91,8 +99,10 @@ detect_project_files <- function(folder) {
   paths$specific_mort <- pick_first(files, "SpecificMort\\.txt$", exclude = "Pred")
   paths$bgm <- pick_first(files, "\\.bgm$")
   paths$catch_nc <- pick_first(files, "CATCH.*\\.nc$|Catch.*\\.nc$")
+  paths$prod_nc <- pick_first(files, "PROD.*\\.nc$|Prod.*\\.nc$")
   paths$init_nc <- pick_first(files, "init.*\\.nc$|_ini.*\\.nc$")
-  paths$output_nc <- pick_first(files, "\\.nc$", exclude = "CATCH|Catch|init|_ini|restart")
+  paths$output_nc <- pick_first(files, "\\.nc$",
+                                exclude = "CATCH|Catch|init|_ini|restart|PROD|Prod")
   paths$ext_catch <- pick_first(files, "catch.*\\.csv$|observed.*catch")
 
   csvs <- files[grepl("\\.csv$", files, ignore.case = TRUE)]
@@ -100,6 +110,7 @@ detect_project_files <- function(folder) {
     kind <- classify_csv(p)
     if (isTRUE(kind == "groups") && is.na(paths$groups)) paths$groups <- p
     if (isTRUE(kind == "fisheries") && is.na(paths$fisheries)) paths$fisheries <- p
+    if (isTRUE(kind == "obs") && is.na(paths$obs_csv)) paths$obs_csv <- p
   }
   if (is.na(paths$groups)) paths$groups <- pick_first(files, "group.*\\.csv$|functionalGroup")
   if (is.na(paths$fisheries)) paths$fisheries <- pick_first(files, "fish.*\\.csv$")
@@ -215,6 +226,7 @@ load_project <- function(paths) {
     nc_old = NULL,
     nc_catch = NULL,
     nc_init = NULL,
+    nc_prod = NULL,
     biomindx = NULL,
     diet_full = NULL,
     diet_time = NULL,
@@ -230,6 +242,7 @@ load_project <- function(paths) {
     origin = as.Date(NA),
     fg_palette = NULL,
     ext_catch = NULL,
+    observations = NULL,
     errors = character()
   )
 
@@ -269,6 +282,9 @@ load_project <- function(paths) {
   if (path_ok(paths$init_nc)) {
     out$nc_init <- tryCatch(ncdf4::nc_open(paths$init_nc), error = function(e) NULL)
   }
+  if (path_ok(paths$prod_nc)) {
+    out$nc_prod <- tryCatch(ncdf4::nc_open(paths$prod_nc), error = function(e) NULL)
+  }
 
   if (path_ok(paths$biomindx)) {
     out$biomindx <- tryCatch(read_space_table(paths$biomindx), error = function(e) {
@@ -288,6 +304,11 @@ load_project <- function(paths) {
   if (path_ok(paths$ext_catch)) {
     out$ext_catch <- tryCatch(utils::read.csv(paths$ext_catch, stringsAsFactors = FALSE),
                               error = function(e) NULL)
+  }
+  if (path_ok(paths$obs_csv)) {
+    out$observations <- tryCatch(read_observations(paths$obs_csv), error = function(e) {
+      add_err(paste("Observations:", e$message)); NULL
+    })
   }
   if (path_ok(paths$yoy)) {
     out$yoy <- tryCatch(utils::read.csv(paths$yoy, sep = " ", stringsAsFactors = FALSE),
@@ -334,6 +355,8 @@ project_sidebar_ui <- function(id) {
     ),
     shiny::p(class = "ra-muted",
              "A local folder path avoids browser upload limits for large NetCDF and DietCheck files."),
+    shiny::textAreaInput(ns("extra_folders"), "Other run folders (one per line)",
+                         rows = 3, placeholder = "/path/to/run2\n/path/to/run3"),
     shiny::h6("Loaded files"),
     shiny::uiOutput(ns("file_checklist")),
     shiny::h6("Tools"),
@@ -348,6 +371,7 @@ project_sidebar_ui <- function(id) {
         shiny::fileInput(ns("up_output"), "Output .nc", accept = ".nc"),
         shiny::fileInput(ns("up_output_old"), "Previous output .nc", accept = ".nc"),
         shiny::fileInput(ns("up_catch"), "CATCH.nc", accept = ".nc"),
+        shiny::fileInput(ns("up_prod"), "PROD.nc", accept = ".nc"),
         shiny::fileInput(ns("up_init"), "Initial .nc", accept = ".nc"),
         shiny::fileInput(ns("up_biom"), "BiomIndx.txt", accept = ".txt"),
         shiny::fileInput(ns("up_diet"), "DietCheck.txt", accept = ".txt"),
@@ -358,7 +382,8 @@ project_sidebar_ui <- function(id) {
         shiny::fileInput(ns("up_bgm"), "BGM", accept = ".bgm"),
         shiny::fileInput(ns("up_smort"), "SpecificMort.txt", accept = ".txt"),
         shiny::fileInput(ns("up_pmort"), "SpecificPredMort.txt", accept = ".txt"),
-        shiny::fileInput(ns("up_ext_catch"), "External catch CSV", accept = ".csv")
+        shiny::fileInput(ns("up_ext_catch"), "External catch CSV", accept = ".csv"),
+        shiny::fileInput(ns("up_obs"), "Observations CSV", accept = ".csv")
       )
     )
   )
@@ -369,7 +394,8 @@ project_server <- function(id) {
     rv <- shiny::reactiveValues(
       ready = FALSE,
       paths = empty_paths(),
-      data = NULL
+      data = NULL,
+      ensemble = NULL
     )
 
     collect_uploads <- function() {
@@ -379,6 +405,7 @@ project_server <- function(id) {
         output_nc = upload_path(input$up_output),
         output_nc_old = upload_path(input$up_output_old),
         catch_nc = upload_path(input$up_catch),
+        prod_nc = upload_path(input$up_prod),
         init_nc = upload_path(input$up_init),
         biomindx = upload_path(input$up_biom),
         dietcheck = upload_path(input$up_diet),
@@ -389,8 +416,28 @@ project_server <- function(id) {
         bgm = upload_path(input$up_bgm),
         specific_mort = upload_path(input$up_smort),
         specific_pred_mort = upload_path(input$up_pmort),
-        ext_catch = upload_path(input$up_ext_catch)
+        ext_catch = upload_path(input$up_ext_catch),
+        obs_csv = upload_path(input$up_obs)
       )
+    }
+
+    build_ensemble <- function(loaded, folder) {
+      runs <- list()
+      runs[[1]] <- list(
+        label = "Current",
+        folder = folder,
+        paths = loaded$paths,
+        biomindx = loaded$biomindx,
+        yoy = loaded$yoy,
+        ssb = loaded$ssb,
+        catch_nc = loaded$nc_catch
+      )
+      extra <- trimws(unlist(strsplit(as.character(input$extra_folders), "\n")))
+      extra <- extra[nzchar(extra) & dir.exists(extra)]
+      for (f in extra) {
+        runs[[length(runs) + 1]] <- load_run_lite(f)
+      }
+      runs
     }
 
     try_autoload <- function() {
@@ -402,6 +449,7 @@ project_server <- function(id) {
       if (is.null(loaded) || is.null(loaded$grp)) return()
       rv$paths <- paths
       rv$data <- loaded
+      rv$ensemble <- build_ensemble(loaded, folder)
       rv$ready <- TRUE
     }
 
@@ -445,6 +493,7 @@ project_server <- function(id) {
       if (is.null(loaded)) return()
       rv$paths <- paths
       rv$data <- loaded
+      rv$ensemble <- build_ensemble(loaded, folder)
       rv$ready <- !is.null(loaded$grp)
       msg <- if (length(loaded$errors)) {
         paste("Loaded with notes:", paste(loaded$errors, collapse = "; "))

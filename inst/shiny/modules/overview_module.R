@@ -19,6 +19,12 @@ overview_server <- function(id, project) {
       biomass_health(dat$biomindx, dat$grp)
     })
 
+    cohorts <- shiny::reactive({
+      dat <- project$data
+      shiny::req(dat, dat$grp, dat$nc_out)
+      problem_cohorts(dat$nc_out, dat$grp, ACCEPT_BAND)
+    })
+
     output$cards <- shiny::renderUI({
       if (!isTRUE(project$ready) || is.null(project$data)) {
         return(bslib::card(
@@ -35,9 +41,11 @@ overview_server <- function(id, project) {
       flags <- tryCatch(health(), error = function(e) NULL)
       n_ext <- if (is.null(flags)) NA else sum(flags$Flag == "Extinct (<1%)")
       n_exp <- if (is.null(flags)) NA else sum(flags$Flag == "Exploding (>10x)")
+      coh <- tryCatch(cohorts(), error = function(e) NULL)
+      n_coh <- if (is.null(coh)) NA else sum(coh$Flag == "Outside band")
 
       bslib::layout_column_wrap(
-        width = 1/5,
+        width = 1/6,
         fill = FALSE,
         bslib::value_box(
           title = "Groups on",
@@ -66,6 +74,11 @@ overview_server <- function(id, project) {
           title = "Exploding (>10x)",
           value = ifelse(is.na(n_exp), "—", n_exp),
           theme = if (!is.na(n_exp) && n_exp > 0) "warning" else "success"
+        ),
+        bslib::value_box(
+          title = "Problem cohorts",
+          value = ifelse(is.na(n_coh), "—", n_coh),
+          theme = if (!is.na(n_coh) && n_coh > 0) "warning" else "success"
         )
       )
     })
@@ -94,6 +107,21 @@ overview_server <- function(id, project) {
             bslib::card_header("Group health (final / initial biomass)"),
             bslib::card_body(DT::dataTableOutput(ns("health_table")))
           )
+        },
+        if (is.null(dat$nc_out)) {
+          bslib::card(
+            bslib::card_header("Problem cohorts"),
+            bslib::card_body("Load the biology output NetCDF to flag age classes whose mean StructN or ResN at the end of the run sits outside 0.5–1.5 of the initial value.")
+          )
+        } else {
+          bslib::card(
+            bslib::card_header("Problem cohorts (StructN / ResN relative to t0)"),
+            bslib::card_body(
+              shiny::p(class = "ra-muted",
+                       "Age classes outside the 0.5–1.5 band at the last time step. The same band is drawn on Compare relative views."),
+              DT::dataTableOutput(ns("cohort_table"))
+            )
+          )
         }
       )
     })
@@ -108,6 +136,19 @@ overview_server <- function(id, project) {
         rownames = FALSE,
         filter = "top",
         options = list(pageLength = 20, order = list(list(5, "desc")))
+      )
+    })
+
+    output$cohort_table <- DT::renderDataTable({
+      tbl <- cohorts()
+      tbl$Relative <- round(tbl$Relative, 3)
+      tbl$Initial <- signif(tbl$Initial, 4)
+      tbl$Final <- signif(tbl$Final, 4)
+      DT::datatable(
+        tbl,
+        rownames = FALSE,
+        filter = "top",
+        options = list(pageLength = 15, order = list(list(7, "desc")))
       )
     })
   })

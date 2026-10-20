@@ -20,11 +20,13 @@ compare_body_ui <- function(ns, grp) {
       selectInput(ns("group_type"), "Group type", choices = types, selected = "All"),
       textInput(ns("search"), "Search code or name", placeholder = "COD, haddock…"),
       checkboxInput(ns("relative"), "Relative to initial (Bt/B0)", FALSE),
+      checkboxInput(ns("show_band"), "0.5–1.5 acceptable band", TRUE),
       hr(),
       selectInput(ns("view"), "View",
                   choices = c("Small multiples" = "facets",
                               "One group, totals" = "total",
-                              "By age class" = "age")),
+                              "By age class" = "age",
+                              "Age structure (bars)" = "age_bars")),
       conditionalPanel(
         "input.view == 'total'", ns = ns,
         selectInput(ns("fg_total"), "Functional group", choices = as.character(grp$code)),
@@ -34,7 +36,7 @@ compare_body_ui <- function(ns, grp) {
         checkboxInput(ns("limit_axis"), "Limit axis", TRUE)
       ),
       conditionalPanel(
-        "input.view == 'age'", ns = ns,
+        "input.view == 'age' || input.view == 'age_bars'", ns = ns,
         selectInput(ns("fg_age"), "Functional group", choices = codes),
         checkboxInput(ns("show_biomass_age"), "Biomass", TRUE),
         checkboxInput(ns("show_numbers_age"), "Numbers", FALSE),
@@ -133,6 +135,8 @@ compare_server <- function(id, project = NULL) {
         else plotOutput(ns("plot_facets_gg"), height = "760px")
       } else if (view == "total") {
         plotOutput(ns("plot_total"), height = "560px")
+      } else if (view == "age_bars") {
+        plotOutput(ns("plot_age_bars"), height = "640px")
       } else {
         plotOutput(ns("plot_age"), height = "640px")
       }
@@ -152,6 +156,31 @@ compare_server <- function(id, project = NULL) {
       p <- p + theme_reactiveatlantis()
       if (isTRUE(input$relative)) {
         p <- p + ggplot2::coord_cartesian(ylim = relative_axis_ylim(df[[ycol]]))
+        if (isTRUE(input$show_band) && nrow(df) > 0) {
+          p <- acceptable_band_layer(p, ACCEPT_BAND[1], ACCEPT_BAND[2],
+                                     xmin = min(df$Time), xmax = max(df$Time))
+        }
+      } else {
+        obs <- project$data$observations
+        df$Code <- code_from_fg_label(as.character(df$FG))
+        sub <- obs_for(obs, unique(df$Code), "Biomass")
+        if (!is.null(sub) && nrow(sub) > 0) {
+          lookup <- unique(data.frame(Code = df$Code, FG = df$FG, stringsAsFactors = FALSE))
+          sub$FG <- lookup$FG[match(sub$Code, lookup$Code)]
+          sub <- sub[!is.na(sub$FG), , drop = FALSE]
+          if (nrow(sub) > 0 && any(is.finite(sub$Lower) & is.finite(sub$Upper))) {
+            p <- p + ggplot2::geom_ribbon(
+              data = sub, ggplot2::aes(x = Time, ymin = Lower, ymax = Upper),
+              inherit.aes = FALSE, fill = "#C4A35A", alpha = 0.25
+            )
+          }
+          if (nrow(sub) > 0) {
+            p <- p + ggplot2::geom_point(
+              data = sub, ggplot2::aes(x = Time, y = Value),
+              inherit.aes = FALSE, colour = "#A33B20", size = 1.8
+            )
+          }
+        }
       }
       p
     }
@@ -180,7 +209,17 @@ compare_server <- function(id, project = NULL) {
       p <- plot_total_data(total_data, dat$time_dates, FALSE, FALSE,
                            isTRUE(input$show_numbers), isTRUE(input$show_biomass),
                            isTRUE(input$scaled), isTRUE(input$limit_axis))
-      if (inherits(p, "ggplot")) p + theme_reactiveatlantis() else p
+      if (inherits(p, "ggplot")) {
+        p <- p + theme_reactiveatlantis()
+        if (isTRUE(input$scaled) && isTRUE(input$show_band)) {
+          p <- acceptable_band_layer(p, ACCEPT_BAND[1], ACCEPT_BAND[2],
+                                     xmin = min(dat$time_dates), xmax = max(dat$time_dates))
+        }
+        if (!isTRUE(input$scaled)) {
+          p <- add_obs_overlay(p, dat$observations, input$fg_total, "Biomass")
+        }
+        p
+      } else p
     })
 
     output$plot_age <- renderPlot({
@@ -200,7 +239,51 @@ compare_server <- function(id, project = NULL) {
       p <- plot_cohorts_ggplot(coho, dat$time_dates, FALSE, FALSE,
                               isTRUE(input$show_numbers_age), isTRUE(input$show_biomass_age),
                               isTRUE(input$scaled_age), isTRUE(input$limit_axis_age), n.coh)
-      if (inherits(p, "ggplot")) p + theme_reactiveatlantis() else p
+      if (inherits(p, "ggplot")) {
+        p <- p + theme_reactiveatlantis()
+        if (isTRUE(input$scaled_age) && isTRUE(input$show_band)) {
+          p <- acceptable_band_layer(p, ACCEPT_BAND[1], ACCEPT_BAND[2],
+                                     xmin = min(dat$time_dates), xmax = max(dat$time_dates))
+        }
+        p
+      } else p
+    })
+
+    output$plot_age_bars <- renderPlot({
+      dat <- project$data
+      req(dat$nc_out, input$fg_age, dat$inf_box, dat$time_dates)
+      mg2t <- 0.00000002
+      x.cn <- 5.7
+      coho <- nitro.weight(dat$nc_out, dat$grp, FG = input$fg_age, By = "Cohort",
+                          dat$inf_box, mg2t, x.cn)
+      use_num <- isTRUE(input$show_numbers_age) && !isTRUE(input$show_biomass_age)
+      src <- if (use_num) coho$Numbers else coho$Biomass
+      req(!is.null(src), length(src) > 0)
+      n.coh <- length(src)
+      rows <- lapply(seq_len(n.coh), function(i) {
+        vals <- as.numeric(unlist(src[[i]]))
+        data.frame(
+          Time = dat$time_dates[seq_along(vals)],
+          Value = vals,
+          Age = sprintf("Age%02d", i),
+          stringsAsFactors = FALSE
+        )
+      })
+      plot_df <- do.call(rbind, rows)
+      ylab <- if (use_num) "Numbers" else "Biomass (tons)"
+      n_t <- length(unique(plot_df$Time))
+      p <- ggplot2::ggplot(plot_df, ggplot2::aes(x = Time, y = Value, fill = Age))
+      if (n_t <= 40) {
+        p <- p + ggplot2::geom_col(position = "stack", width = 20)
+      } else {
+        p <- p + ggplot2::geom_area(position = "stack")
+      }
+      pal <- get_mortality_colors(n.coh)
+      names(pal) <- sprintf("Age%02d", seq_len(n.coh))
+      p <- p + ggplot2::scale_fill_manual(values = pal)
+      p <- p + ggplot2::labs(title = paste("Age structure —", input$fg_age),
+                             x = "Year", y = ylab)
+      p + theme_reactiveatlantis()
     })
   })
 }
