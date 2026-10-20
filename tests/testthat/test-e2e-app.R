@@ -186,6 +186,49 @@ e2e_chrome <- function() {
   chrome_dir
 }
 
+http_status <- function(base, path) {
+  u <- paste0(sub("/$", "", base), "/", gsub("^/", "", path))
+  h <- tryCatch(curlGetHeaders(u, redirect = TRUE), error = function(e) character())
+  if (length(h) < 1) return(NA_integer_)
+  codes <- as.integer(sub("^HTTP/[^ ]+ ([0-9]+).*", "\\1", h[grepl("^HTTP/", h)]))
+  codes <- codes[is.finite(codes)]
+  if (length(codes) == 0) NA_integer_ else tail(codes, 1)
+}
+
+test_that("favicon and logo return HTTP 200", {
+  e2e_chrome()
+  root <- ra_pkg_root()
+  shot_dir <- file.path(tempdir(), "ra_e2e_brand_shots")
+  dir.create(shot_dir, showWarnings = FALSE)
+  app <- shinytest2::AppDriver$new(
+    app_dir = file.path(root, "inst", "shiny"),
+    name = "reactiveatlantis-brand",
+    height = 800,
+    width = 1400,
+    load_timeout = 40000,
+    timeout = 15000
+  )
+  on.exit(try(app$stop(), silent = TRUE), add = TRUE)
+  app$wait_for_idle(timeout = 15000)
+  base <- app$get_url()
+  expect_equal(http_status(base, "favicon.ico"), 200L)
+  expect_equal(http_status(base, "app-icon-32.png"), 200L)
+  expect_equal(http_status(base, "app-icon-180.png"), 200L)
+  expect_equal(http_status(base, "app-icon-192.png"), 200L)
+  expect_equal(http_status(base, "logo-transparent-128.png"), 200L)
+  expect_equal(http_status(base, "site.webmanifest"), 200L)
+  html <- app$get_html("html")
+  expect_true(grepl("favicon.ico", html, fixed = TRUE))
+  expect_true(grepl("app-icon-32.png", html, fixed = TRUE))
+  expect_true(grepl("app-icon-180.png", html, fixed = TRUE))
+  expect_true(grepl("logo-transparent-128.png", html, fixed = TRUE))
+  expect_true(grepl("ra-brand-logo", html, fixed = TRUE))
+  save_shot(app, shot_dir, "navbar_light")
+  app$get_js("document.documentElement.setAttribute('data-bs-theme', 'dark'); true;")
+  app$wait_for_idle(timeout = 5000)
+  save_shot(app, shot_dir, "navbar_dark")
+})
+
 test_that("North Sea real names load COD into every group tab", {
   fx <- northsea_fixture_dir()
   skip_if_not(dir.exists(fx) && file.exists(file.path(fx, "functionalGroups.csv")),

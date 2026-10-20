@@ -48,12 +48,28 @@ source(file.path(app_dir, "modules", "consumption_module.R"))
 source(file.path(app_dir, "modules", "physics_module.R"))
 source(file.path(app_dir, "modules", "ensemble_module.R"))
 
+ra_navbar_title <- tags$span(
+  class = "ra-brand",
+  tags$img(
+    src = "logo-transparent-128.png",
+    alt = "ReactiveAtlantis",
+    class = "ra-brand-logo"
+  ),
+  tags$span("ReactiveAtlantis", class = "ra-brand-text")
+)
+
 ui <- page_navbar(
-  title = "ReactiveAtlantis",
+  title = ra_navbar_title,
   window_title = "ReactiveAtlantis",
   theme = ra_theme(),
   fillable = FALSE,
-  header = tags$head(tags$link(rel = "stylesheet", type = "text/css", href = "custom.css")),
+  header = tags$head(
+    tags$link(rel = "stylesheet", type = "text/css", href = "custom.css"),
+    tags$link(rel = "icon", type = "image/x-icon", href = "favicon.ico"),
+    tags$link(rel = "icon", type = "image/png", sizes = "32x32", href = "app-icon-32.png"),
+    tags$link(rel = "apple-touch-icon", sizes = "180x180", href = "app-icon-180.png"),
+    tags$link(rel = "manifest", href = "site.webmanifest")
+  ),
   sidebar = sidebar(
     title = "Run",
     width = 340,

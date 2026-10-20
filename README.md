@@ -1,4 +1,4 @@
-# ReactiveAtlantis
+# ReactiveAtlantis <img src="man/figures/logo.png" align="right" alt="ReactiveAtlantis logo" width="120" />
 
 Calibration tools for Atlantis ecosystem models, in one Shiny app.
 

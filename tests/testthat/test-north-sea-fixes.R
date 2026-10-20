@@ -1390,6 +1390,31 @@ test_that("app.R sources the new analysis modules", {
   expect_true(grepl("consumption_ui", txt, fixed = TRUE))
   expect_true(grepl("physics_ui", txt, fixed = TRUE))
   expect_true(grepl("ensemble_ui", txt, fixed = TRUE))
+  expect_true(grepl("favicon.ico", txt, fixed = TRUE))
+  expect_true(grepl("app-icon-32.png", txt, fixed = TRUE))
+  expect_true(grepl("app-icon-180.png", txt, fixed = TRUE))
+  expect_true(grepl("site.webmanifest", txt, fixed = TRUE))
+  expect_true(grepl("logo-transparent-128.png", txt, fixed = TRUE))
+})
+
+test_that("approved branding files are present and unaltered copies", {
+  www <- file.path(root, "inst", "shiny", "www")
+  fig <- file.path(root, "man", "figures", "logo.png")
+  need <- c("favicon.ico", "app-icon-32.png", "app-icon-180.png",
+            "app-icon-192.png", "logo-transparent-128.png",
+            "logo-transparent-256.png", "site.webmanifest")
+  for (nm in need) {
+    p <- file.path(www, nm)
+    expect_true(file.exists(p), info = nm)
+    expect_gt(file.size(p), 100)
+  }
+  expect_true(file.exists(fig))
+  expect_equal(unname(tools::md5sum(fig)),
+               unname(tools::md5sum(file.path(www, "logo-transparent-256.png"))))
+  man <- paste(readLines(file.path(www, "site.webmanifest")), collapse = " ")
+  expect_true(grepl("app-icon-192.png", man, fixed = TRUE))
+  readme <- paste(readLines(file.path(root, "README.md")), collapse = "\n")
+  expect_true(grepl("man/figures/logo.png", readme, fixed = TRUE))
 })
 
 test_that("lite load_project does not open NetCDF or DietCheck", {

@@ -22,6 +22,33 @@ body {
   font-weight: 600;
 }
 
+.navbar-brand .ra-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.ra-brand-logo {
+  height: 32px;
+  width: 32px;
+  display: block;
+  flex: 0 0 auto;
+  object-fit: contain;
+}
+
+.ra-brand-text {
+  line-height: 1;
+}
+
+/* Transparent cyan A stays readable on the navy navbar in both themes. */
+[data-bs-theme="dark"] .navbar {
+  background-color: var(--ra-navy, #0B3C5D);
+}
+
+[data-bs-theme="dark"] .ra-brand-logo {
+  background: transparent;
+}
+
 .card {
   border: 1px solid rgba(11, 60, 93, 0.08);
   box-shadow: 0 1px 2px rgba(27, 40, 51, 0.04);
