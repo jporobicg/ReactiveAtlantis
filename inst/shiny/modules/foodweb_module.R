@@ -25,7 +25,9 @@ foodweb_ui <- function(id) {
                       value = 4, min = 1, max = 10, step = 1),
           numericInput(ns("min_proportion"), "Min Proportion:", 
                       value = 0.01, min = 0.001, max = 1, step = 0.001),
-          selectInput(ns("time_step"), "Time Step:", choices = NULL),
+          sliderInput(ns("time_step"), "Time (days):",
+                     min = 0, max = 1, value = 0, step = 1),
+          textOutput(ns("time_step_label")),
           selectInput(ns("stock"), "Stock:", choices = NULL),
           conditionalPanel(
             condition = "output.has_bypol",
@@ -78,7 +80,9 @@ foodweb_server <- function(id) {
       stk = NULL,
       pol = NULL,
       time.stp = NULL,
-      lag = NULL
+      time_vals = NULL,
+      lag = NULL,
+      fg_palette = NULL
     )
     
     output$data_loaded <- reactive({ rv$data_loaded })
@@ -106,7 +110,7 @@ foodweb_server <- function(id) {
         
         time.vals <- sort(unique(dat$Time))
         time.stp <- range(time.vals)
-        lag <- if(length(time.vals) > 1) diff(time.vals)[1] else 1
+        lag <- if(length(time.vals) > 1) min(diff(time.vals)) else 1
         grp.dat <- utils::read.csv(input$grp_file$datapath)
         stk <- unique(dat$Stock)
         
@@ -119,6 +123,8 @@ foodweb_server <- function(id) {
         
         code.fg <- grp.dat$Code[grp.dat$IsPredator > 0]
         
+        code_col <- if ("Code" %in% names(grp.dat)) grp.dat$Code else grp.dat$code
+        
         rv$dat <- dat
         rv$dat.bp <- dat.bp
         rv$grp.dat <- grp.dat
@@ -126,14 +132,18 @@ foodweb_server <- function(id) {
         rv$stk <- stk
         rv$pol <- pol
         rv$time.stp <- time.stp
+        rv$time_vals <- time.vals
         rv$lag <- lag
+        rv$fg_palette <- build_fg_palette(code_col)
         rv$data_loaded <- TRUE
         
         updateSelectInput(session, "focal_fg", choices = c('All', as.character(code.fg)))
         updateSelectInput(session, "stock", choices = stk)
-        updateSelectInput(session, "time_step",
-                         choices = setNames(as.character(time.vals), as.character(time.vals)),
-                         selected = as.character(time.vals[1]))
+        updateSliderInput(session, "time_step",
+                         min = min(time.vals),
+                         max = max(time.vals),
+                         value = time.vals[1],
+                         step = lag)
         
         if(!is.null(pol)){
           updateSelectInput(session, "polygon", choices = pol)
@@ -147,11 +157,17 @@ foodweb_server <- function(id) {
       })
     })
     
+    output$time_step_label <- renderText({
+      req(rv$time_vals, input$time_step)
+      tstep <- nearest_time(as.numeric(input$time_step), rv$time_vals)
+      paste("Selected time:", tstep, "days")
+    })
+    
     time_prey_data <- reactive({
-      req(rv$dat, input$time_step, input$stock)
+      req(rv$dat, input$time_step, input$stock, rv$time_vals)
       
-      tstep <- as.numeric(input$time_step)
-      if(input$use_polygon && !is.null(rv$dat.bp)){
+      tstep <- nearest_time(as.numeric(input$time_step), rv$time_vals)
+      if(isTRUE(input$use_polygon) && !is.null(rv$dat.bp)){
         req(input$polygon)
         rv$dat.bp[rv$dat.bp$Time == tstep & rv$dat.bp$Box == input$polygon, c(2, 6:ncol(rv$dat.bp))]
       } else {
@@ -174,9 +190,10 @@ foodweb_server <- function(id) {
       req(trophic_data(), prey_data())
       
       color.p <- get_foodweb_colors()
-      poly_label <- if(input$use_polygon && !is.null(input$polygon)) input$polygon else NULL
+      poly_label <- if(isTRUE(input$use_polygon) && !is.null(input$polygon)) input$polygon else NULL
       
-      plot.tlvl(trophic_data(), prey_data(), input$focal_fg, pol = poly_label, color.p)
+      plot.tlvl(trophic_data(), prey_data(), input$focal_fg, pol = poly_label, color.p,
+                fg_colors = rv$fg_palette)
     })
     
     output$trophic_table <- DT::renderDataTable({
@@ -320,7 +337,7 @@ trophic.lvl <- function(rel.prey, grp.dat){
   return(TL)
 }
 
-plot.tlvl <- function(T.lvl, rel.prey, foc.fg, pol = NULL, color.p){
+plot.tlvl <- function(T.lvl, rel.prey, foc.fg, pol = NULL, color.p, fg_colors = NULL){
   rad <- 0.25
   y.lab <- "Trophic-level"
   if(!is.null(pol)) y.lab <- paste0("Trophic-level at polygon ", as.numeric(pol))
@@ -336,10 +353,20 @@ plot.tlvl <- function(T.lvl, rel.prey, foc.fg, pol = NULL, color.p){
     lines(x, y, lty = 1, lwd = (rel.prey$value[i] * 3), col = col)
   }
   for(i in 1:nrow(T.lvl)){
+    fg <- as.character(T.lvl$FG[i])
+    node_col <- if (!is.null(fg_colors) && fg %in% names(fg_colors)) {
+      unname(fg_colors[fg])
+    } else if (i == 1 && foc.fg != 'All') {
+      'steelblue'
+    } else {
+      'gray91'
+    }
+    rgb <- grDevices::col2rgb(node_col)
+    lum <- 0.299 * rgb[1, 1] + 0.587 * rgb[2, 1] + 0.114 * rgb[3, 1]
+    txt_col <- if (lum < 140) "white" else "black"
     plotrix::draw.circle(T.lvl$vpos[i], T.lvl$Tlevel[i], radius = rad, nv = 1500, border = NULL,
-                        col = ifelse(i == 1 && foc.fg != 'All', 'steelblue', 'gray91'), lty = 1, lwd = 1)
-    text(T.lvl$vpos[i], T.lvl$Tlevel[i], T.lvl$FG[i], cex = .8, font = 2, 
-         col = ifelse(i == 1 && foc.fg != 'All', 'white', 1))
+                        col = node_col, lty = 1, lwd = 1)
+    text(T.lvl$vpos[i], T.lvl$Tlevel[i], T.lvl$FG[i], cex = .8, font = 2, col = txt_col)
   }
   legend('topright', c('DownTop', 'TopDown'), lty = 1, col = c(color.p[1], color.p[2]), lwd = 1.5, bty = 'n')
 }
