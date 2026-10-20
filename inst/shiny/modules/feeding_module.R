@@ -4,117 +4,101 @@
 
 feeding_ui <- function(id) {
   ns <- NS(id)
-  
-  fluidPage(
-    titlePanel("Predator-Prey Feeding Matrix"),
-    
-    sidebarLayout(
-      sidebarPanel(
-        width = 3,
-        fileInput(ns("prm_file"), "Parameters File (.prm)", accept = ".prm"),
-        fileInput(ns("grp_file"), "Groups CSV", accept = ".csv"),
-        fileInput(ns("nc_file"), "Initial Conditions (.nc)", accept = ".nc"),
-        actionButton(ns("load_data"), "Load Data", class = "btn-primary btn-block"),
-        hr(),
-        conditionalPanel(
-          condition = "output.data_loaded",
-          ns = ns,
-          h5("Matrix Options"),
-          selectInput(ns("view_type"), "View Type",
-                     choices = c("Availability matrix" = "availability",
-                               "Overlap matrix" = "overlap",
-                               "Effective predation" = "effective",
-                               "Predation pressure" = "pressure")),
-          selectInput(ns("predator"), "Predator row:", choices = NULL),
-          selectInput(ns("prey"), "Prey column:", choices = NULL)
-        )
-      ),
-      
-      mainPanel(
-        width = 9,
-        conditionalPanel(
-          condition = "!output.data_loaded",
-          ns = ns,
-          div(
-            class = "alert alert-info",
-            style = "margin-top: 50px;",
-            icon("info-circle"),
-            " Load the biology parameter file, groups CSV, and initial-conditions NetCDF to inspect the pPREY matrix, gape overlap, and effective predation."
-          )
-        ),
-        conditionalPanel(
-          condition = "output.data_loaded",
-          ns = ns,
-          div(
-            style = "overflow: auto; width: 100%;",
-            plotOutput(ns("feeding_plot"), height = "800px")
-          )
-        )
-      )
-    )
+  tagList(uiOutput(ns("body")))
+}
+
+feeding_body_ui <- function(ns, ava_mat) {
+  preds <- rownames(ava_mat)
+  preys <- colnames(ava_mat)
+  layout_sidebar(
+    sidebar = sidebar(
+      width = 280, open = "open",
+      selectInput(ns("view_type"), "View",
+                  choices = c("Availability (pPREY)" = "availability",
+                              "Gape overlap" = "overlap",
+                              "Gape mismatch (pPREY>0, overlap=0)" = "mismatch",
+                              "Effective predation" = "effective",
+                              "Predation pressure" = "pressure")),
+      textInput(ns("pred_search"), "Predator search", placeholder = "pPREY1COD…"),
+      textInput(ns("prey_search"), "Prey search", placeholder = "HAD, COD…"),
+      selectInput(ns("predator"), "Highlight predator", choices = c("", preds)),
+      selectInput(ns("prey"), "Highlight prey", choices = c("", preys)),
+      p(class = "ra-muted",
+        "Cells outlined in navy are the classic calibration bug: pPREY is positive but gape overlap is zero, so that diet link never fires.")
+    ),
+    uiOutput(ns("plot_host")),
+    DT::dataTableOutput(ns("bug_table"))
   )
 }
 
-feeding_server <- function(id) {
+feeding_server <- function(id, project = NULL) {
   moduleServer(id, function(input, output, session) {
     rv <- reactiveValues(
-      data_loaded = FALSE,
-      ava_mat = NULL,
-      overlap_mat = NULL,
-      real_feed = NULL,
-      pressure = NULL,
-      grp = NULL
+      ava_mat = NULL, overlap_mat = NULL, real_feed = NULL,
+      pressure = NULL, bugs = NULL, built = FALSE, token = NULL
     )
-    
-    output$data_loaded <- reactive({ rv$data_loaded })
-    outputOptions(output, "data_loaded", suspendWhenHidden = FALSE)
-    
-    observeEvent(input$load_data, {
-      req(input$prm_file, input$grp_file, input$nc_file)
-      
-      tryCatch({
-        showNotification("Loading feeding matrix data...", type = "message", id = "load_feed", duration = NULL)
-        
-        grp <- read.csv(input$grp_file$datapath)
-        names(grp) <- tolower(names(grp))
-        if(any(grepl('invertype', names(grp)))){
-          names(grp)[which(grepl('invertype', names(grp)))] <- 'grouptype'
-        }
-        prm <- readLines(input$prm_file$datapath, warn = FALSE)
-        
-        options(warn = -1)
-        ava_mat <- text2num(prm, 'pPREY', Vector = TRUE, pprey = TRUE)
-        options(warn = 0)
-        
-        if(is.null(ava_mat) || !is.matrix(ava_mat) || nrow(ava_mat) == 0){
-          stop("Could not find a pPREY matrix in the parameter file")
-        }
-        
-        n_col <- ncol(ava_mat)
-        expected <- c(as.character(grp$code), 'DLsed', 'DRsed', 'DCsed')
-        if(n_col == length(expected)){
-          colnames(ava_mat) <- expected
-        } else if(n_col == length(grp$code)){
-          colnames(ava_mat) <- as.character(grp$code)
-        } else if(is.null(colnames(ava_mat))){
-          colnames(ava_mat) <- paste0("Prey", seq_len(n_col))
-        }
-        
-        bio <- feed_bio_struct(input$nc_file$datapath, grp)
+
+    output$body <- renderUI({
+      if (is.null(project) || !isTRUE(project$ready)) {
+        return(tool_missing_card(FILE_LABELS[TOOL_REQUIREMENTS$feeding], "Feeding"))
+      }
+      miss <- tool_missing(project$paths, "feeding")
+      if (length(miss)) return(tool_missing_card(miss, "Feeding"))
+      if (is.null(rv$ava_mat)) {
+        return(bslib::card(bslib::card_header("Feeding matrix"),
+                           bslib::card_body("Building pPREY and gape overlap…")))
+      }
+      feeding_body_ui(session$ns, rv$ava_mat)
+    })
+
+    observe({
+      req(!is.null(project), isTRUE(project$ready), project$data)
+      miss <- tool_missing(project$paths, "feeding")
+      token <- paste(unlist(project$paths), collapse = "|")
+      if (length(miss) || (isTRUE(rv$built) && identical(rv$token, token))) return()
+      rv$token <- token
+      dat <- project$data
+      req(dat$grp, dat$prm_bio)
+      init_path <- project$paths$init_nc
+      req(path_ok(init_path))
+      grp <- dat$grp
+      if (any(grepl("invertype", names(grp)))) {
+        names(grp)[which(grepl("invertype", names(grp)))] <- "grouptype"
+      }
+      prm <- dat$prm_bio
+      options(warn = -1)
+      ava_mat <- text2num(prm, "pPREY", Vector = TRUE, pprey = TRUE)
+      options(warn = 0)
+      if (is.null(ava_mat) || !is.matrix(ava_mat) || nrow(ava_mat) == 0) {
+        shiny::showNotification("Could not find a pPREY matrix in the biology parameter file.",
+                                type = "error", duration = 10)
+        return()
+      }
+      n_col <- ncol(ava_mat)
+      expected <- c(as.character(grp$code), "DLsed", "DRsed", "DCsed")
+      if (n_col == length(expected)) {
+        colnames(ava_mat) <- expected
+      } else if (n_col == length(grp$code)) {
+        colnames(ava_mat) <- as.character(grp$code)
+      } else if (is.null(colnames(ava_mat))) {
+        colnames(ava_mat) <- paste0("Prey", seq_len(n_col))
+      }
+
+      built <- tryCatch({
+        bio <- feed_bio_struct(init_path, grp)
         gape_out <- gape.func(grp, bio$Struct, bio$Biom.N, prm)
         overlap_mat <- Over.mat.func(ava_mat, gape_out[[1]])
         bio.a <- Bio.ages(bio$Biom.N, gape_out[[2]], overlap_mat)
         bio.juv <- bio.a[[1]]
         bio.adl <- bio.a[[2]]
-        
         real.feed <- overlap_mat * NA
         pred <- row.names(overlap_mat)
-        for(pd in seq_len(nrow(overlap_mat))){
-          c.pred <- unlist(strsplit(pred[pd], 'pPREY'))[2]
-          predator <- gsub(pattern = "[[:digit:]]+", '\\1', c.pred)
+        for (pd in seq_len(nrow(overlap_mat))) {
+          c.pred <- unlist(strsplit(pred[pd], "pPREY"))[2]
+          predator <- gsub(pattern = "[[:digit:]]+", "\\1", c.pred)
           a.pred.prey <- as.numeric(unlist(strsplit(c.pred, predator)))
-          if(length(a.pred.prey) == 0 || is.na(a.pred.prey[2])) a.pred.prey[2] <- 2
-          if(a.pred.prey[2] == 1){
+          if (length(a.pred.prey) == 0 || is.na(a.pred.prey[2])) a.pred.prey[2] <- 2
+          if (a.pred.prey[2] == 1) {
             real.feed[pd, ] <- overlap_mat[pd, ] * as.numeric(bio.juv[, 2])
           } else {
             real.feed[pd, ] <- overlap_mat[pd, ] * as.numeric(bio.adl[, 2])
@@ -122,53 +106,106 @@ feeding_server <- function(id) {
         }
         real.feed <- real.feed * ava_mat
         pressure <- t((real.feed) / rowSums(real.feed, na.rm = TRUE)) * 100
-        
-        rv$ava_mat <- ava_mat
-        rv$overlap_mat <- overlap_mat
-        rv$real_feed <- real.feed
-        rv$pressure <- pressure
-        rv$grp <- grp
-        rv$data_loaded <- TRUE
-        
-        updateSelectInput(session, "predator", choices = rownames(ava_mat))
-        updateSelectInput(session, "prey", choices = colnames(ava_mat))
-        
-        removeNotification("load_feed")
-        showNotification("Data loaded successfully!", type = "message", duration = 3)
+        list(overlap = overlap_mat, real = real.feed, pressure = pressure)
       }, error = function(e) {
-        removeNotification("load_feed")
-        showNotification(paste("Error:", e$message), type = "error", duration = 10)
+        shiny::showNotification(paste("Feeding matrix:", e$message), type = "error", duration = 10)
+        NULL
       })
+      rv$ava_mat <- ava_mat
+      if (!is.null(built)) {
+        rv$overlap_mat <- built$overlap
+        rv$real_feed <- built$real
+        rv$pressure <- built$pressure
+        rv$bugs <- gape_mismatch_table(ava_mat, built$overlap)
+      }
+      rv$built <- TRUE
     })
-    
-    output$feeding_plot <- renderPlot({
-      req(rv$data_loaded, input$view_type)
-      
-      if(input$view_type == "availability"){
-        plot_feed_tile(t(rv$ava_mat), "Availability matrix (pPREY)",
-                      pal = "YlOrRd", legend = "Availability",
-                      highlight_pred = input$predator, highlight_prey = input$prey)
-      } else if(input$view_type == "overlap"){
-        t.o.mat <- t(rv$overlap_mat * rv$ava_mat)
+
+    filtered_mats <- reactive({
+      req(rv$ava_mat)
+      ava <- rv$ava_mat
+      pred_keep <- seq_len(nrow(ava))
+      prey_keep <- seq_len(ncol(ava))
+      if (!is.null(input$pred_search) && nzchar(trimws(input$pred_search))) {
+        pred_keep <- grep(trimws(input$pred_search), rownames(ava), ignore.case = TRUE)
+      }
+      if (!is.null(input$prey_search) && nzchar(trimws(input$prey_search))) {
+        prey_keep <- grep(trimws(input$prey_search), colnames(ava), ignore.case = TRUE)
+      }
+      if (length(pred_keep) == 0) pred_keep <- seq_len(nrow(ava))
+      if (length(prey_keep) == 0) prey_keep <- seq_len(ncol(ava))
+      list(
+        ava = ava[pred_keep, prey_keep, drop = FALSE],
+        overlap = if (is.null(rv$overlap_mat)) NULL else rv$overlap_mat[pred_keep, prey_keep, drop = FALSE],
+        real = if (is.null(rv$real_feed)) NULL else rv$real_feed[pred_keep, prey_keep, drop = FALSE],
+        pressure = if (is.null(rv$pressure)) NULL else {
+          rv$pressure[prey_keep, pred_keep, drop = FALSE]
+        }
+      )
+    })
+
+    output$plot_host <- renderUI({
+      ns <- session$ns
+      n_pred <- if (is.null(rv$ava_mat)) 40 else nrow(filtered_mats()$ava)
+      h <- max(560, 16 * n_pred + 140)
+      if (requireNamespace("plotly", quietly = TRUE) && n_pred <= 80) {
+        plotly::plotlyOutput(ns("feeding_plot"), height = paste0(h, "px"))
+      } else {
+        plotOutput(ns("feeding_plot_gg"), height = paste0(h, "px"))
+      }
+    })
+
+    make_feed_plot <- function() {
+      mats <- filtered_mats()
+      req(mats$ava, input$view_type)
+      bugs <- if (is.null(mats$overlap)) NULL else gape_mismatch(mats$ava, mats$overlap)
+      hl_pred <- if (is.null(input$predator) || !nzchar(input$predator)) NULL else input$predator
+      hl_prey <- if (is.null(input$prey) || !nzchar(input$prey)) NULL else input$prey
+      if (input$view_type == "availability") {
+        plot_feed_tile(t(mats$ava), "Availability matrix (pPREY)",
+                       pal = "YlOrRd", legend = "Availability",
+                       highlight_pred = hl_pred, highlight_prey = hl_prey,
+                       mismatch = if (is.null(bugs)) NULL else t(bugs))
+      } else if (input$view_type == "overlap") {
+        t.o.mat <- t(mats$overlap * mats$ava)
         t.o.mat[t.o.mat > 0] <- 1
-        plot_feed_overlap(t.o.mat, input$predator, input$prey)
-      } else if(input$view_type == "effective"){
-        rff <- log(rv$real_feed)
+        plot_feed_overlap(t.o.mat, hl_pred, hl_prey)
+      } else if (input$view_type == "mismatch") {
+        if (is.null(bugs)) {
+          return(ggplot2::ggplot() + ggplot2::labs(title = "Gape overlap was not calculated") +
+                   theme_reactiveatlantis())
+        }
+        plot_feed_mismatch(t(bugs))
+      } else if (input$view_type == "effective") {
+        rff <- log(mats$real)
         rff[!is.finite(rff)] <- NA
         plot_feed_tile(t(rff), "Effective predation (log scale)",
-                      pal = "YlGnBu", legend = "Predation\nLn()",
-                      highlight_pred = input$predator, highlight_prey = input$prey)
+                       pal = "YlGnBu", legend = "Predation\nLn()",
+                       highlight_pred = hl_pred, highlight_prey = hl_prey,
+                       mismatch = if (is.null(bugs)) NULL else t(bugs))
       } else {
-        press <- rv$pressure
+        press <- mats$pressure
         press[!is.finite(press) | press == 0] <- NA
         plot_feed_tile(press, "Percentage of predation pressure",
-                      pal = "RdPu", legend = "% of diet",
-                      highlight_pred = input$predator, highlight_prey = input$prey,
-                      limits = c(0, 100))
+                       pal = "RdPu", legend = "% of diet",
+                       highlight_pred = hl_pred, highlight_prey = hl_prey,
+                       limits = c(0, 100))
       }
-    }, height = function(){
-      req(rv$ava_mat)
-      max(600, 18 * nrow(rv$ava_mat) + 160)
+    }
+
+    output$feeding_plot_gg <- renderPlot({ make_feed_plot() })
+    if (requireNamespace("plotly", quietly = TRUE)) {
+      output$feeding_plot <- plotly::renderPlotly({
+        ra_ggplotly(make_feed_plot(), n_series = 1, max_series = 80)
+      })
+    }
+
+    output$bug_table <- DT::renderDataTable({
+      bugs <- rv$bugs
+      if (is.null(bugs) || nrow(bugs) == 0) {
+        return(data.frame(Note = "No pPREY > 0 cells with zero gape overlap."))
+      }
+      DT::datatable(bugs, rownames = FALSE, options = list(pageLength = 8, dom = "tip"))
     })
   })
 }
@@ -389,7 +426,29 @@ Bio.ages <- function(Biom.N, age, Over.mat){
   list(bio.juv, bio.adl)
 }
 
-plot_feed_tile <- function(mat, title, pal, legend, highlight_pred, highlight_prey, limits = NULL){
+gape_mismatch <- function(ava_mat, overlap_mat) {
+  ava <- ava_mat > 0
+  ov <- overlap_mat == 0
+  ava & ov
+}
+
+gape_mismatch_table <- function(ava_mat, overlap_mat) {
+  bug <- gape_mismatch(ava_mat, overlap_mat)
+  if (!any(bug, na.rm = TRUE)) {
+    return(data.frame(Predator = character(), Prey = character(), pPREY = numeric(),
+                      stringsAsFactors = FALSE))
+  }
+  idx <- which(bug, arr.ind = TRUE)
+  data.frame(
+    Predator = rownames(ava_mat)[idx[, 1]],
+    Prey = colnames(ava_mat)[idx[, 2]],
+    pPREY = ava_mat[idx],
+    stringsAsFactors = FALSE
+  )
+}
+
+plot_feed_tile <- function(mat, title, pal, legend, highlight_pred, highlight_prey,
+                           limits = NULL, mismatch = NULL){
   dat <- reshape2::melt(mat, value.name = 'value')
   dat$value[dat$value == 0] <- NA
   if(is.null(limits)){
@@ -397,15 +456,27 @@ plot_feed_tile <- function(mat, title, pal, legend, highlight_pred, highlight_pr
     if(!is.finite(limits[2]) || limits[2] == 0) limits[2] <- 1
   }
   p <- ggplot2::ggplot(dat, ggplot2::aes(x = .data$Var1, y = .data$Var2, fill = .data$value))
-  p <- p + ggplot2::geom_tile(colour = "grey45", linewidth = 0.15)
+  p <- p + ggplot2::geom_tile(colour = "grey85", linewidth = 0.15)
   p <- p + ggplot2::scale_fill_distiller(palette = pal, limits = limits,
                                          name = legend, na.value = 'white', direction = 1)
-  p <- p + ggplot2::theme(panel.background = ggplot2::element_blank(),
-                          axis.text.x = ggplot2::element_text(angle = 90, hjust = 1, size = 7),
-                          axis.text.y = ggplot2::element_text(size = 7))
+  if (!is.null(mismatch) && any(mismatch, na.rm = TRUE)) {
+    bug <- reshape2::melt(mismatch, value.name = "bug")
+    bug <- bug[!is.na(bug$bug) & as.logical(bug$bug), , drop = FALSE]
+    if (nrow(bug) > 0) {
+      p <- p + ggplot2::geom_tile(
+        data = bug, ggplot2::aes(x = .data$Var1, y = .data$Var2),
+        fill = NA, colour = "#0B3C5D", linewidth = 0.55, inherit.aes = FALSE
+      )
+    }
+  }
+  p <- p + theme_reactiveatlantis()
+  p <- p + ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90, hjust = 1, size = 8),
+                          axis.text.y = ggplot2::element_text(size = 8),
+                          legend.position = "right",
+                          panel.grid = ggplot2::element_blank())
   p <- p + ggplot2::labs(x = 'Prey', y = 'Predator', title = title)
   p <- p + ggplot2::scale_x_discrete(position = "top")
-  if(!is.null(highlight_pred) && !is.null(highlight_prey)){
+  if(!is.null(highlight_pred) && !is.null(highlight_prey) && nzchar(highlight_pred) && nzchar(highlight_prey)){
     p <- p + ggplot2::annotate("rect",
                                xmin = which(levels(factor(dat$Var1)) == highlight_prey) - 0.5,
                                xmax = which(levels(factor(dat$Var1)) == highlight_prey) + 0.5,
@@ -415,14 +486,34 @@ plot_feed_tile <- function(mat, title, pal, legend, highlight_pred, highlight_pr
   p
 }
 
+plot_feed_mismatch <- function(bug_mat) {
+  dat <- reshape2::melt(bug_mat, value.name = "bug")
+  dat$Flag <- ifelse(!is.na(dat$bug) & as.logical(dat$bug), "pPREY>0, gape=0", "OK")
+  pal <- c("OK" = "#F7F4EC", "pPREY>0, gape=0" = "#A33B20")
+  p <- ggplot2::ggplot(dat, ggplot2::aes(x = .data$Var1, y = .data$Var2, fill = Flag))
+  p <- p + ggplot2::geom_tile(colour = "grey85", linewidth = 0.15)
+  p <- p + ggplot2::scale_fill_manual(values = pal)
+  p <- p + theme_reactiveatlantis()
+  p <- p + ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90, hjust = 1, size = 8),
+                          axis.text.y = ggplot2::element_text(size = 8),
+                          legend.position = "right",
+                          panel.grid = ggplot2::element_blank())
+  p <- p + ggplot2::labs(x = "Prey", y = "Predator",
+                         title = "pPREY positive but gape overlap is zero")
+  p <- p + ggplot2::scale_x_discrete(position = "top")
+  p
+}
+
 plot_feed_overlap <- function(t.o.mat, highlight_pred, highlight_prey){
-  col.tmp <- RColorBrewer::brewer.pal(11, 'RdBu')[c(6, 11)]
+  col.tmp <- c("0" = "#F7F4EC", "1" = "#1D7874")
   dat2 <- reshape2::melt(t.o.mat, value.name = 'value')
   p <- ggplot2::ggplot(dat2, ggplot2::aes(x = .data$Var1, y = .data$Var2, fill = factor(.data$value)))
-  p <- p + ggplot2::geom_tile(colour = 'grey45')
-  p <- p + ggplot2::theme(panel.background = ggplot2::element_blank(),
-                          axis.text.x = ggplot2::element_text(angle = 90, hjust = 1, size = 7),
-                          axis.text.y = ggplot2::element_text(size = 7))
+  p <- p + ggplot2::geom_tile(colour = 'grey85')
+  p <- p + theme_reactiveatlantis()
+  p <- p + ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90, hjust = 1, size = 8),
+                          axis.text.y = ggplot2::element_text(size = 8),
+                          legend.position = "right",
+                          panel.grid = ggplot2::element_blank())
   p <- p + ggplot2::labs(x = 'Prey', y = 'Predator', title = "Gape overlap")
   p <- p + ggplot2::scale_x_discrete(position = "top")
   p <- p + ggplot2::scale_fill_manual(values = col.tmp, name = 'Gape overlap',

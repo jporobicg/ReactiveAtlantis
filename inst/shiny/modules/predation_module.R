@@ -4,370 +4,169 @@
 
 predation_ui <- function(id) {
   ns <- NS(id)
-  
-  fluidPage(
-    titlePanel("Predation Analysis"),
-    
-    sidebarLayout(
-      sidebarPanel(
-        width = 3,
-        fileInput(ns("biom_file"), "Biomass File (BiomIndx.txt)", accept = ".txt"),
-        fileInput(ns("grp_csv"), "Groups CSV", accept = ".csv"),
-        fileInput(ns("diet_file"), "Diet File (DietCheck.txt)", accept = ".txt"),
-        fileInput(ns("age_biomass"), "Age Biomass [Optional]", accept = ".txt"),
-        actionButton(ns("load_data"), "Load Data", class = "btn-primary btn-block"),
-        hr(),
-        conditionalPanel(
-          condition = "output.data_loaded",
-          ns = ns,
-          h5("Analysis Options"),
-          selectInput(ns("analysis_type"), "Analysis Type",
-                     choices = c("Biomass Overview" = "biomass",
-                               "Predation Through Time" = "predation",
-                               "Predation by Age" = "age")),
-          conditionalPanel(
-            condition = "input.analysis_type == 'predation'",
-            ns = ns,
-            selectInput(ns("fg_pred"), "Functional Group:", choices = NULL),
-            selectInput(ns("stock_pred"), "Stock:", choices = NULL),
-            numericInput(ns("threshold_pred"), "Threshold:", value = 0.001, 
-                        min = 0, max = 1, step = 0.001),
-            checkboxInput(ns("scaled_pred"), "Scaled to 1", TRUE),
-            checkboxInput(ns("melt_time"), "Melt Time Step", FALSE)
-          ),
-          conditionalPanel(
-            condition = "input.analysis_type == 'age'",
-            ns = ns,
-            selectInput(ns("fg_age"), "Functional Group:", choices = NULL),
-            sliderInput(ns("time_age"), "Simulation Time:", min = 0, max = 100, value = 0, step = 1),
-            selectInput(ns("stock_age"), "Stock:", choices = NULL),
-            numericInput(ns("threshold_age"), "Threshold:", value = 0.001, 
-                        min = 0, max = 1, step = 0.001)
-          )
-        )
-      ),
-      
-      mainPanel(
-        width = 9,
-        conditionalPanel(
-          condition = "!output.data_loaded",
-          ns = ns,
-          div(
-            class = "alert alert-info",
-            style = "margin-top: 50px;",
-            icon("info-circle"),
-            " Please load your predation data files to begin analysis."
-          )
-        ),
-        conditionalPanel(
-          condition = "output.data_loaded",
-          ns = ns,
-          uiOutput(ns("analysis_output"))
-        )
-      )
-    )
-  )
+  tagList(uiOutput(ns("body")))
 }
 
-predation_server <- function(id) {
+predation_server <- function(id, project = NULL) {
   moduleServer(id, function(input, output, session) {
-    rv <- reactiveValues(
-      data_loaded = FALSE,
-      biom.tot = NULL,
-      rel.bio = NULL,
-      diet.data = NULL,
-      diet_full = NULL,
-      diet_time = NULL,
-      new.bio = NULL,
-      grp.codes = NULL,
-      grp.prd = NULL,
-      time = NULL,
-      stocks = NULL,
-      age.gr.pred = NULL,
-      col.nam = NULL,
-      g.col = NULL,
-      fg_palette = NULL
-    )
-    
-    output$data_loaded <- reactive({ rv$data_loaded })
-    outputOptions(output, "data_loaded", suspendWhenHidden = FALSE)
-    
-    observeEvent(input$load_data, {
-      req(input$biom_file, input$grp_csv, input$diet_file)
-      
-      tryCatch({
-        showNotification("Loading predation data...", type = "message", id = "load_pred", duration = NULL)
-        
-        cur.dat <- data.frame(data.table::fread(input$biom_file$datapath, header = TRUE, sep = ' ', showProgress = FALSE))
-        diet_raw <- data.table::fread(input$diet_file$datapath, header = TRUE, sep = ' ', showProgress = FALSE)
-        grp <- utils::read.csv(input$grp_csv$datapath, stringsAsFactors = FALSE)
-        
-        code_col <- if ("Code" %in% names(grp)) grp$Code else grp$code
-        on_col <- if ("IsTurnedOn" %in% names(grp)) grp$IsTurnedOn else grp$isturnedon
-        ncoh_col <- if ("NumCohorts" %in% names(grp)) grp$NumCohorts else grp$numcohorts
-        grp.prd <- code_col[on_col == 1 & ncoh_col > 1]
-        grp.codes <- code_col[on_col == 1]
-        fg_palette <- build_fg_palette(code_col)
-        
-        sub.cur <- cbind(cur.dat[c('Time', as.character(grp.codes))])
-        sp.name <- c("Time", paste0('Rel', grp.codes), "PelDemRatio", "PiscivPlankRatio")
-        sp.name2 <- c("Time", as.character(grp.codes))
-        
-        biom.tot <- reshape2::melt(cur.dat[, sp.name2], id.vars = 'Time')
-        rel.bio <- reshape2::melt(cur.dat[, sp.name], id.vars = 'Time')
-        names(biom.tot) <- c('Time', 'FG', 'Biomass')
-        names(rel.bio) <- c('Time', 'FG', 'RelBiom')
-        
-        diet_agg <- preaggregate_diet(diet_raw)
-        diet.data <- as.data.frame(diet_agg$diet_full)
-        
-        predators <- as.character(unique(diet.data$Predator))
-        time <- unique(diet.data$Time)
-        stocks <- unique(diet.data$Stock)
-        
-        sub.cur <- cbind(Time = sub.cur$Time, sub.cur[, names(sub.cur) %in% predators])
-        new.bio <- reshape2::melt(sub.cur, id = c('Time'))
-        colnames(new.bio) <- c('Time', 'Predator', 'Biomass')
-        new.bio$Predator <- as.character(new.bio$Predator)
-        
-        age.gr.pred <- NULL
-        col.nam <- NULL
-        if(!is.null(input$age_biomass)){
-          age.gr.pred <- data.frame(data.table::fread(input$age_biomass$datapath, header = TRUE, sep = ' ', showProgress = FALSE))
-          col.nam <- stringr::str_extract(names(age.gr.pred), "[aA-zZ]+")
-        }
-        
-        data.table::setDT(new.bio)
-        new.bio[, Predator := as.character(Predator)]
-        data.table::setkey(new.bio, Predator, Time)
-        
-        g.col <- data.frame(grp = names(fg_palette), col = unname(fg_palette), stringsAsFactors = FALSE)
-        
-        rv$biom.tot <- biom.tot
-        rv$rel.bio <- rel.bio
-        rv$diet.data <- diet.data
-        rv$diet_full <- diet_agg$diet_full
-        rv$diet_time <- diet_agg$diet_time
-        rv$new.bio <- new.bio
-        rv$grp.codes <- grp.codes
-        rv$grp.prd <- grp.prd
-        rv$time <- time
-        rv$stocks <- stocks
-        rv$age.gr.pred <- age.gr.pred
-        rv$col.nam <- col.nam
-        rv$g.col <- g.col
-        rv$fg_palette <- fg_palette
-        rv$data_loaded <- TRUE
-        
-        updateSelectInput(session, "fg_pred", choices = as.character(grp.codes))
-        updateSelectInput(session, "fg_age", choices = as.character(grp.codes))
-        updateSelectInput(session, "stock_pred", choices = stocks)
-        updateSelectInput(session, "stock_age", choices = stocks)
-        updateSliderInput(session, "time_age", min = min(time), max = max(time), 
-                         value = min(time), step = diff(time)[1])
-        
-        removeNotification("load_pred")
-        showNotification("Data loaded successfully!", type = "message", duration = 3)
-      }, error = function(e) {
-        removeNotification("load_pred")
-        showNotification(paste("Error:", e$message), type = "error", duration = 10)
-      })
-    })
-    
-    output$analysis_output <- renderUI({
-      req(rv$data_loaded)
-      ns <- session$ns
-      
-      if (input$analysis_type == "biomass") {
-        tagList(
-          tabsetPanel(
-            tabPanel("Total Biomass",
-                    plotOutput(ns("plot_biomass"), height = "800px")
-            ),
-            tabPanel("Relative Biomass",
-                    plotOutput(ns("plot_rel_biomass"), height = "800px")
-            )
-          )
-        )
-      } else if (input$analysis_type == "predation") {
-        tagList(
-          uiOutput(ns("pred_time_panel")),
-          uiOutput(ns("prey_time_panel"))
-        )
-      } else if (input$analysis_type == "age") {
-        tagList(
-          plotOutput(ns("plot_bio_pred"), height = "300px"),
-          plotOutput(ns("plot_pred_age"), height = "500px")
-        )
+
+    output$body <- renderUI({
+      if (is.null(project) || !isTRUE(project$ready)) {
+        return(tool_missing_card(FILE_LABELS[TOOL_REQUIREMENTS$predation], "Predation"))
       }
-    })
-    
-    output$plot_biomass <- renderPlot({
-      req(rv$biom.tot)
-      
-      pal <- get_fg_colors(unique(as.character(rv$biom.tot$FG)), rv$fg_palette)
-      
-      p <- ggplot2::ggplot(data = rv$biom.tot, aes(x = Time, y = Biomass, colour = FG)) 
-      p <- p + geom_line(linewidth = 0.8)
-      p <- p + facet_wrap(~ FG, ncol = 4, scale = 'free_y') + theme_minimal()
-      p <- p + scale_color_manual(values = pal, guide = "none")
-      p <- p + labs(title = 'Total Biomass by Functional Group', x = 'Time (days)', y = 'Biomass (tons)')
-      p <- p + theme(
-        plot.title = element_text(size = 16, face = "bold"),
-        axis.title = element_text(size = 12),
-        strip.text = element_text(size = 10, face = "bold")
-      )
-      p
-    })
-    
-    output$plot_rel_biomass <- renderPlot({
-      req(rv$rel.bio)
-      
-      colors <- get_palette(2)
-      
-      p <- ggplot2::ggplot(data = rv$rel.bio)
-      p <- p + geom_line(aes(x = Time, y = RelBiom), colour = colors[2], linewidth = 0.8, na.rm = TRUE)
-      p <- p + facet_wrap(~ FG, ncol = 4) + theme_minimal() + ylim(0, 2)
-      p <- p + labs(title = 'Relative Biomass by Functional Group', x = 'Time (days)', y = 'Relative Biomass (Bt/B0)')
-      p <- p + theme(
-        plot.title = element_text(size = 16, face = "bold"),
-        axis.title = element_text(size = 12),
-        strip.text = element_text(size = 10, face = "bold")
-      )
-      p
-    })
-    
-    output$pred_time_panel <- renderUI({
+      miss <- tool_missing(project$paths, "predation")
+      if (length(miss)) return(tool_missing_card(miss, "Predation"))
+      dat <- project$data
+      codes <- as.character(dat$grp$code)
+      stocks <- if (!is.null(dat$diet_time) && "Stock" %in% names(dat$diet_time)) {
+        unique(dat$diet_time$Stock)
+      } else 0
+      times <- if (!is.null(dat$diet_full)) sort(unique(dat$diet_full$Time)) else 0
       ns <- session$ns
-      dat <- predator_data()
-      if (is.null(dat) || nrow(dat) == 0) {
-        shiny::div(
-          class = "alert alert-warning",
-          style = "margin-top: 20px;",
-          "This functional group has no prey diet recorded."
-        )
-      } else {
-        plotOutput(ns("plot_pred_time"), height = "400px")
-      }
+      layout_sidebar(
+        sidebar = sidebar(
+          width = 280, open = "open",
+          selectInput(ns("fg"), "Functional group", choices = codes),
+          selectInput(ns("stock"), "Stock", choices = stocks),
+          numericInput(ns("threshold"), "Diet threshold", 0.001, min = 0, max = 1, step = 0.001),
+          numericInput(ns("top_n"), "Top N prey (rest = Other)", 8, min = 3, max = 20, step = 1),
+          checkboxInput(ns("scaled"), "Scale to 1", TRUE),
+          sliderInput(ns("time_age"), "Age-diet time (days)",
+                      min = min(times), max = max(times), value = min(times),
+                      step = if (length(times) > 1) min(diff(times)) else 1)
+        ),
+        uiOutput(ns("pred_panel")),
+        uiOutput(ns("prey_panel")),
+        uiOutput(ns("age_panel"))
+      )
     })
-    
-    output$prey_time_panel <- renderUI({
+
+    new_bio <- reactive({
+      dat <- project$data
+      req(dat$biomindx, dat$diet_time)
+      biom <- as.data.frame(dat$biomindx)
+      preds <- unique(as.character(dat$diet_time$Predator))
+      keep <- c("Time", intersect(names(biom), preds))
+      sub <- biom[, keep, drop = FALSE]
+      nb <- reshape2::melt(sub, id.vars = "Time")
+      names(nb) <- c("Time", "Predator", "Biomass")
+      nb$Predator <- as.character(nb$Predator)
+      data.table::setDT(nb)
+      data.table::setkey(nb, Predator, Time)
+      nb
+    })
+
+    predator_df <- reactive({
+      dat <- project$data
+      req(dat$diet_time, input$fg)
+      diet_through_time_predator(dat$diet_time, new_bio(), input$fg, input$stock,
+                                 input$threshold, FALSE)
+    })
+
+    prey_df <- reactive({
+      dat <- project$data
+      req(dat$diet_time, input$fg)
+      diet_through_time_prey(dat$diet_time, new_bio(), input$fg, input$threshold, FALSE)
+    })
+
+    to_year <- function(df) {
+      origin <- project$data$origin
+      df$Time <- days_as_date(df$Time, origin)
+      df
+    }
+
+    output$pred_panel <- renderUI({
       ns <- session$ns
-      dat <- prey_data()
-      if (is.null(dat) || nrow(dat) == 0) {
-        shiny::div(
-          class = "alert alert-warning",
-          style = "margin-top: 20px;",
-          "This functional group has no predators."
-        )
-      } else {
-        plotOutput(ns("plot_prey_time"), height = "400px")
+      df <- predator_df()
+      if (is.null(df) || nrow(df) == 0) {
+        return(div(class = "alert alert-warning", "This functional group has no prey diet recorded."))
       }
+      if (requireNamespace("plotly", quietly = TRUE)) plotly::plotlyOutput(ns("plot_pred"), height = "360px")
+      else plotOutput(ns("plot_pred_gg"), height = "360px")
     })
-    
-    predator_data <- reactive({
-      req(rv$diet_time, rv$new.bio, input$fg_pred, input$threshold_pred)
-      diet_through_time_predator(
-        rv$diet_time, rv$new.bio, input$fg_pred, input$stock_pred,
-        input$threshold_pred, isTRUE(input$melt_time)
-      )
+
+    output$prey_panel <- renderUI({
+      ns <- session$ns
+      df <- prey_df()
+      if (is.null(df) || nrow(df) == 0) {
+        return(div(class = "alert alert-warning", "This functional group has no predators."))
+      }
+      if (requireNamespace("plotly", quietly = TRUE)) plotly::plotlyOutput(ns("plot_prey"), height = "360px")
+      else plotOutput(ns("plot_prey_gg"), height = "360px")
     })
-    
-    prey_data <- reactive({
-      req(rv$diet_time, rv$new.bio, input$fg_pred, input$threshold_pred)
-      diet_through_time_prey(
-        rv$diet_time, rv$new.bio, input$fg_pred,
-        input$threshold_pred, isTRUE(input$melt_time)
-      )
+
+    pred_plot <- reactive({
+      df <- to_year(predator_df())
+      req(nrow(df) > 0)
+      df <- bucket_top_n(df, "variable", "consum", input$top_n)
+      agg <- stats::aggregate(consum ~ Time + series, data = df, sum)
+      pal <- get_fg_colors(setdiff(unique(agg$series), "Other"), project$data$fg_palette)
+      pal <- c(pal, Other = "#8D99AE")
+      ylab <- if (isTRUE(input$scaled)) "Proportion of diet" else "Consumption (tons)"
+      p <- ggplot2::ggplot(agg, ggplot2::aes(x = Time, y = consum, fill = series))
+      p <- p + ggplot2::geom_area(position = if (isTRUE(input$scaled)) "fill" else "stack")
+      p <- p + ggplot2::scale_fill_manual(values = pal, name = "Prey")
+      p <- p + ggplot2::labs(title = paste("Diet of", input$fg), x = "Year", y = ylab)
+      p + theme_reactiveatlantis()
     })
-    
-    output$plot_pred_time <- renderPlot({
-      predator <- predator_data()
-      req(!is.null(predator), nrow(predator) > 0)
-      
-      prey_names <- unique(as.character(predator$variable))
-      colors <- get_fg_colors(prey_names, rv$fg_palette)
-      
-      p <- ggplot2::ggplot(data = predator, aes(x = Time, y = consum, fill = variable, width = 1))
-      p <- p + geom_bar(stat = "identity", position = if(input$scaled_pred) 'fill' else 'stack', na.rm = TRUE)
-      p <- p + scale_fill_manual(values = colors, name = 'Prey')
-      p <- p + labs(title = paste('Predator -', input$fg_pred),
-                   x = diet_time_axis_label(input$melt_time),
-                   y = if(input$scaled_pred) 'Proportion' else 'Biomass [tons]')
-      p <- p + theme_minimal()
-      p <- p + theme(
-        plot.title = element_text(size = 14, face = "bold"),
-        axis.title = element_text(size = 11),
-        legend.position = "right"
-      )
-      p
+
+    prey_plot <- reactive({
+      df <- to_year(prey_df())
+      req(nrow(df) > 0)
+      df <- bucket_top_n(df, "Predator", "eff.pred", input$top_n)
+      agg <- stats::aggregate(eff.pred ~ Time + series, data = df, sum)
+      pal <- get_fg_colors(setdiff(unique(agg$series), "Other"), project$data$fg_palette)
+      pal <- c(pal, Other = "#8D99AE")
+      ylab <- if (isTRUE(input$scaled)) "Proportion of predation" else "Predation pressure (tons)"
+      p <- ggplot2::ggplot(agg, ggplot2::aes(x = Time, y = eff.pred, fill = series))
+      p <- p + ggplot2::geom_area(position = if (isTRUE(input$scaled)) "fill" else "stack")
+      p <- p + ggplot2::scale_fill_manual(values = pal, name = "Predator")
+      p <- p + ggplot2::labs(title = paste("Predators of", input$fg), x = "Year", y = ylab)
+      p + theme_reactiveatlantis()
     })
-    
-    output$plot_prey_time <- renderPlot({
-      prey <- prey_data()
-      req(!is.null(prey), nrow(prey) > 0)
-      
-      pred_names <- unique(as.character(prey$Predator))
-      colors <- get_fg_colors(pred_names, rv$fg_palette)
-      
-      p <- ggplot2::ggplot(data = prey, aes(x = Time, y = eff.pred, fill = Predator, width = 1))
-      p <- p + geom_bar(stat = "identity", position = if(input$scaled_pred) 'fill' else 'stack', na.rm = TRUE)
-      p <- p + scale_fill_manual(values = colors, name = 'Predator')
-      p <- p + labs(title = paste('Prey -', input$fg_pred),
-                   x = diet_time_axis_label(input$melt_time),
-                   y = if(input$scaled_pred) 'Proportion' else 'Biomass [tons]')
-      p <- p + theme_minimal()
-      p <- p + theme(
-        plot.title = element_text(size = 14, face = "bold"),
-        axis.title = element_text(size = 11),
-        legend.position = "right"
-      )
-      p
+
+    output$plot_pred_gg <- renderPlot({ pred_plot() })
+    output$plot_prey_gg <- renderPlot({ prey_plot() })
+    if (requireNamespace("plotly", quietly = TRUE)) {
+      output$plot_pred <- plotly::renderPlotly({ ra_ggplotly(pred_plot(), n_series = 12) })
+      output$plot_prey <- plotly::renderPlotly({ ra_ggplotly(prey_plot(), n_series = 12) })
+    }
+
+    output$age_panel <- renderUI({
+      dat <- project$data
+      req(dat$diet_full, input$fg, input$time_age)
+      df <- age_diet_slice(dat$diet_full, input$fg, input$stock, input$time_age, input$threshold)
+      if (is.null(df) || nrow(df) == 0) return(NULL)
+      plotOutput(session$ns("plot_age"), height = "280px")
     })
-    
-    age_diet_data <- reactive({
-      req(rv$diet_full, input$fg_age, input$stock_age, input$time_age, input$threshold_age)
-      age_diet_slice(rv$diet_full, input$fg_age, input$stock_age, input$time_age, input$threshold_age)
-    })
-    
-    age_diet_bio <- reactive({
-      req(rv$new.bio, input$fg_age)
-      rv$new.bio[rv$new.bio$Predator == input$fg_age, ]
-    })
-    
-    output$plot_bio_pred <- renderPlot({
-      req(age_diet_bio(), input$time_age)
-      
-      bio_data <- age_diet_bio()
-      
-      plot(bio_data$Time, bio_data$Biomass, ylab = 'Biomass (tons)', xlab = 'Time (days)', 
-           bty = 'n', type = 'l', ylim = range(bio_data$Biomass), las = 1,
-           main = paste0('Biomass - ', input$fg_age))
-      points(bio_data$Time[bio_data$Time == input$time_age], 
-            bio_data$Biomass[bio_data$Time == input$time_age], 
-            pch = 19, col = 'firebrick3', cex = 1.3)
-    })
-    
-    output$plot_pred_age <- renderPlot({
-      req(age_diet_data(), rv$g.col)
-      
-      age.diet <- age_diet_data()
-      prey_names <- unique(as.character(age.diet$variable))
-      colors <- get_fg_colors(prey_names, rv$fg_palette)
-      
-      p <- ggplot2::ggplot(data = age.diet, aes(x = Cohort, y = value, fill = variable, width = .75))
-      p <- p + geom_bar(stat = "identity", position = 'fill') + scale_fill_manual(values = colors, name = 'Prey')
-      p <- p + labs(title = paste('Predator -', input$fg_age, 'at', input$time_age, 'days'),
-                   x = 'AgeGroup', y = 'Proportion')
-      p <- p + theme_minimal()
-      p <- p + theme(
-        plot.title = element_text(size = 14, face = "bold"),
-        axis.title = element_text(size = 11),
-        legend.position = "right"
-      )
-      p
+
+    output$plot_age <- renderPlot({
+      dat <- project$data
+      req(dat$diet_full, input$fg, input$time_age)
+      df <- age_diet_slice(dat$diet_full, input$fg, input$stock, input$time_age, input$threshold)
+      req(nrow(df) > 0)
+      pal <- get_fg_colors(unique(as.character(df$variable)), dat$fg_palette)
+      df$Age <- sprintf("Age%02d", as.integer(df$Cohort))
+      p <- ggplot2::ggplot(df, ggplot2::aes(x = Age, y = value, fill = variable))
+      p <- p + ggplot2::geom_col(position = "stack")
+      p <- p + ggplot2::scale_fill_manual(values = pal, name = "Prey")
+      p <- p + ggplot2::labs(title = "Diet by age at the selected time",
+                             x = "Age class", y = "Diet proportion")
+      p + theme_reactiveatlantis()
     })
   })
+}
+
+bucket_top_n <- function(df, key, value, n = 8) {
+  if (nrow(df) == 0) {
+    df$series <- character()
+    return(df)
+  }
+  n <- max(1, as.integer(n))
+  totals <- tapply(df[[value]], df[[key]], sum, na.rm = TRUE)
+  keep <- names(sort(totals, decreasing = TRUE))[seq_len(min(n, length(totals)))]
+  df$series <- ifelse(as.character(df[[key]]) %in% keep, as.character(df[[key]]), "Other")
+  df
 }
 
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##

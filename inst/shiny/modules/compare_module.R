@@ -4,381 +4,204 @@
 
 compare_ui <- function(id) {
   ns <- NS(id)
-  
-  fluidPage(
-    titlePanel("Compare Atlantis Outputs"),
-    
-    sidebarLayout(
-      sidebarPanel(
-        width = 3,
-        fileInput(ns("nc_current"), "Current Output (.nc)", 
-                 accept = ".nc"),
-        fileInput(ns("nc_old"), "Previous Output (.nc) [Optional]", 
-                 accept = ".nc"),
-        fileInput(ns("grp_csv"), "Groups CSV", 
-                 accept = ".csv"),
-        fileInput(ns("bgm_file"), "BGM File", 
-                 accept = ".bgm"),
-        textInput(ns("cum_depths"), "Cumulative Depths (comma-separated, optional)",
-                 value = "",
-                 placeholder = "Leave blank to read layers from the NetCDF"),
-        actionButton(ns("load_data"), "Load Data", 
-                    class = "btn-primary btn-block"),
-        hr(),
-        conditionalPanel(
-          condition = "output.data_loaded",
-          ns = ns,
-          h5("Analysis Options"),
-          selectInput(ns("analysis_type"), "Analysis Type",
-                     choices = c("Biomass" = "biomass",
-                               "Total" = "total",
-                               "By AgeClass" = "age")),
-          conditionalPanel(
-            condition = "input.analysis_type == 'total'",
-            ns = ns,
-            selectInput(ns("fg_total"), "Functional Group:", choices = NULL),
-            checkboxInput(ns("by_polygon"), "By Polygon", FALSE),
-            conditionalPanel(
-              condition = "input.by_polygon",
-              ns = ns,
-              selectInput(ns("polygon_n"), "Polygon:", choices = NULL)
-            ),
-            hr(),
-            h6("Variables to Display"),
-            checkboxInput(ns("show_biomass"), "Biomass", TRUE),
-            checkboxInput(ns("show_numbers"), "Numbers", FALSE),
-            checkboxInput(ns("show_struct_n"), "Structural Nitrogen", FALSE),
-            checkboxInput(ns("show_reserve_n"), "Reserve Nitrogen", FALSE),
-            checkboxInput(ns("scaled"), "Scaled", TRUE),
-            checkboxInput(ns("limit_axis"), "Limit Axis", TRUE)
-          ),
-          conditionalPanel(
-            condition = "input.analysis_type == 'age'",
-            ns = ns,
-            selectInput(ns("fg_age"), "Functional Group:", choices = NULL),
-            hr(),
-            checkboxInput(ns("show_biomass_age"), "Biomass", TRUE),
-            checkboxInput(ns("show_numbers_age"), "Numbers", FALSE),
-            checkboxInput(ns("show_struct_n_age"), "Structural Nitrogen", FALSE),
-            checkboxInput(ns("show_reserve_n_age"), "Reserve Nitrogen", FALSE),
-            checkboxInput(ns("scaled_age"), "Scaled", TRUE),
-            checkboxInput(ns("limit_axis_age"), "Limit Axis", TRUE)
-          )
-        )
+  tagList(uiOutput(ns("body")))
+}
+
+compare_body_ui <- function(ns, grp) {
+  types <- c("All", sort(unique(as.character(grp$grouptype))))
+  codes <- as.character(grp$code[grp$numcohorts > 1 &
+                                 !grp$grouptype %in% c("PWN", "PRAWNS", "PRAWN", "CEP",
+                                                       "MOB_EP_OTHER", "SEAGRASS", "CORAL",
+                                                       "MANGROVE", "MANGROVES", "SPONGE")])
+  layout_sidebar(
+    sidebar = sidebar(
+      open = "open",
+      width = 280,
+      selectInput(ns("group_type"), "Group type", choices = types, selected = "All"),
+      textInput(ns("search"), "Search code or name", placeholder = "COD, haddock…"),
+      checkboxInput(ns("relative"), "Relative to initial (Bt/B0)", FALSE),
+      hr(),
+      selectInput(ns("view"), "View",
+                  choices = c("Small multiples" = "facets",
+                              "One group, totals" = "total",
+                              "By age class" = "age")),
+      conditionalPanel(
+        "input.view == 'total'", ns = ns,
+        selectInput(ns("fg_total"), "Functional group", choices = as.character(grp$code)),
+        checkboxInput(ns("show_biomass"), "Biomass", TRUE),
+        checkboxInput(ns("show_numbers"), "Numbers", FALSE),
+        checkboxInput(ns("scaled"), "Scaled", TRUE),
+        checkboxInput(ns("limit_axis"), "Limit axis", TRUE)
       ),
-      
-      mainPanel(
-        width = 9,
-        conditionalPanel(
-          condition = "!output.data_loaded",
-          ns = ns,
-          div(
-            class = "alert alert-info",
-            style = "margin-top: 50px;",
-            icon("info-circle"),
-            " Please load your Atlantis output files to begin analysis."
-          )
-        ),
-        conditionalPanel(
-          condition = "output.data_loaded",
-          ns = ns,
-          uiOutput(ns("analysis_output"))
-        )
+      conditionalPanel(
+        "input.view == 'age'", ns = ns,
+        selectInput(ns("fg_age"), "Functional group", choices = codes),
+        checkboxInput(ns("show_biomass_age"), "Biomass", TRUE),
+        checkboxInput(ns("show_numbers_age"), "Numbers", FALSE),
+        checkboxInput(ns("scaled_age"), "Scaled", TRUE),
+        checkboxInput(ns("limit_axis_age"), "Limit axis", TRUE)
       )
-    )
+    ),
+    uiOutput(ns("plot_host"))
   )
 }
 
-compare_server <- function(id) {
+compare_server <- function(id, project = NULL) {
   moduleServer(id, function(input, output, session) {
-    
-    rv <- reactiveValues(
-      data_loaded = FALSE,
-      t_biomass = NULL,
-      rel_bio = NULL,
-      nc_cur = NULL,
-      nc_old = NULL,
-      grp = NULL,
-      inf_box = NULL,
-      Time = NULL,
-      Time_old = NULL
-    )
-    
-    output$data_loaded <- reactive({ rv$data_loaded })
-    outputOptions(output, "data_loaded", suspendWhenHidden = FALSE)
-    
-    observeEvent(input$load_data, {
-      req(input$nc_current, input$grp_csv, input$bgm_file)
-      
-      tryCatch({
-        showNotification("Loading data...", type = "message", duration = NULL, id = "load_compare")
-        
-        grp <- read.csv(input$grp_csv$datapath)
-        names(grp) <- tolower(names(grp))
-        grp <- grp[grp$isturnedon == 1, c('code', 'name', 'longname', 'grouptype', 'numcohorts')]
-        
-        nc_cur <- ncdf4::nc_open(input$nc_current$datapath)
-        Time <- time_calc(nc_cur)
-        
-        inferred <- infer_cum_depths(nc_cur)
-        user_raw <- if(is.null(input$cum_depths)) "" else trimws(input$cum_depths)
-        if(nchar(user_raw) == 0){
-          if(is.null(inferred)){
-            stop("Could not read layer thicknesses from the NetCDF. Enter cumulative depths (surface first, include 0).")
-          }
-          cum_depths <- inferred
-          updateTextInput(session, "cum_depths", value = paste(round(cum_depths, 3), collapse = ","))
-        } else {
-          cum_depths <- as.numeric(strsplit(user_raw, ",")[[1]])
-          if(any(!is.finite(cum_depths))){
-            stop("Cumulative depths must be a comma-separated list of numbers.")
-          }
-          nc_z <- if(!is.null(nc_cur$dim$z)) nc_cur$dim$z$len else NA
-          user_n <- n_water_layers(cum_depths)
-          if(is.finite(nc_z) && user_n != (nc_z - 1)){
-            hint <- if(!is.null(inferred)) paste(round(inferred, 3), collapse = ",") else "the model layer thicknesses"
-            stop(paste0("Cumulative depths describe ", user_n, " water layers but the NetCDF has ",
-                        nc_z - 1, " water layers plus sediment (", nc_z, " in z). ",
-                        "Use depths that match the model, for example: ", hint, "."))
-          }
-        }
-        
-        inf_box <- boxes.prop(input$bgm_file$datapath, cum_depths)
-        
-        vol_rows <- nrow(inf_box$Vol)
-        nc_z <- if(!is.null(nc_cur$dim$z)) nc_cur$dim$z$len else NA
-        if(is.finite(nc_z) && vol_rows != nc_z){
-          stop(paste0("Box volumes have ", vol_rows, " layers but the NetCDF has ", nc_z,
-                      ". Check the cumulative depth list."))
-        }
-        
-        nc_old <- NULL
-        Time_old <- NULL
-        if (!is.null(input$nc_old)) {
-          nc_old <- ncdf4::nc_open(input$nc_old$datapath)
-          Time_old <- time_calc(nc_old)
-        }
-        
-        mg2t <- 0.00000002
-        x.cn <- 5.7
-        
-        age.grp <- grp[grp$numcohorts > 1 & 
-                      !grp$grouptype %in% c('PWN', 'PRAWNS', 'PRAWN', 'CEP', 'MOB_EP_OTHER', 
-                                           'SEAGRASS', 'CORAL', 'MANGROVE', 'MANGROVES', 'SPONGE'), ]
-        pol.grp <- grp[grp$numcohorts == 1, ]
-        pwn.grp <- grp[grp$numcohorts > 1 & 
-                      grp$grouptype %in% c('PWN', 'PRAWNS', 'PRAWN', 'CEP', 'MOB_EP_OTHER', 
-                                          'SEAGRASS', 'CORAL', 'MANGROVE', 'MANGROVES', 'SPONGE'), ]
-        
-        if(nrow(age.grp) > 0){
-          age.cur.bio <- bio.age(age.grp, nc_cur, 'Current', mg2t, x.cn, inf_box, Time)
-        } else {
-          age.cur.bio <- NULL
-        }
-        
-        pool.cur.bio <- bio.pool(pol.grp, nc_cur, 'Current', mg2t, x.cn, inf_box, Time)
-        
-        if (!is.null(nc_old)) {
-          if(nrow(age.grp) > 0){
-            age.old.bio <- bio.age(age.grp, nc_old, 'Previous', mg2t, x.cn, inf_box, Time_old)
-          } else {
-            age.old.bio <- NULL
-          }
-          pool.old.bio <- bio.pool(pol.grp, nc_old, 'Previous', mg2t, x.cn, inf_box, Time_old)
-          old.bio <- rbind(pool.old.bio, age.old.bio)
-        } else {
-          old.bio <- NULL
-        }
-        
-        if(nrow(pwn.grp) > 0){
-          pwn.cur.bio <- bio.pwn(pwn.grp, nc_cur, 'Current', mg2t, x.cn, inf_box, Time)
-          pwn.bio <- pwn.cur.bio
-          if (!is.null(nc_old)) {
-            pwn.old.bio <- bio.pwn(pwn.grp, nc_old, 'Previous', mg2t, x.cn, inf_box, Time_old)
-            pwn.bio <- rbind(pwn.cur.bio, pwn.old.bio)
-          }
-        } else {
-          pwn.bio <- NULL
-        }
-        
-        t.biomass <- rbind(age.cur.bio, pool.cur.bio, old.bio, pwn.bio)
-        
-        rel.bio <- by(t.biomass, t.biomass$FG, relative)
-        rel.bio <- do.call(rbind.data.frame, rel.bio)
-        
-        rv$data_loaded <- TRUE
-        rv$t_biomass <- t.biomass
-        rv$rel_bio <- rel.bio
-        rv$nc_cur <- nc_cur
-        rv$nc_old <- nc_old
-        rv$grp <- grp
-        rv$inf_box <- inf_box
-        rv$Time <- Time
-        rv$Time_old <- Time_old
-        
-        updateSelectInput(session, "fg_total", choices = as.character(grp$code))
-        updateSelectInput(session, "fg_age", 
-                         choices = as.character(grp$code[grp$numcohorts > 1 & 
-                                                        !grp$grouptype %in% c('PWN', 'PRAWNS', 'PRAWN', 
-                                                                             'CEP', 'MOB_EP_OTHER', 'SEAGRASS', 
-                                                                             'CORAL', 'MANGROVE', 'MANGROVES', 'SPONGE')]))
-        updateSelectInput(session, "polygon_n", choices = inf_box$info$Boxid)
-        
-        removeNotification("load_compare")
-        showNotification("Data loaded successfully!", type = "message", duration = 3)
-        
-      }, error = function(e) {
-        removeNotification("load_compare")
-        showNotification(paste("Error loading data:", e$message), type = "error", duration = 10)
-      })
-    })
-    
-    output$analysis_output <- renderUI({
-      req(rv$data_loaded)
-      ns <- session$ns
-      
-      if (input$analysis_type == "biomass") {
-        tagList(
-          tabsetPanel(
-            tabPanel("Total Biomass",
-                    plotOutput(ns("plot_biomass"), height = "800px"),
-                    downloadButton(ns("dwn_bio"), "Download Data")
-            ),
-            tabPanel("Relative Biomass",
-                    plotOutput(ns("plot_rel_biomass"), height = "800px"),
-                    downloadButton(ns("dwn_rel"), "Download Data")
-            )
-          )
-        )
-      } else if (input$analysis_type == "total") {
-        plotOutput(ns("plot_total"), height = "600px")
-      } else if (input$analysis_type == "age") {
-        n.coh <- rv$grp$numcohorts[rv$grp$code == input$fg_age]
-        if(length(n.coh) == 0 || is.na(n.coh)) n.coh <- 4
-        plot_h <- paste0(max(400, as.integer(ceiling(n.coh / 3) * 280)), "px")
-        plotOutput(ns("plot_age"), height = plot_h)
+    rv <- reactiveValues(t_biomass = NULL, rel_bio = NULL, built = FALSE, token = NULL)
+
+    output$body <- renderUI({
+      if (is.null(project) || !isTRUE(project$ready)) {
+        return(tool_missing_card(FILE_LABELS[TOOL_REQUIREMENTS$compare], "Compare"))
       }
+      miss <- tool_missing(project$paths, "compare")
+      if (length(miss)) return(tool_missing_card(miss, "Compare"))
+      compare_body_ui(session$ns, project$data$grp)
     })
-    
-    output$plot_biomass <- renderPlot({
-      req(rv$t_biomass, rv$Time)
-      
-      colors <- get_comparison_colors()
-      
-      p <- ggplot2::ggplot(data = rv$t_biomass, 
-                          aes(x = Time, y = Biomass, colour = Simulation)) +
-        geom_line(linewidth = 0.8) + 
-        facet_wrap(~ FG, ncol = 4, scale = 'free_y') + 
-        theme_minimal() +
-        scale_color_manual(values = colors) +
-        labs(x = 'Date', y = 'Biomass (tons)', title = "Total Biomass by Functional Group") +
-        theme(
-          plot.title = element_text(size = 16, face = "bold"),
-          axis.title = element_text(size = 12),
-          strip.text = element_text(size = 10, face = "bold"),
-          legend.position = "top"
-        )
-      
-      p
-    })
-    
-    output$plot_rel_biomass <- renderPlot({
-      req(rv$rel_bio, rv$Time)
-      
-      colors <- get_comparison_colors()
-      
-      p <- ggplot2::ggplot(data = rv$rel_bio, 
-                          aes(x = Time, y = Relative, colour = Simulation)) +
-        geom_line(linewidth = 0.8) + 
-        facet_wrap(~ FG, ncol = 4) + 
-        ylim(0, 2) +
-        theme_minimal() +
-        scale_color_manual(values = colors) +
-        labs(x = 'Date', y = 'Relative Biomass (Bt/B0)', 
-            title = "Relative Biomass by Functional Group") +
-        theme(
-          plot.title = element_text(size = 16, face = "bold"),
-          axis.title = element_text(size = 12),
-          strip.text = element_text(size = 10, face = "bold"),
-          legend.position = "top"
-        )
-      
-      p
-    })
-    
-    output$plot_total <- renderPlot({
-      req(rv$data_loaded, input$fg_total, rv$nc_cur, rv$grp, rv$inf_box, rv$Time)
-      
+
+    observe({
+      req(!is.null(project), isTRUE(project$ready), project$data)
+      miss <- tool_missing(project$paths, "compare")
+      token <- paste(unlist(project$paths), collapse = "|")
+      if (length(miss) || (isTRUE(rv$built) && identical(rv$token, token))) return()
+      rv$token <- token
+      dat <- project$data
+      req(dat$nc_out, dat$grp, dat$inf_box, dat$time_dates)
+
+      grp <- dat$grp[dat$grp$isturnedon == 1,
+                     c("code", "name", "longname", "grouptype", "numcohorts")]
       mg2t <- 0.00000002
       x.cn <- 5.7
-      
-      total_data <- if(input$by_polygon) {
-        nitro.weight(rv$nc_cur, rv$grp, input$fg_total, By = 'Poly', 
-                    rv$inf_box, mg2t, x.cn, polnum = (as.numeric(input$polygon_n) + 1))
-      } else {
-        nitro.weight(rv$nc_cur, rv$grp, input$fg_total, By = 'Total', 
-                    rv$inf_box, mg2t, x.cn)
+      Time <- dat$time_dates
+      inf_box <- dat$inf_box
+      nc_cur <- dat$nc_out
+
+      age.grp <- grp[grp$numcohorts > 1 &
+                     !grp$grouptype %in% c("PWN", "PRAWNS", "PRAWN", "CEP", "MOB_EP_OTHER",
+                                           "SEAGRASS", "CORAL", "MANGROVE", "MANGROVES", "SPONGE"), ]
+      pol.grp <- grp[grp$numcohorts == 1, ]
+      pwn.grp <- grp[grp$numcohorts > 1 &
+                     grp$grouptype %in% c("PWN", "PRAWNS", "PRAWN", "CEP", "MOB_EP_OTHER",
+                                          "SEAGRASS", "CORAL", "MANGROVE", "MANGROVES", "SPONGE"), ]
+
+      age.cur.bio <- if (nrow(age.grp) > 0) bio.age(age.grp, nc_cur, "Current", mg2t, x.cn, inf_box, Time) else NULL
+      pool.cur.bio <- bio.pool(pol.grp, nc_cur, "Current", mg2t, x.cn, inf_box, Time)
+      old.bio <- NULL
+      Time_old <- NULL
+      if (!is.null(dat$nc_old)) {
+        Time_old <- tryCatch(time_calc(dat$nc_old), error = function(e) Time)
+        age.old.bio <- if (nrow(age.grp) > 0) bio.age(age.grp, dat$nc_old, "Previous", mg2t, x.cn, inf_box, Time_old) else NULL
+        pool.old.bio <- bio.pool(pol.grp, dat$nc_old, "Previous", mg2t, x.cn, inf_box, Time_old)
+        old.bio <- rbind(pool.old.bio, age.old.bio)
       }
-      
-      if(input$scaled && !input$by_polygon){
+      pwn.bio <- NULL
+      if (nrow(pwn.grp) > 0) {
+        pwn.cur.bio <- bio.pwn(pwn.grp, nc_cur, "Current", mg2t, x.cn, inf_box, Time)
+        pwn.bio <- pwn.cur.bio
+        if (!is.null(dat$nc_old)) {
+          pwn.bio <- rbind(pwn.cur.bio, bio.pwn(pwn.grp, dat$nc_old, "Previous", mg2t, x.cn, inf_box, Time_old))
+        }
+      }
+      t.biomass <- rbind(age.cur.bio, pool.cur.bio, old.bio, pwn.bio)
+      rel.bio <- do.call(rbind.data.frame, by(t.biomass, t.biomass$FG, relative))
+      rv$t_biomass <- t.biomass
+      rv$rel_bio <- rel.bio
+      rv$built <- TRUE
+    })
+
+    filtered <- reactive({
+      req(rv$t_biomass, project$data$grp)
+      df <- if (isTRUE(input$relative)) rv$rel_bio else rv$t_biomass
+      grp <- project$data$grp
+      if (!is.null(input$group_type) && input$group_type != "All") {
+        codes <- grp$code[grp$grouptype == input$group_type]
+        keep <- grepl(paste0("\\((", paste(codes, collapse = "|"), ")\\)$"), df$FG)
+        df <- df[keep, ]
+      }
+      if (!is.null(input$search) && nzchar(trimws(input$search))) {
+        q <- trimws(input$search)
+        df <- df[grepl(q, df$FG, ignore.case = TRUE), ]
+      }
+      df
+    })
+
+    output$plot_host <- renderUI({
+      ns <- session$ns
+      view <- input$view
+      if (is.null(view) || view == "facets") {
+        if (requireNamespace("plotly", quietly = TRUE)) plotly::plotlyOutput(ns("plot_facets"), height = "760px")
+        else plotOutput(ns("plot_facets_gg"), height = "760px")
+      } else if (view == "total") {
+        plotOutput(ns("plot_total"), height = "560px")
+      } else {
+        plotOutput(ns("plot_age"), height = "640px")
+      }
+    })
+
+    make_facet_plot <- function() {
+      df <- filtered()
+      req(nrow(df) > 0)
+      ycol <- if ("Relative" %in% names(df) && isTRUE(input$relative)) "Relative" else "Biomass"
+      ylab <- if (isTRUE(input$relative)) "Relative biomass (Bt/B0)" else "Biomass (tons)"
+      colors <- get_comparison_colors()
+      p <- ggplot2::ggplot(df, ggplot2::aes(x = Time, y = .data[[ycol]], colour = Simulation))
+      p <- p + ggplot2::geom_line(linewidth = 0.7, na.rm = TRUE)
+      p <- p + ggplot2::facet_wrap(~ FG, ncol = 4, scales = "free_y")
+      p <- p + ggplot2::scale_color_manual(values = colors)
+      p <- p + ggplot2::labs(x = "Year", y = ylab, title = "Biomass by functional group")
+      p <- p + theme_reactiveatlantis()
+      if (isTRUE(input$relative)) {
+        p <- p + ggplot2::coord_cartesian(ylim = relative_axis_ylim(df[[ycol]]))
+      }
+      p
+    }
+
+    output$plot_facets_gg <- renderPlot({ make_facet_plot() })
+    if (requireNamespace("plotly", quietly = TRUE)) {
+      output$plot_facets <- plotly::renderPlotly({
+        p <- make_facet_plot()
+        ra_ggplotly(p, n_series = length(unique(filtered()$FG)))
+      })
+    }
+
+    output$plot_total <- renderPlot({
+      dat <- project$data
+      req(dat$nc_out, input$fg_total, dat$inf_box, dat$time_dates)
+      mg2t <- 0.00000002
+      x.cn <- 5.7
+      total_data <- nitro.weight(dat$nc_out, dat$grp, input$fg_total, By = "Total",
+                                dat$inf_box, mg2t, x.cn)
+      if (isTRUE(input$scaled)) {
         rmv <- which(sapply(total_data, function(x) length(x) == 0 || is.null(x) || is.character(x)))
         total.tmp <- total_data[-rmv]
         total.tmp <- lapply(total.tmp, function(x) x / x[1])
         total_data[-rmv] <- total.tmp
       }
-      
-      plot_total_data(total_data, rv$Time, input$show_reserve_n, input$show_struct_n,
-                     input$show_numbers, input$show_biomass, input$scaled, 
-                     input$limit_axis)
+      p <- plot_total_data(total_data, dat$time_dates, FALSE, FALSE,
+                           isTRUE(input$show_numbers), isTRUE(input$show_biomass),
+                           isTRUE(input$scaled), isTRUE(input$limit_axis))
+      if (inherits(p, "ggplot")) p + theme_reactiveatlantis() else p
     })
-    
+
     output$plot_age <- renderPlot({
-      req(rv$data_loaded, input$fg_age, rv$nc_cur, rv$grp, rv$inf_box, rv$Time)
-      
+      dat <- project$data
+      req(dat$nc_out, input$fg_age, dat$inf_box, dat$time_dates)
       mg2t <- 0.00000002
       x.cn <- 5.7
-      
-      coho <- nitro.weight(rv$nc_cur, rv$grp, FG = input$fg_age, By = 'Cohort', 
-                          rv$inf_box, mg2t, x.cn)
-      
-      if(input$scaled_age){
+      coho <- nitro.weight(dat$nc_out, dat$grp, FG = input$fg_age, By = "Cohort",
+                          dat$inf_box, mg2t, x.cn)
+      if (isTRUE(input$scaled_age)) {
         rmv <- which(sapply(coho, function(x) length(x) == 0 || is.null(x) || is.character(x)))
         coho.tmp <- coho[-rmv]
         coho.tmp <- lapply(coho.tmp, function(x) lapply(x, function(x) x / x[1]))
         coho[-rmv] <- coho.tmp
       }
-      
-      n.coh <- rv$grp$numcohorts[rv$grp$code == input$fg_age]
-      
-      plot_cohorts_ggplot(coho, rv$Time, input$show_reserve_n_age, input$show_struct_n_age,
-                         input$show_numbers_age, input$show_biomass_age, input$scaled_age,
-                         input$limit_axis_age, n.coh)
+      n.coh <- dat$grp$numcohorts[dat$grp$code == input$fg_age]
+      p <- plot_cohorts_ggplot(coho, dat$time_dates, FALSE, FALSE,
+                              isTRUE(input$show_numbers_age), isTRUE(input$show_biomass_age),
+                              isTRUE(input$scaled_age), isTRUE(input$limit_axis_age), n.coh)
+      if (inherits(p, "ggplot")) p + theme_reactiveatlantis() else p
     })
-    
-    output$dwn_bio <- downloadHandler(
-      filename = function(){
-        paste0("biomass_", Sys.Date(), ".csv")
-      },
-      content = function(file) {
-        biom.save <- list(Biomass = lapply(split(rv$t_biomass, paste(rv$t_biomass$FG, rv$t_biomass$Simulation, sep = '_')),
-                                          function(x){x$Biomass}))
-        out <- to.save.biomass(biom.save, rv$Time)
-        write.csv(out, file, row.names = FALSE)
-      }
-    )
-    
-    output$dwn_rel <- downloadHandler(
-      filename = function(){
-        paste0("relative_biomass_", Sys.Date(), ".csv")
-      },
-      content = function(file) {
-        biom.save <- list(Biomass = lapply(split(rv$rel_bio, paste(rv$rel_bio$FG, rv$rel_bio$Simulation, sep = '_')),
-                                          function(x){x$Relative}))
-        out <- to.save.biomass(biom.save, rv$Time)
-        write.csv(out, file, row.names = FALSE)
-      }
-    )
-    
   })
 }
 
@@ -579,14 +402,10 @@ plot_total_data <- function(total, Time, rn2, sn2, num2, bio2, scl2, limit2){
     
     p <- ggplot2::ggplot(bio_df, aes(x = Time, y = Value)) +
       geom_line(color = colors[1], linewidth = 1) +
-      theme_minimal() +
-      labs(x = 'Date', 
+      theme_reactiveatlantis() +
+      labs(x = 'Year', 
           y = if(scl2) 'Relative Values (X_t/X_0)' else 'Biomass (tons)',
-          title = "Total Biomass Over Time") +
-      theme(
-        plot.title = element_text(size = 14, face = "bold"),
-        axis.title = element_text(size = 11)
-      )
+          title = "Total Biomass Over Time")
     
     if(scl2 && limit2){
       p <- p + ggplot2::coord_cartesian(ylim = relative_axis_ylim(bio_df$Value))
@@ -620,7 +439,6 @@ plot_cohort <- function(coho, Time, rn3a, sn3a, num3a, bio3a, scl3a, limit3a, co
 }
 
 plot_cohorts_ggplot <- function(coho, Time, rn3a, sn3a, num3a, bio3a, scl3a, limit3a, n.coh){
-  colors <- get_predation_colors()
   rows <- list()
   
   add_series <- function(values, cohort, variable){
@@ -661,13 +479,8 @@ plot_cohorts_ggplot <- function(coho, Time, rn3a, sn3a, num3a, bio3a, scl3a, lim
   p <- ggplot2::ggplot(plot_df, ggplot2::aes(x = Time, y = Value, colour = Variable))
   p <- p + ggplot2::geom_line(linewidth = 0.8, na.rm = TRUE)
   p <- p + ggplot2::facet_wrap(~ Cohort, ncol = min(3, n.coh), scales = "free_y")
-  p <- p + ggplot2::theme_minimal()
-  p <- p + ggplot2::labs(x = "Date", y = ylab, title = "Values by age class")
-  p <- p + ggplot2::theme(
-    plot.title = ggplot2::element_text(size = 14, face = "bold"),
-    strip.text = ggplot2::element_text(size = 10, face = "bold"),
-    legend.position = "top"
-  )
+  p <- p + theme_reactiveatlantis()
+  p <- p + ggplot2::labs(x = "Year", y = ylab, title = "Values by age class")
   if(isTRUE(scl3a) && isTRUE(limit3a)){
     p <- p + ggplot2::coord_cartesian(ylim = relative_axis_ylim(plot_df$Value))
   }

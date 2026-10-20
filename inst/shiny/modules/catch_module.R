@@ -4,268 +4,265 @@
 
 catch_ui <- function(id) {
   ns <- NS(id)
-  
-  fluidPage(
-    titlePanel("Catch and Harvest Analysis"),
-    
-    sidebarLayout(
-      sidebarPanel(
-        width = 3,
-        fileInput(ns("grp_csv"), "Groups CSV", accept = ".csv"),
-        fileInput(ns("fish_csv"), "Fisheries CSV", accept = ".csv"),
-        fileInput(ns("catch_nc"), "Catch Output (.nc)", accept = ".nc"),
-        fileInput(ns("ext_catch"), "External Catch [Optional]", accept = ".csv"),
-        actionButton(ns("load_data"), "Load Data", class = "btn-primary btn-block"),
-        hr(),
-        conditionalPanel(
-          condition = "output.data_loaded",
-          ns = ns,
-          h5("Analysis Options"),
-          selectInput(ns("analysis_type"), "Analysis Type",
-                     choices = c("Biomass" = "biomass",
-                               "Numbers" = "numbers",
-                               "Skill Assessment" = "skill")),
-          selectInput(ns("fishery"), "Fishery:", choices = NULL),
-          selectInput(ns("fg"), "Functional Group:", choices = NULL),
-          checkboxInput(ns("by_year"), "Aggregate by Year", TRUE)
-        )
-      ),
-      
-      mainPanel(
-        width = 9,
-        conditionalPanel(
-          condition = "!output.data_loaded",
-          ns = ns,
-          div(
-            class = "alert alert-info",
-            style = "margin-top: 50px;",
-            icon("info-circle"),
-            " Catch analysis needs a groups CSV, a fisheries CSV, and a catch NetCDF (often a dedicated CATCH output, not the main biology output.nc). Load those files to plot harvest and skill metrics."
-          )
-        ),
-        conditionalPanel(
-          condition = "output.data_loaded",
-          ns = ns,
-          uiOutput(ns("analysis_output"))
-        )
-      )
-    )
+  tagList(uiOutput(ns("body")))
+}
+
+catch_body_ui <- function(ns, grp, fish) {
+  fish_labels <- if ("name" %in% names(fish)) {
+    setNames(as.character(fish$code), paste(fish$code, fish$name, sep = " — "))
+  } else {
+    as.character(fish$code)
+  }
+  impacted <- grp
+  if ("isimpacted" %in% names(grp)) {
+    on <- grp[grp$isimpacted == 1, , drop = FALSE]
+    if (nrow(on) > 0) impacted <- on
+  }
+  fg_choices <- c("All", as.character(impacted$code))
+  layout_sidebar(
+    sidebar = sidebar(
+      width = 280, open = "open",
+      selectInput(ns("view"), "View",
+                  choices = c("Stacked by group" = "by_group",
+                              "Stacked by fleet" = "by_fleet",
+                              "Numbers by age" = "numbers",
+                              "Skill vs observed" = "skill")),
+      selectInput(ns("fishery"), "Fishery", choices = fish_labels),
+      selectInput(ns("fg"), "Functional group", choices = fg_choices),
+      checkboxInput(ns("by_year"), "Aggregate by year", TRUE)
+    ),
+    uiOutput(ns("analysis_output"))
   )
 }
 
-catch_server <- function(id) {
+catch_server <- function(id, project = NULL) {
   moduleServer(id, function(input, output, session) {
-    rv <- reactiveValues(
-      data_loaded = FALSE,
-      nc_data = NULL,
-      nc_vars = NULL,
-      grp = NULL,
-      fish = NULL,
-      ext_catch = NULL,
-      time = NULL,
-      fg_palette = NULL
-    )
-    
-    output$data_loaded <- reactive({ rv$data_loaded })
-    outputOptions(output, "data_loaded", suspendWhenHidden = FALSE)
-    
-    observeEvent(input$load_data, {
-      if(is.null(input$grp_csv) || is.null(input$fish_csv) || is.null(input$catch_nc)){
-        showNotification(
-          "Catch analysis needs a groups CSV, a fisheries CSV, and a catch NetCDF. Those files were not provided.",
-          type = "error", duration = 10
-        )
-        return()
+
+    output$body <- renderUI({
+      if (is.null(project) || !isTRUE(project$ready)) {
+        return(tool_missing_card(FILE_LABELS[TOOL_REQUIREMENTS$catch], "Catch"))
       }
-      
-      tryCatch({
-        showNotification("Loading catch data...", type = "message", id = "load_catch", duration = NULL)
-        
-        nc.data <- ncdf4::nc_open(input$catch_nc$datapath)
-        grp <- normalise_groups_catch(utils::read.csv(input$grp_csv$datapath, stringsAsFactors = FALSE))
-        fish <- normalise_fisheries(utils::read.csv(input$fish_csv$datapath, stringsAsFactors = FALSE))
-        
-        time <- ncdf4::ncvar_get(nc.data, 't')
-        t_att <- ncdf4::ncatt_get(nc.data, 't')
-        if (!is.null(t_att$units) && grepl('seconds', t_att$units, ignore.case = TRUE)) {
-          time <- as.Date(time / 86400, origin = '1970-01-01')
-        } else {
-          time <- as.Date(time, origin = '1970-01-01')
-        }
-        
-        ext_catch <- NULL
-        if(!is.null(input$ext_catch)){
-          ext_catch <- utils::read.csv(input$ext_catch$datapath, stringsAsFactors = FALSE)
-        }
-        
-        impacted_grp <- grp
-        if ("isimpacted" %in% names(grp)) {
-          impacted_grp <- grp[grp$isimpacted == 1, ]
-        }
-        if (nrow(impacted_grp) == 0) impacted_grp <- grp
-        
-        rv$nc_data <- nc.data
-        rv$nc_vars <- names(nc.data$var)
-        rv$grp <- grp
-        rv$fish <- fish
-        rv$ext_catch <- ext_catch
-        rv$time <- time
-        rv$fg_palette <- build_fg_palette(grp$code)
-        rv$data_loaded <- TRUE
-        
-        fish_labels <- if ("name" %in% names(fish)) {
-          setNames(as.character(fish$code), as.character(fish$name))
-        } else {
-          as.character(fish$code)
-        }
-        updateSelectInput(session, "fishery", choices = fish_labels)
-        updateSelectInput(session, "fg", choices = as.character(impacted_grp$code))
-        
-        removeNotification("load_catch")
-        showNotification("Data loaded successfully!", type = "message", duration = 3)
-      }, error = function(e) {
-        removeNotification("load_catch")
-        showNotification(paste("Error:", e$message), type = "error", duration = 10)
-      })
+      miss <- tool_missing(project$paths, "catch")
+      if (length(miss)) return(tool_missing_card(miss, "Catch"))
+      catch_body_ui(session$ns, project$data$grp, project$data$fish)
     })
-    
+
+    catch_time <- reactive({
+      dat <- project$data
+      req(dat$nc_catch)
+      t <- tryCatch(time_calc(dat$nc_catch), error = function(e) NULL)
+      if (!is.null(t)) return(t)
+      raw <- ncdf4::ncvar_get(dat$nc_catch, "t")
+      as.Date(as.numeric(raw) / 86400, origin = "1970-01-01")
+    })
+
+    nc_vars <- reactive({
+      dat <- project$data
+      req(dat$nc_catch)
+      names(dat$nc_catch$var)
+    })
+
     catch_result <- reactive({
-      req(rv$nc_data, rv$grp, rv$fish, rv$nc_vars, input$analysis_type)
-      quantity <- if (identical(input$analysis_type, "numbers")) "numbers" else "biomass"
+      dat <- project$data
+      req(dat$nc_catch, dat$grp, dat$fish, input$view)
+      quantity <- if (identical(input$view, "numbers")) "numbers" else "biomass"
       fishery_code <- input$fishery
       fg_code <- input$fg
+      if (identical(fg_code, "All")) fg_code <- ""
       if (identical(quantity, "biomass")) {
         req(fishery_code)
       } else {
         req(fg_code)
       }
       extract_catch_series(
-        nc.data = rv$nc_data,
-        nc_vars = rv$nc_vars,
-        grp = rv$grp,
-        fish = rv$fish,
-        time = rv$time,
+        nc.data = dat$nc_catch,
+        nc_vars = nc_vars(),
+        grp = dat$grp,
+        fish = dat$fish,
+        time = catch_time(),
         quantity = quantity,
         fishery_code = fishery_code,
         fg_code = fg_code,
         by_year = isTRUE(input$by_year)
       )
     })
-    
-    output$analysis_output <- renderUI({
-      req(rv$data_loaded)
-      ns <- session$ns
-      res <- catch_result()
-      
-      if (input$analysis_type == "skill") {
-        if (!isTRUE(res$ok)) {
-          return(catch_empty_message(res))
-        }
-        tagList(
-          h4("Model Skill Assessment"),
-          DT::dataTableOutput(ns("skill_table"))
+
+    fleet_stack <- reactive({
+      dat <- project$data
+      req(dat$nc_catch, dat$grp, dat$fish, input$fg)
+      fg_code <- input$fg
+      if (identical(fg_code, "All")) fg_code <- ""
+      rows <- list()
+      for (i in seq_len(nrow(dat$fish))) {
+        res <- extract_catch_series(
+          nc.data = dat$nc_catch,
+          nc_vars = nc_vars(),
+          grp = dat$grp,
+          fish = dat$fish,
+          time = catch_time(),
+          quantity = "biomass",
+          fishery_code = dat$fish$code[i],
+          fg_code = fg_code,
+          by_year = isTRUE(input$by_year)
         )
-      } else if (!isTRUE(res$ok)) {
-        catch_empty_message(res)
+        if (isTRUE(res$ok) && !is.null(res$data)) {
+          df <- res$data
+          df$Fleet <- dat$fish$code[i]
+          rows[[length(rows) + 1]] <- df
+        }
+      }
+      if (length(rows) == 0) return(NULL)
+      do.call(rbind, rows)
+    })
+
+    observed_overlay <- function(p, fg_code, time_col_df) {
+      dat <- project$data
+      ext <- dat$ext_catch
+      if (is.null(ext) || is.null(fg_code) || !nzchar(fg_code) || !(fg_code %in% names(ext))) {
+        return(p)
+      }
+      time_col <- names(ext)[tolower(names(ext)) %in% c("time", "year", "years")][1]
+      if (is.na(time_col)) return(p)
+      ext_df <- data.frame(
+        years = as.Date(paste0(ext[[time_col]], "-01-01")),
+        catch = ext[[fg_code]],
+        stringsAsFactors = FALSE
+      )
+      p + ggplot2::geom_point(
+        data = ext_df, ggplot2::aes(x = years, y = catch),
+        color = "#A33B20", size = 2.4, inherit.aes = FALSE
+      )
+    }
+
+    output$analysis_output <- renderUI({
+      ns <- session$ns
+      view <- input$view
+      if (is.null(view)) return(NULL)
+      if (identical(view, "skill")) {
+        return(tagList(
+          h4("Model skill assessment"),
+          DT::dataTableOutput(ns("skill_table"))
+        ))
+      }
+      res <- if (identical(view, "by_fleet")) {
+        df <- fleet_stack()
+        if (is.null(df) || nrow(df) == 0) {
+          return(div(class = "alert alert-warning",
+                     "No catch variables for this group across fleets."))
+        }
+        TRUE
       } else {
-        plotOutput(ns("catch_plot"), height = "700px")
+        catch_result()
+      }
+      if (!isTRUE(res) && !isTRUE(res$ok)) return(catch_empty_message(res))
+      if (requireNamespace("plotly", quietly = TRUE)) {
+        plotly::plotlyOutput(ns("catch_plot"), height = "640px")
+      } else {
+        plotOutput(ns("catch_plot_gg"), height = "640px")
       }
     })
-    
-    output$catch_plot <- renderPlot({
+
+    make_catch_plot <- function() {
+      view <- input$view
+      pal <- project$data$fg_palette
+      xlab <- if (isTRUE(input$by_year)) "Year" else "Date"
+
+      if (identical(view, "by_fleet")) {
+        df <- fleet_stack()
+        req(!is.null(df), nrow(df) > 0)
+        agg <- stats::aggregate(catch ~ years + Fleet, data = df, sum)
+        n_series <- length(unique(agg$Fleet))
+        colors <- get_catch_colors(n_series)
+        names(colors) <- unique(as.character(agg$Fleet))
+        p <- ggplot2::ggplot(agg, ggplot2::aes(x = years, y = catch, fill = Fleet))
+        p <- p + ggplot2::geom_area(position = "stack", alpha = 0.92)
+        p <- p + ggplot2::scale_fill_manual(values = colors)
+        p <- p + ggplot2::labs(
+          title = paste("Catch by fleet —", input$fg),
+          x = xlab, y = "Catch (tons)"
+        )
+        p <- p + theme_reactiveatlantis()
+        return(observed_overlay(p, input$fg, agg))
+      }
+
       res <- catch_result()
       req(isTRUE(res$ok), !is.null(res$data), nrow(res$data) > 0)
-      
       catch_df <- res$data
       quantity <- res$quantity
       ylab <- if (identical(quantity, "numbers")) "Catch (numbers)" else "Catch (tons)"
-      title_qty <- if (identical(quantity, "numbers")) "Catch numbers" else "Catch biomass"
-      
-      colour_by_group <- "Functional_group" %in% names(catch_df) &&
-        length(unique(catch_df$Functional_group)) > 1 &&
-        length(unique(catch_df$series)) == length(unique(catch_df$Functional_group))
-      
-      if (colour_by_group) {
-        pal <- get_fg_colors(unique(as.character(catch_df$Functional_group)), rv$fg_palette)
-        p <- ggplot2::ggplot(catch_df, ggplot2::aes(x = years, y = catch, color = Functional_group))
-        p <- p + ggplot2::geom_line(linewidth = 1.1, na.rm = TRUE)
-        p <- p + ggplot2::scale_color_manual(values = pal, name = "Functional group")
-        p <- p + ggplot2::facet_wrap(~ Functional_group, scales = "free_y")
-      } else {
-        n_series <- length(unique(catch_df$series))
-        colors <- get_catch_colors(n_series)
-        names(colors) <- unique(as.character(catch_df$series))
-        p <- ggplot2::ggplot(catch_df, ggplot2::aes(x = years, y = catch, color = series))
-        p <- p + ggplot2::geom_line(linewidth = 1.1, na.rm = TRUE)
-        p <- p + ggplot2::scale_color_manual(values = colors, name = "Cohort")
-        if (n_series > 1) {
-          p <- p + ggplot2::facet_wrap(~ series, scales = "free_y")
+
+      if (identical(view, "by_group") || identical(quantity, "biomass")) {
+        agg <- stats::aggregate(catch ~ years + Functional_group, data = catch_df, sum)
+        pal_g <- get_fg_colors(unique(as.character(agg$Functional_group)), pal)
+        p <- ggplot2::ggplot(agg, ggplot2::aes(x = years, y = catch, fill = Functional_group))
+        p <- p + ggplot2::geom_area(position = "stack", alpha = 0.92)
+        p <- p + ggplot2::scale_fill_manual(values = pal_g, name = "Group")
+        p <- p + ggplot2::labs(
+          title = paste("Catch by group —", input$fishery),
+          x = xlab, y = ylab
+        )
+        p <- p + theme_reactiveatlantis()
+        fg_one <- input$fg
+        if (!is.null(fg_one) && fg_one != "All") {
+          p <- observed_overlay(p, fg_one, agg)
         }
+        return(p)
       }
-      
-      p <- p + ggplot2::theme_minimal()
+
+      n_series <- length(unique(catch_df$series))
+      colors <- get_catch_colors(n_series)
+      names(colors) <- unique(as.character(catch_df$series))
+      p <- ggplot2::ggplot(catch_df, ggplot2::aes(x = years, y = catch, colour = series))
+      p <- p + ggplot2::geom_line(linewidth = 0.9, na.rm = TRUE)
+      p <- p + ggplot2::scale_color_manual(values = colors, name = "Cohort")
+      if (n_series > 1) {
+        p <- p + ggplot2::facet_wrap(~ series, scales = "free_y")
+      }
       p <- p + ggplot2::labs(
-        title = paste(title_qty, "-", input$fishery, "-", input$fg),
-        x = if (isTRUE(input$by_year)) "Year" else "Date",
-        y = ylab
+        title = paste("Catch numbers —", input$fg),
+        x = xlab, y = ylab
       )
-      p <- p + ggplot2::theme(
-        plot.title = ggplot2::element_text(size = 16, face = "bold"),
-        axis.title = ggplot2::element_text(size = 12),
-        legend.position = "right"
-      )
-      
-      if (!is.null(rv$ext_catch) && !is.null(input$fg) && input$fg %in% names(rv$ext_catch)) {
-        time_col <- names(rv$ext_catch)[tolower(names(rv$ext_catch)) %in% c("time", "year", "years")][1]
-        if (!is.na(time_col)) {
-          ext_df <- data.frame(
-            years = as.Date(paste0(rv$ext_catch[[time_col]], "-01-01")),
-            catch = rv$ext_catch[[input$fg]]
-          )
-          p <- p + ggplot2::geom_point(
-            data = ext_df, ggplot2::aes(x = years, y = catch),
-            color = "red", size = 3, inherit.aes = FALSE
-          )
-        }
-      }
-      
-      p
-    })
-    
+      p + theme_reactiveatlantis()
+    }
+
+    output$catch_plot_gg <- renderPlot({ make_catch_plot() })
+    if (requireNamespace("plotly", quietly = TRUE)) {
+      output$catch_plot <- plotly::renderPlotly({
+        p <- make_catch_plot()
+        n <- 8
+        ra_ggplotly(p, n_series = n)
+      })
+    }
+
     output$skill_table <- DT::renderDataTable({
+      dat <- project$data
       res <- catch_result()
-      if (!isTRUE(res$ok) || is.null(rv$ext_catch)) {
-        return(data.frame(Note = "External catch data required for skill assessment"))
+      if (!isTRUE(res$ok) || is.null(dat$ext_catch)) {
+        return(data.frame(Note = "Load an external catch CSV to score skill."))
       }
-      if (is.null(input$fg) || !(input$fg %in% names(rv$ext_catch))) {
-        return(data.frame(Note = paste("No external data for", input$fg)))
+      fg <- input$fg
+      if (is.null(fg) || identical(fg, "All") || !(fg %in% names(dat$ext_catch))) {
+        return(data.frame(Note = paste("No observed series for", fg)))
       }
-      
       catch_df <- res$data
       catch_agg <- stats::aggregate(catch ~ format(years, "%Y"), data = catch_df, sum)
       names(catch_agg) <- c("year", "modeled")
-      
-      time_col <- names(rv$ext_catch)[tolower(names(rv$ext_catch)) %in% c("time", "year", "years")][1]
+      time_col <- names(dat$ext_catch)[tolower(names(dat$ext_catch)) %in% c("time", "year", "years")][1]
       ext_df <- data.frame(
-        year = as.character(rv$ext_catch[[time_col]]),
-        observed = rv$ext_catch[[input$fg]]
+        year = as.character(dat$ext_catch[[time_col]]),
+        observed = dat$ext_catch[[fg]]
       )
-      
       merged <- merge(catch_agg, ext_df, by = "year")
       merged <- merged[stats::complete.cases(merged), ]
-      
       if (nrow(merged) < 3) {
-        return(data.frame(Note = "Insufficient overlapping data for skill assessment"))
+        return(data.frame(Note = "Not enough overlapping years for skill assessment"))
       }
-      
-      skill <- skill_assessment(merged$observed, merged$modeled, input$fg)
+      skill <- skill_assessment(merged$observed, merged$modeled, fg)
       DT::datatable(skill, options = list(pageLength = 10, dom = "t"), rownames = FALSE)
     })
   })
 }
 
-## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
-## ~            Helper Functions                ~ ##
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
 
 normalise_groups_catch <- function(grp) {

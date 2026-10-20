@@ -4,221 +4,151 @@
 
 foodweb_ui <- function(id) {
   ns <- NS(id)
-  
-  fluidPage(
-    titlePanel("Atlantis Food Web and Trophic Levels"),
-    
-    sidebarLayout(
-      sidebarPanel(
-        width = 3,
-        fileInput(ns("diet_file"), "Diet File (DietCheck.txt)", accept = ".txt"),
-        fileInput(ns("grp_file"), "Groups CSV", accept = ".csv"),
-        fileInput(ns("diet_bypol"), "Detailed Diet [Optional]", accept = ".txt"),
-        actionButton(ns("load_data"), "Load Data", class = "btn-primary btn-block"),
-        hr(),
-        conditionalPanel(
-          condition = "output.data_loaded",
-          ns = ns,
-          h5("Food Web Options"),
-          selectInput(ns("focal_fg"), "Focal Functional Group:", choices = NULL),
-          numericInput(ns("max_connections"), "Max Trophic Connections:", 
-                      value = 4, min = 1, max = 10, step = 1),
-          numericInput(ns("min_proportion"), "Min Proportion:", 
-                      value = 0.01, min = 0.001, max = 1, step = 0.001),
-          sliderInput(ns("time_step"), "Time (days):",
-                     min = 0, max = 1, value = 0, step = 1),
-          textOutput(ns("time_step_label")),
-          selectInput(ns("stock"), "Stock:", choices = NULL),
-          conditionalPanel(
-            condition = "output.has_bypol",
-            ns = ns,
-            hr(),
-            h6("By Polygon Analysis"),
-            checkboxInput(ns("use_polygon"), "Analyze by Polygon", FALSE),
-            conditionalPanel(
-              condition = "input.use_polygon",
-              ns = ns,
-              selectInput(ns("polygon"), "Polygon:", choices = NULL)
-            )
-          )
-        )
-      ),
-      
-      mainPanel(
-        width = 9,
-        conditionalPanel(
-          condition = "!output.data_loaded",
-          ns = ns,
-          div(
-            class = "alert alert-info",
-            style = "margin-top: 50px;",
-            icon("info-circle"),
-            " Please load your diet files to visualize the food web."
-          )
-        ),
-        conditionalPanel(
-          condition = "output.data_loaded",
-          ns = ns,
-          plotOutput(ns("foodweb_plot"), height = "800px"),
-          hr(),
-          h4("Trophic Levels"),
-          DT::dataTableOutput(ns("trophic_table"))
-        )
-      )
-    )
-  )
+  tagList(uiOutput(ns("body")))
 }
 
-foodweb_server <- function(id) {
+foodweb_server <- function(id, project = NULL) {
   moduleServer(id, function(input, output, session) {
-    rv <- reactiveValues(
-      data_loaded = FALSE,
-      dat = NULL,
-      dat.bp = NULL,
-      grp.dat = NULL,
-      code.fg = NULL,
-      stk = NULL,
-      pol = NULL,
-      time.stp = NULL,
-      time_vals = NULL,
-      lag = NULL,
-      fg_palette = NULL
-    )
-    
-    output$data_loaded <- reactive({ rv$data_loaded })
-    outputOptions(output, "data_loaded", suspendWhenHidden = FALSE)
-    
-    output$has_bypol <- reactive({ !is.null(rv$dat.bp) })
-    outputOptions(output, "has_bypol", suspendWhenHidden = FALSE)
-    
-    observeEvent(input$load_data, {
-      req(input$diet_file, input$grp_file)
-      
-      tryCatch({
-        showNotification("Loading food web data...", type = "message", id = "load_fw", duration = NULL)
-        
-        dat <- data.frame(data.table::fread(input$diet_file$datapath, header = TRUE, sep = ' ', showProgress = FALSE))
-        
-        dat.bp <- NULL
-        pol <- NULL
-        if(!is.null(input$diet_bypol)){
-          dat.bp <- data.frame(data.table::fread(input$diet_bypol$datapath, header = TRUE, sep = ' ', showProgress = FALSE))
-          pol <- unique(dat.bp$Box)
-        }
-        
-        if(any(names(dat) == 'Group')) names(dat)[which(names(dat) == 'Group')] <- 'Predator'
-        
-        time.vals <- sort(unique(dat$Time))
-        time.stp <- range(time.vals)
-        lag <- if(length(time.vals) > 1) min(diff(time.vals)) else 1
-        grp.dat <- utils::read.csv(input$grp_file$datapath)
-        stk <- unique(dat$Stock)
-        
-        if(any(names(grp.dat) == 'InvertType')){
-          names(grp.dat)[which(names(grp.dat) == 'InvertType')] <- 'GroupType'
-        }
-        if(any(names(grp.dat) == 'isPredator')){
-          names(grp.dat)[which(names(grp.dat) == 'isPredator')] <- 'IsPredator'
-        }
-        
-        code.fg <- grp.dat$Code[grp.dat$IsPredator > 0]
-        
-        code_col <- if ("Code" %in% names(grp.dat)) grp.dat$Code else grp.dat$code
-        
-        rv$dat <- dat
-        rv$dat.bp <- dat.bp
-        rv$grp.dat <- grp.dat
-        rv$code.fg <- code.fg
-        rv$stk <- stk
-        rv$pol <- pol
-        rv$time.stp <- time.stp
-        rv$time_vals <- time.vals
-        rv$lag <- lag
-        rv$fg_palette <- build_fg_palette(code_col)
-        rv$data_loaded <- TRUE
-        
-        updateSelectInput(session, "focal_fg", choices = c('All', as.character(code.fg)))
-        updateSelectInput(session, "stock", choices = stk)
-        updateSliderInput(session, "time_step",
-                         min = min(time.vals),
-                         max = max(time.vals),
-                         value = time.vals[1],
-                         step = lag)
-        
-        if(!is.null(pol)){
-          updateSelectInput(session, "polygon", choices = pol)
-        }
-        
-        removeNotification("load_fw")
-        showNotification("Data loaded successfully!", type = "message", duration = 3)
-      }, error = function(e) {
-        removeNotification("load_fw")
-        showNotification(paste("Error:", e$message), type = "error", duration = 10)
-      })
-    })
-    
-    output$time_step_label <- renderText({
-      req(rv$time_vals, input$time_step)
-      tstep <- nearest_time(as.numeric(input$time_step), rv$time_vals)
-      paste("Selected time:", tstep, "days")
-    })
-    
-    time_prey_data <- reactive({
-      req(rv$dat, input$time_step, input$stock, rv$time_vals)
-      
-      tstep <- nearest_time(as.numeric(input$time_step), rv$time_vals)
-      if(isTRUE(input$use_polygon) && !is.null(rv$dat.bp)){
-        req(input$polygon)
-        rv$dat.bp[rv$dat.bp$Time == tstep & rv$dat.bp$Box == input$polygon, c(2, 6:ncol(rv$dat.bp))]
-      } else {
-        rv$dat[rv$dat$Time == tstep & rv$dat$Stock == input$stock, c(2, 6:ncol(rv$dat))]
+
+    output$body <- renderUI({
+      if (is.null(project) || !isTRUE(project$ready)) {
+        return(tool_missing_card(FILE_LABELS[TOOL_REQUIREMENTS$foodweb], "Food web"))
       }
+      miss <- tool_missing(project$paths, "foodweb")
+      if (length(miss)) return(tool_missing_card(miss, "Food web"))
+      dat <- project$data
+      times <- sort(unique(dat$diet_time$Time))
+      stocks <- if ("Stock" %in% names(dat$diet_time)) unique(dat$diet_time$Stock) else 0
+      grp <- dat$grp
+      code.fg <- grp$code[if ("ispredator" %in% names(grp)) grp$ispredator > 0 else TRUE]
+      ns <- session$ns
+      layout_sidebar(
+        sidebar = sidebar(
+          width = 280, open = "open",
+          selectInput(ns("focal_fg"), "Focal group", choices = c("All", as.character(code.fg))),
+          numericInput(ns("max_connections"), "Max trophic connections", 4, min = 1, max = 10),
+          numericInput(ns("min_proportion"), "Min diet proportion", 0.01, min = 0.001, max = 1, step = 0.001),
+          sliderInput(ns("time_step"), "Time (days)",
+                      min = min(times), max = max(times), value = times[1],
+                      step = if (length(times) > 1) min(diff(times)) else 1),
+          textOutput(ns("time_step_label")),
+          selectInput(ns("stock"), "Stock", choices = stocks)
+        ),
+        uiOutput(ns("net_host")),
+        h4("Trophic levels"),
+        DT::dataTableOutput(ns("trophic_table"))
+      )
     })
-    
+
+    output$time_step_label <- renderText({
+      dat <- project$data
+      req(dat$diet_time, input$time_step)
+      tstep <- nearest_time(as.numeric(input$time_step), sort(unique(dat$diet_time$Time)))
+      origin <- dat$origin
+      when <- days_as_date(tstep, origin)
+      paste("Selected:", tstep, "days",
+            if (inherits(when, "Date")) paste0("(", format(when, "%Y-%m-%d"), ")") else "")
+    })
+
+    time_prey_data <- reactive({
+      dat <- project$data
+      req(dat$diet_time, input$time_step)
+      tstep <- nearest_time(as.numeric(input$time_step), sort(unique(dat$diet_time$Time)))
+      dt <- dat$diet_time[Time == tstep]
+      if ("Stock" %in% names(dt) && !is.null(input$stock)) {
+        dt <- dt[Stock == as.numeric(input$stock)]
+      }
+      drop <- intersect(c("Time", "Stock", "Cohort"), names(dt))
+      as.data.frame(dt[, !drop, with = FALSE])
+    })
+
     prey_data <- reactive({
-      req(time_prey_data(), input$focal_fg, input$max_connections, input$min_proportion, rv$code.fg, rv$grp.dat)
-      tot.prey(input$focal_fg, input$max_connections, rv$code.fg, time_prey_data(), input$min_proportion, rv$grp.dat)
+      dat <- project$data
+      req(time_prey_data(), input$focal_fg, dat$grp)
+      grp <- dat$grp
+      if (!"Code" %in% names(grp) && "code" %in% names(grp)) {
+        grp$Code <- grp$code
+        grp$GroupType <- grp$grouptype
+      }
+      code.fg <- grp$code[if ("ispredator" %in% names(grp)) grp$ispredator > 0 else TRUE]
+      tot.prey(input$focal_fg, input$max_connections, code.fg, time_prey_data(),
+               input$min_proportion, grp)
     })
-    
+
     trophic_data <- reactive({
       req(prey_data())
-      validate(need(!is.null(prey_data()), 'No interaction between predators and prey.'))
-      trophic.lvl(prey_data(), rv$grp.dat)
+      dat <- project$data
+      grp <- dat$grp
+      if (!"Code" %in% names(grp)) {
+        grp$Code <- grp$code
+        grp$GroupType <- grp$grouptype
+      }
+      trophic.lvl(prey_data(), grp)
     })
-    
-    output$foodweb_plot <- renderPlot({
-      req(trophic_data(), prey_data())
-      
-      color.p <- get_foodweb_colors()
-      poly_label <- if(isTRUE(input$use_polygon) && !is.null(input$polygon)) input$polygon else NULL
-      
-      plot.tlvl(trophic_data(), prey_data(), input$focal_fg, pol = poly_label, color.p,
-                fg_colors = rv$fg_palette)
+
+    output$net_host <- renderUI({
+      ns <- session$ns
+      if (requireNamespace("visNetwork", quietly = TRUE)) {
+        visNetwork::visNetworkOutput(ns("network"), height = "640px")
+      } else {
+        plotOutput(ns("network_gg"), height = "640px")
+      }
     })
-    
+
+    output$network <- if (requireNamespace("visNetwork", quietly = TRUE)) {
+      visNetwork::renderVisNetwork({
+        TL <- trophic_data()
+        edges_src <- prey_data()
+        req(TL, edges_src)
+        pal <- project$data$fg_palette
+        nodes <- data.frame(
+          id = TL$FG,
+          label = TL$FG,
+          level = pmax(1, 7 - round(TL$Tlevel)),
+          value = 20,
+          color = unname(get_fg_colors(as.character(TL$FG), pal)),
+          title = paste0(TL$FG, "<br>TL ", round(TL$Tlevel, 2)),
+          stringsAsFactors = FALSE
+        )
+        edges <- data.frame(
+          from = edges_src$Pred,
+          to = edges_src$Prey,
+          value = edges_src$value,
+          width = pmax(1, edges_src$value * 18),
+          title = paste0(edges_src$Pred, " → ", edges_src$Prey, ": ",
+                         round(100 * edges_src$value, 1), "%"),
+          stringsAsFactors = FALSE
+        )
+        vn <- visNetwork::visNetwork(nodes, edges)
+        vn <- visNetwork::visNodes(vn, font = list(size = 16))
+        vn <- visNetwork::visEdges(vn, arrows = "to", color = list(opacity = 0.45))
+        vn <- visNetwork::visHierarchicalLayout(vn, direction = "DU", levelSeparation = 90)
+        vn <- visNetwork::visOptions(vn, highlightNearest = TRUE, nodesIdSelection = TRUE)
+        visNetwork::visPhysics(vn, enabled = FALSE)
+      })
+    } else NULL
+
+    output$network_gg <- renderPlot({
+      plot.tlvl(trophic_data(), prey_data(), input$focal_fg, NULL,
+                get_foodweb_colors(), project$data$fg_palette)
+    })
+
     output$trophic_table <- DT::renderDataTable({
       req(trophic_data())
-      
       table <- with(trophic_data(), data.frame(
         `Functional Group` = FG,
         `Trophic Level` = round(Tlevel, 2)
       ))
-      
-      DT::datatable(table, options = list(pageLength = 15, dom = 'tip'), rownames = FALSE)
+      DT::datatable(table, options = list(pageLength = 15, dom = "tip"), rownames = FALSE)
     })
   })
 }
 
-## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
-## ~            Helper Functions                ~ ##
-## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
-
 prey.pos <- function(FGs, grp.dat){
-  ctg <- vector('numeric')
-  for(i in 1:length(FGs)){
-    ctg[i] <- which(grp.dat$Code %in% FGs[i], arr.ind = TRUE)
-  }
-  typ <- grp.dat$GroupType[ctg]
+  code_col <- if ("Code" %in% names(grp.dat)) grp.dat$Code else grp.dat$code
+  type_col <- if ("GroupType" %in% names(grp.dat)) grp.dat$GroupType else grp.dat$grouptype
+  ctg <- match(FGs, code_col)
+  typ <- type_col[ctg]
   TL.v <- ifelse(typ %in% c('SHARK', 'MAMMAL'), 4,
           ifelse(typ == 'BIRD', 3.5,
           ifelse(typ == 'FISH', 3.24,
@@ -294,7 +224,8 @@ trophic.lvl <- function(rel.prey, grp.dat){
     pospred <- which(rel.prey$Pred %in% pred)
     TL <- c(TL, Tlevel(rel.prey$value[pospred], rel.prey$TLprey[pospred]))
   }
-  pp.prey <- unique(rel.prey$Prey[-which(rel.prey$Prey %in% npred)])
+  left <- rel.prey$Prey[-which(rel.prey$Prey %in% npred)]
+  pp.prey <- unique(left)
   pp.prey <- data.frame(FG = pp.prey, Tlevel = prey.pos(pp.prey, grp.dat))
   TL <- data.frame(FG = npred, Tlevel = TL)
   TL <- rbind(TL, pp.prey)
@@ -311,7 +242,8 @@ trophic.lvl <- function(rel.prey, grp.dat){
     pospred <- which(prey.f$Pred %in% pred)
     TL <- c(TL, Tlevel(prey.f$value[pospred], prey.f$TLprey[pospred]))
   }
-  pp.prey <- unique(prey.f$Prey[-which(prey.f$Prey %in% npred)])
+  left <- prey.f$Prey[-which(prey.f$Prey %in% npred)]
+  pp.prey <- unique(left)
   pp.prey <- data.frame(FG = pp.prey, Tlevel = prey.pos(pp.prey, grp.dat))
   TL <- data.frame(FG = npred, Tlevel = TL)
   TL <- rbind(TL, pp.prey)
