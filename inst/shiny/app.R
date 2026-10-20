@@ -41,7 +41,12 @@ source(file.path(app_dir, "modules", "feeding_module.R"))
 source(file.path(app_dir, "modules", "mortality_module.R"))
 source(file.path(app_dir, "modules", "compare_module.R"))
 source(file.path(app_dir, "modules", "project_store.R"))
+source(file.path(app_dir, "modules", "analysis_helpers.R"))
 source(file.path(app_dir, "modules", "overview_module.R"))
+source(file.path(app_dir, "modules", "spatial_module.R"))
+source(file.path(app_dir, "modules", "consumption_module.R"))
+source(file.path(app_dir, "modules", "physics_module.R"))
+source(file.path(app_dir, "modules", "ensemble_module.R"))
 
 ui <- page_navbar(
   title = "ReactiveAtlantis",
@@ -59,6 +64,10 @@ ui <- page_navbar(
   nav_item(input_dark_mode(id = "color_mode", mode = "light")),
   nav_panel("Overview", overview_ui("overview")),
   nav_panel("Compare", compare_ui("compare")),
+  nav_panel("Spatial", spatial_ui("spatial")),
+  nav_panel("Consumption", consumption_ui("consumption")),
+  nav_panel("Physics", physics_ui("physics")),
+  nav_panel("Multi-run", ensemble_ui("ensemble")),
   nav_panel("Predation", predation_ui("predation")),
   nav_panel("Food web", foodweb_ui("foodweb")),
   nav_panel("Recruitment", recruitment_ui("recruitment")),
@@ -72,6 +81,10 @@ server <- function(input, output, session) {
   project <- project_server("project")
   overview_server("overview", project)
   compare_server("compare", project)
+  spatial_server("spatial", project)
+  consumption_server("consumption", project)
+  physics_server("physics", project)
+  ensemble_server("ensemble", project)
   predation_server("predation", project)
   foodweb_server("foodweb", project)
   recruitment_server("recruitment", project)
