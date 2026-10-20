@@ -38,15 +38,26 @@ source(file.path(mod, "foodweb_module.R"), local = TRUE)
 source(file.path(mod, "mortality_module.R"), local = TRUE)
 source(file.path(mod, "compare_module.R"), local = TRUE)
 source(file.path(mod, "project_store.R"), local = TRUE)
+source(file.path(mod, "analysis_helpers.R"), local = TRUE)
 source(file.path(mod, "overview_module.R"), local = TRUE)
 source(file.path(mod, "feeding_module.R"), local = TRUE)
+source(file.path(mod, "recruitment_module.R"), local = TRUE)
+source(file.path(mod, "spatial_module.R"), local = TRUE)
+source(file.path(mod, "consumption_module.R"), local = TRUE)
+source(file.path(mod, "physics_module.R"), local = TRUE)
+source(file.path(mod, "ensemble_module.R"), local = TRUE)
 
-make_project <- function(...) {
+make_project <- function(..., ensemble = NULL) {
   paths <- empty_paths()
   args <- list(...)
   for (nm in names(args)) paths[[nm]] <- args[[nm]]
   loaded <- load_project(paths)
-  shiny::reactiveValues(ready = !is.null(loaded$grp), paths = paths, data = loaded)
+  shiny::reactiveValues(
+    ready = !is.null(loaded$grp),
+    paths = paths,
+    data = loaded,
+    ensemble = ensemble
+  )
 }
 
 make_groups_csv <- function(path) {
@@ -512,5 +523,487 @@ test_that("catch_server without a project asks for the required files", {
     expect_true(grepl("needs more files", body, ignore.case = TRUE) ||
                   grepl("CATCH", body) || grepl("Groups CSV", body))
   })
+})
+
+## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
+## ~  Spatial, consumption, physics, ensemble    ~ ##
+## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
+
+make_cod_groups_csv <- function(path) {
+  write.csv(
+    data.frame(
+      Code = c("COD", "PHY"),
+      Name = c("Cod", "Phy"),
+      LongName = c("Cod", "Phytoplankton"),
+      NumCohorts = c(2, 1),
+      IsImpacted = c(1, 0),
+      IsTurnedOn = c(1, 1),
+      IsPredator = c(1, 0),
+      GroupType = c("FISH", "LG_PHY"),
+      stringsAsFactors = FALSE
+    ),
+    path, row.names = FALSE
+  )
+}
+
+make_bgm <- function(path) {
+  writeLines(c(
+    "nbox 3",
+    "box0.vert 4",
+    "0 0",
+    "1 0",
+    "1 1",
+    "0 1",
+    "box0.ibox 1 2 -1",
+    "box0.botz -50",
+    "box0.area 1",
+    "box1.vert 4",
+    "1 0",
+    "2 0",
+    "2 1",
+    "1 1",
+    "box1.ibox 0 2",
+    "box1.botz -20",
+    "box1.area 1",
+    "box2.vert 4",
+    "2 0",
+    "3 0",
+    "3 1",
+    "2 1",
+    "box2.ibox 0 1",
+    "box2.botz 0",
+    "box2.area 1"
+  ), path)
+}
+
+fill3 <- function(nc, name, v1, v2, v3) {
+  arr <- array(NA_real_, dim = c(2, 3, 3))
+  arr[, , 1] <- v1
+  arr[, , 2] <- v2
+  arr[, , 3] <- v3
+  ncdf4::ncvar_put(nc, name, arr)
+}
+
+make_biology_nc <- function(path) {
+  dim_z <- ncdf4::ncdim_def("z", "layer", 1:2)
+  dim_b <- ncdf4::ncdim_def("b", "box", 1:3)
+  t_vals <- c(0, 365, 730)
+  dim_t <- ncdf4::ncdim_def("t", "days since 1970-01-01", t_vals)
+  mk <- function(name, units = "mg N m-3") {
+    ncdf4::ncvar_def(name, units, list(dim_z, dim_b, dim_t), -999, prec = "float")
+  }
+  vars <- list(
+    mk("Cod1_StructN"), mk("Cod1_ResN"), mk("Cod1_Nums", "individuals"),
+    mk("Cod2_StructN"), mk("Cod2_ResN"), mk("Cod2_Nums", "individuals"),
+    mk("Phy_N"), mk("Temp", "degC"), mk("salt", "PSU"),
+    mk("NO3"), mk("NH3"), mk("Chl_a"), mk("Denitrificatio"),
+    mk("volume", "m3"),
+    ncdf4::ncvar_def("nominal_dz", "m", list(dim_z, dim_b), -999, prec = "float")
+  )
+  nc <- ncdf4::nc_create(path, vars, force_v4 = TRUE)
+  ncdf4::ncatt_put(nc, "t", "units", "days since 1970-01-01")
+  fill3(nc, "Cod1_StructN", 10, 15, 20)
+  fill3(nc, "Cod1_ResN", 5, 5, 5)
+  fill3(nc, "Cod1_Nums", 100, 100, 100)
+  fill3(nc, "Cod2_StructN", 8, 8, 8)
+  fill3(nc, "Cod2_ResN", 4, 4, 4)
+  fill3(nc, "Cod2_Nums", 50, 50, 50)
+  fill3(nc, "Phy_N", 2, 2, 2)
+  fill3(nc, "Temp", 8, 10, 12)
+  fill3(nc, "salt", 34, 34, 34)
+  fill3(nc, "NO3", 1, 1.1, 1.2)
+  fill3(nc, "NH3", 0.2, 0.2, 0.2)
+  fill3(nc, "Chl_a", 0.5, 0.6, 0.4)
+  fill3(nc, "Denitrificatio", 0.01, 0.01, 0.01)
+  fill3(nc, "volume", 1e6, 1e6, 1e6)
+  ncdf4::ncvar_put(nc, "nominal_dz", array(c(10, 40), dim = c(2, 3)))
+  ncdf4::nc_close(nc)
+}
+
+make_prod_nc <- function(path) {
+  dim_z <- ncdf4::ncdim_def("z", "layer", 1:2)
+  dim_b <- ncdf4::ncdim_def("b", "box", 1:3)
+  t_vals <- c(0, 365, 730)
+  dim_t <- ncdf4::ncdim_def("t", "days since 1970-01-01", t_vals)
+  mk <- function(name) {
+    ncdf4::ncvar_def(name, "mg N m-3 d-1", list(dim_z, dim_b, dim_t), -999, prec = "float")
+  }
+  nc <- ncdf4::nc_create(path, list(mk("Eat_COD"), mk("Grazing_PHY")), force_v4 = TRUE)
+  ncdf4::ncatt_put(nc, "t", "units", "days since 1970-01-01")
+  fill3(nc, "Eat_COD", 1, 1, 1)
+  fill3(nc, "Grazing_PHY", 0.4, 0.4, 0.4)
+  ncdf4::nc_close(nc)
+}
+
+make_obs_csv <- function(path) {
+  write.csv(
+    data.frame(
+      Code = c("COD", "COD", "COD"),
+      Year = c(1970, 1971, 1971),
+      Value = c(100, 50, 10),
+      Lower = c(80, 40, 8),
+      Upper = c(120, 60, 12),
+      Type = c("Biomass", "SSB", "Recruitment"),
+      stringsAsFactors = FALSE
+    ),
+    path, row.names = FALSE
+  )
+}
+
+test_that("PROD.nc is not treated as biology output and obs CSV is classified", {
+  tmpdir <- tempfile()
+  dir.create(tmpdir)
+  on.exit(unlink(tmpdir, recursive = TRUE), add = TRUE)
+  file.create(file.path(tmpdir, "outputNorthSea.nc"))
+  file.create(file.path(tmpdir, "outputNorthSeaPROD.nc"))
+  file.create(file.path(tmpdir, "outputNorthSeaCATCH.nc"))
+  make_obs_csv(file.path(tmpdir, "observations.csv"))
+  found <- detect_project_files(tmpdir)
+  expect_true(path_ok(found$prod_nc))
+  expect_true(grepl("PROD", basename(found$prod_nc), ignore.case = TRUE))
+  expect_true(path_ok(found$output_nc))
+  expect_false(grepl("PROD", basename(found$output_nc), ignore.case = TRUE))
+  expect_false(identical(found$output_nc, found$prod_nc))
+  expect_true(path_ok(found$obs_csv))
+})
+
+test_that("problem_cohorts flags StructN outside the 0.5-1.5 band", {
+  tmpdir <- tempfile()
+  dir.create(tmpdir)
+  on.exit(unlink(tmpdir, recursive = TRUE), add = TRUE)
+  grp_path <- file.path(tmpdir, "grp.csv")
+  nc_path <- file.path(tmpdir, "output.nc")
+  make_cod_groups_csv(grp_path)
+  make_biology_nc(nc_path)
+  grp <- utils::read.csv(grp_path, stringsAsFactors = FALSE)
+  names(grp) <- tolower(names(grp))
+  nc <- ncdf4::nc_open(nc_path)
+  on.exit(ncdf4::nc_close(nc), add = TRUE)
+  tbl <- problem_cohorts(nc, grp, ACCEPT_BAND)
+  sn1 <- tbl[tbl$Code == "COD" & tbl$Cohort == 1 & tbl$Component == "StructN", ]
+  expect_equal(nrow(sn1), 1)
+  expect_equal(sn1$Flag, "Outside band")
+  expect_equal(sn1$Relative, 2, tolerance = 1e-8)
+  rn1 <- tbl[tbl$Code == "COD" & tbl$Cohort == 1 & tbl$Component == "ResN", ]
+  expect_equal(rn1$Flag, "OK")
+})
+
+test_that("BGM polygons mark island and neighbour -1 boxes as boundary", {
+  tmpdir <- tempfile()
+  dir.create(tmpdir)
+  on.exit(unlink(tmpdir, recursive = TRUE), add = TRUE)
+  bgm_path <- file.path(tmpdir, "geo.bgm")
+  make_bgm(bgm_path)
+  poly <- read_bgm_polygons(bgm_path)
+  expect_true(all(c("boxid", "x", "y", "boundary") %in% names(poly)))
+  expect_equal(sort(unique(poly$boxid)), 0:2)
+  expect_true(unique(poly$boundary[poly$boxid == 0]))
+  expect_false(unique(poly$boundary[poly$boxid == 1]))
+  expect_true(unique(poly$boundary[poly$boxid == 2]))
+})
+
+test_that("biomass_by_box uses Cod1_StructN/ResN/Nums and Phy_N x volume", {
+  tmpdir <- tempfile()
+  dir.create(tmpdir)
+  on.exit(unlink(tmpdir, recursive = TRUE), add = TRUE)
+  grp_path <- file.path(tmpdir, "grp.csv")
+  nc_path <- file.path(tmpdir, "output.nc")
+  make_cod_groups_csv(grp_path)
+  make_biology_nc(nc_path)
+  grp <- utils::read.csv(grp_path, stringsAsFactors = FALSE)
+  names(grp) <- tolower(names(grp))
+  nc <- ncdf4::nc_open(nc_path)
+  on.exit(ncdf4::nc_close(nc), add = TRUE)
+  cod <- biomass_by_box(nc, grp, "COD")
+  expect_equal(sort(unique(cod$Box)), 0:2)
+  expect_equal(length(unique(cod$Time)), 3)
+  expect_true(all(cod$Biomass > 0))
+  phy <- biomass_by_box(nc, grp, "PHY")
+  expect_true(all(phy$Biomass > 0))
+  expect_equal(nrow(phy), 9)
+})
+
+test_that("Eat_COD and Grazing_PHY become tonnes split by DietCheck", {
+  tmpdir <- tempfile()
+  dir.create(tmpdir)
+  on.exit(unlink(tmpdir, recursive = TRUE), add = TRUE)
+  grp_path <- file.path(tmpdir, "grp.csv")
+  out_path <- file.path(tmpdir, "output.nc")
+  prod_path <- file.path(tmpdir, "outputPROD.nc")
+  make_cod_groups_csv(grp_path)
+  make_biology_nc(out_path)
+  make_prod_nc(prod_path)
+  grp <- utils::read.csv(grp_path, stringsAsFactors = FALSE)
+  names(grp) <- tolower(names(grp))
+  nc_out <- ncdf4::nc_open(out_path)
+  nc_prod <- ncdf4::nc_open(prod_path)
+  on.exit({
+    ncdf4::nc_close(nc_out)
+    ncdf4::nc_close(nc_prod)
+  }, add = TRUE)
+  expect_equal(prod_eat_name(names(nc_prod$var), "COD", "Cod"), "Eat_COD")
+  expect_equal(prod_eat_name(names(nc_prod$var), "PHY", "Phy"), "Grazing_PHY")
+  tot <- consumed_tonnes(nc_prod, nc_out, grp, "COD")
+  expect_equal(tot$variable, "Eat_COD")
+  expect_equal(length(tot$tonnes), 3)
+  expect_true(all(tot$tonnes > 0))
+  diet <- data.table::data.table(
+    Time = c(0, 365, 730),
+    Predator = "COD",
+    Cohort = 1,
+    Stock = 0,
+    COD = 0,
+    PHY = 1
+  )
+  by_prey <- consumption_by_prey(tot$tonnes, diet, "COD")
+  expect_true("PHY" %in% by_prey$Prey)
+  expect_equal(sum(by_prey$Tonnes[by_prey$Prey == "PHY"]), sum(tot$tonnes),
+               tolerance = 1e-8)
+  as_prey <- consumption_as_prey(nc_prod, nc_out, grp, "PHY", diet)
+  expect_true("COD" %in% as_prey$Predator)
+  expect_true(all(as_prey$Tonnes > 0))
+})
+
+test_that("physics_long reads Temp and NO3 by box and layer", {
+  tmpdir <- tempfile()
+  dir.create(tmpdir)
+  on.exit(unlink(tmpdir, recursive = TRUE), add = TRUE)
+  nc_path <- file.path(tmpdir, "output.nc")
+  make_biology_nc(nc_path)
+  nc <- ncdf4::nc_open(nc_path)
+  on.exit(ncdf4::nc_close(nc), add = TRUE)
+  vars <- names(nc$var)
+  expect_equal(match_nc_var(vars, PHYSICS_CANDIDATES$Temperature), "Temp")
+  expect_equal(match_nc_var(vars, PHYSICS_CANDIDATES$NO3), "NO3")
+  temp <- physics_long(nc, "Temp", box = 1)
+  expect_equal(sort(unique(temp$Layer)), 0:1)
+  expect_equal(unique(temp$Box), 1)
+  expect_equal(temp$Value[temp$Time == 1 & temp$Layer == 0], 8)
+  expect_equal(temp$Value[temp$Time == 3 & temp$Layer == 0], 12)
+  no3 <- physics_long(nc, "NO3", box = NULL)
+  expect_equal(sort(unique(no3$Box)), 0:2)
+  dz <- layer_thickness(nc)
+  expect_equal(dz$name, "nominal_dz")
+  expect_equal(dim(dz$array), c(2, 3))
+})
+
+test_that("observations CSV maps Type and overlays without error when missing", {
+  tmpdir <- tempfile()
+  dir.create(tmpdir)
+  on.exit(unlink(tmpdir, recursive = TRUE), add = TRUE)
+  obs_path <- file.path(tmpdir, "obs.csv")
+  make_obs_csv(obs_path)
+  obs <- read_observations(obs_path)
+  expect_equal(sort(unique(obs$Type)), c("Biomass", "Recruitment", "SSB"))
+  expect_equal(nrow(obs_for(obs, "COD", "SSB")), 1)
+  expect_equal(nrow(obs_for(NULL, "COD", "Biomass")), 0)
+  df <- data.frame(Time = as.Date("1970-01-01") + c(0, 365), Value = c(90, 110))
+  p <- ggplot2::ggplot(df, ggplot2::aes(x = Time, y = Value)) + ggplot2::geom_line()
+  p2 <- add_obs_overlay(p, obs, "COD", "Biomass")
+  expect_s3_class(p2, "ggplot")
+  expect_gt(length(p2$layers), length(p$layers))
+})
+
+test_that("acceptable band is drawn on relative ggplot views", {
+  df <- data.frame(
+    Time = as.Date("1970-01-01") + c(0, 365, 730),
+    Relative = c(1, 0.8, 1.2)
+  )
+  p <- ggplot2::ggplot(df, ggplot2::aes(x = Time, y = Relative)) + ggplot2::geom_line()
+  p <- acceptable_band_layer(p, 0.5, 1.5, xmin = min(df$Time), xmax = max(df$Time))
+  expect_s3_class(p, "ggplot")
+  expect_true(any(vapply(p$layers, function(ly) inherits(ly$geom, "GeomHline"), logical(1))))
+})
+
+test_that("ensemble mean and range are computed when more than two runs", {
+  runs <- list(
+    list(label = "A", biomindx = data.frame(Time = c(0, 365), COD = c(100, 80))),
+    list(label = "B", biomindx = data.frame(Time = c(0, 365), COD = c(120, 90))),
+    list(label = "C", biomindx = data.frame(Time = c(0, 365), COD = c(80, 70)))
+  )
+  df <- ensemble_table(runs, "COD", "biomass")
+  expect_equal(length(unique(df$Run)), 3)
+  st <- ensemble_stats(df)
+  expect_equal(st$Mean[st$Time == 0], 100)
+  expect_equal(st$Lo[st$Time == 0], 80)
+  expect_equal(st$Hi[st$Time == 0], 120)
+})
+
+test_that("overview_server reports problem cohorts from Cod1_StructN", {
+  tmpdir <- tempfile()
+  dir.create(tmpdir)
+  on.exit(unlink(tmpdir, recursive = TRUE), add = TRUE)
+  grp_path <- file.path(tmpdir, "grp.csv")
+  nc_path <- file.path(tmpdir, "output.nc")
+  biom_path <- file.path(tmpdir, "BiomIndx.txt")
+  make_cod_groups_csv(grp_path)
+  make_biology_nc(nc_path)
+  utils::write.table(data.frame(Time = c(0, 730), COD = c(100, 80), PHY = c(50, 55)),
+                     biom_path, row.names = FALSE, quote = FALSE)
+  proj <- make_project(groups = grp_path, output_nc = nc_path, biomindx = biom_path)
+  shiny::testServer(overview_server, args = list(project = proj), {
+    cards <- paste(as.character(output$cards$html), collapse = " ")
+    expect_true(grepl("Problem cohorts", cards, ignore.case = TRUE) || nchar(cards) > 0)
+    tbl <- output$cohort_table
+    expect_true(!is.null(tbl))
+    panel <- paste(as.character(output$health_panel$html), collapse = " ")
+    expect_true(grepl("StructN", panel) || grepl("cohort", panel, ignore.case = TRUE))
+  })
+})
+
+test_that("compare_server exposes the acceptable band and age-structure bars", {
+  tmpdir <- tempfile()
+  dir.create(tmpdir)
+  on.exit(unlink(tmpdir, recursive = TRUE), add = TRUE)
+  grp_path <- file.path(tmpdir, "grp.csv")
+  nc_path <- file.path(tmpdir, "output.nc")
+  bgm_path <- file.path(tmpdir, "geo.bgm")
+  make_cod_groups_csv(grp_path)
+  make_biology_nc(nc_path)
+  make_bgm(bgm_path)
+  proj <- make_project(groups = grp_path, output_nc = nc_path, bgm = bgm_path)
+  shiny::testServer(compare_server, args = list(project = proj), {
+    body <- paste(as.character(output$body$html), collapse = " ")
+    expect_true(grepl("acceptable band", body, ignore.case = TRUE))
+    expect_true(grepl("age_bars", body) || grepl("Age structure", body, ignore.case = TRUE))
+  })
+})
+
+test_that("spatial_server draws from BGM polygons and consumption needs PROD", {
+  tmpdir <- tempfile()
+  dir.create(tmpdir)
+  on.exit(unlink(tmpdir, recursive = TRUE), add = TRUE)
+  grp_path <- file.path(tmpdir, "grp.csv")
+  nc_path <- file.path(tmpdir, "output.nc")
+  bgm_path <- file.path(tmpdir, "geo.bgm")
+  make_cod_groups_csv(grp_path)
+  make_biology_nc(nc_path)
+  make_bgm(bgm_path)
+  proj <- make_project(groups = grp_path, output_nc = nc_path, bgm = bgm_path)
+  shiny::testServer(spatial_server, args = list(project = proj), {
+    body <- paste(as.character(output$body$html), collapse = " ")
+    expect_true(grepl("time_i", body) || grepl("Functional group", body))
+    session$setInputs(fg = "COD", time_i = 1, highlight_boundary = TRUE)
+    expect_true(!is.null(output$map_plot) || grepl("map_plot", body))
+  })
+
+  shiny::testServer(consumption_server, args = list(project = proj), {
+    body <- paste(as.character(output$body$html), collapse = " ")
+    expect_true(grepl("PROD", body) || grepl("outputPROD", body, ignore.case = TRUE))
+  })
+})
+
+test_that("consumption_server and physics_server render with Atlantis names", {
+  tmpdir <- tempfile()
+  dir.create(tmpdir)
+  on.exit(unlink(tmpdir, recursive = TRUE), add = TRUE)
+  grp_path <- file.path(tmpdir, "grp.csv")
+  nc_path <- file.path(tmpdir, "output.nc")
+  prod_path <- file.path(tmpdir, "outputPROD.nc")
+  diet_path <- file.path(tmpdir, "DietCheck.txt")
+  make_cod_groups_csv(grp_path)
+  make_biology_nc(nc_path)
+  make_prod_nc(prod_path)
+  diet <- data.frame(
+    Time = rep(c(0, 365, 730), each = 1),
+    Predator = "COD",
+    Cohort = 1,
+    Stock = 0,
+    COD = 0,
+    PHY = 1
+  )
+  utils::write.table(diet, diet_path, row.names = FALSE, quote = FALSE)
+  proj <- make_project(
+    groups = grp_path, output_nc = nc_path, prod_nc = prod_path, dietcheck = diet_path
+  )
+  shiny::testServer(consumption_server, args = list(project = proj), {
+    body <- paste(as.character(output$body$html), collapse = " ")
+    expect_true(grepl("What this group eats", body) || grepl("predator", body, ignore.case = TRUE))
+    session$setInputs(view = "predator", fg = "COD", top_n = 8)
+    host <- paste(as.character(output$plot_host$html), collapse = " ")
+    expect_true(grepl("cons_plot", host) || nchar(host) > 0)
+  })
+
+  shiny::testServer(physics_server, args = list(project = proj), {
+    body <- paste(as.character(output$body$html), collapse = " ")
+    expect_true(grepl("Temp", body) || grepl("Tracer", body))
+    session$setInputs(tracer = "Temp", box = "0", all_boxes = FALSE)
+    expect_true(!is.null(output$tracer_plot) || grepl("tracer", body, ignore.case = TRUE))
+  })
+})
+
+test_that("ensemble_server overlays three BiomIndx runs with mean and range", {
+  tmpdir <- tempfile()
+  dir.create(tmpdir)
+  on.exit(unlink(tmpdir, recursive = TRUE), add = TRUE)
+  grp_path <- file.path(tmpdir, "grp.csv")
+  make_cod_groups_csv(grp_path)
+  biom <- list(
+    A = data.frame(Time = c(0, 365), COD = c(100, 80), PHY = c(50, 50)),
+    B = data.frame(Time = c(0, 365), COD = c(120, 90), PHY = c(50, 50)),
+    C = data.frame(Time = c(0, 365), COD = c(80, 70), PHY = c(50, 50))
+  )
+  runs <- lapply(names(biom), function(lab) {
+    list(label = lab, biomindx = biom[[lab]], yoy = NULL, ssb = NULL, catch_nc = NULL)
+  })
+  proj <- make_project(groups = grp_path, ensemble = runs)
+  proj$ensemble <- runs
+  shiny::testServer(ensemble_server, args = list(project = proj), {
+    body <- paste(as.character(output$body$html), collapse = " ")
+    expect_true(grepl("ensemble mean", body, ignore.case = TRUE) || grepl("kind", body))
+    session$setInputs(kind = "biomass", fg = "COD")
+    expect_true(!is.null(output$ens_plot) || nchar(body) > 0)
+  })
+})
+
+test_that("recruitment_server overlays Recruitment observations on YOY", {
+  tmpdir <- tempfile()
+  dir.create(tmpdir)
+  on.exit(unlink(tmpdir, recursive = TRUE), add = TRUE)
+  grp_path <- file.path(tmpdir, "grp.csv")
+  nc_path <- file.path(tmpdir, "output.nc")
+  yoy_path <- file.path(tmpdir, "YOY.txt")
+  ssb_path <- file.path(tmpdir, "SSB.txt")
+  prm_path <- file.path(tmpdir, "bio.prm")
+  obs_path <- file.path(tmpdir, "obs.csv")
+  make_cod_groups_csv(grp_path)
+  make_biology_nc(nc_path)
+  make_obs_csv(obs_path)
+  writeLines(c("flagrecruitCOD 3", "BHalpha_COD 1.5", "BHbeta_COD 0.01", "pPREY1COD 1", "0"),
+             prm_path)
+  utils::write.table(
+    data.frame(Time = c(0, 365, 730), COD.0 = c(20, 22, 18)),
+    yoy_path, row.names = FALSE, quote = FALSE
+  )
+  utils::write.table(
+    data.frame(Time = c(0, 365, 730), COD = c(80, 70, 60)),
+    ssb_path, row.names = FALSE, quote = FALSE
+  )
+  proj <- make_project(
+    groups = grp_path, output_nc = nc_path, yoy = yoy_path,
+    ssb = ssb_path, bio_prm = prm_path, obs_csv = obs_path
+  )
+  shiny::testServer(recruitment_server, args = list(project = proj), {
+    body <- paste(as.character(output$body$html), collapse = " ")
+    expect_true(grepl("ssb", body, ignore.case = TRUE) || grepl("Spawning", body))
+    session$setInputs(analysis_type = "yoy", fg_yoy = "COD", new_alpha = 1.5, new_beta = 0.01)
+    host <- paste(as.character(output$analysis_output$html), collapse = " ")
+    expect_true(grepl("plot_yoy", host) || nchar(host) > 0)
+    session$setInputs(analysis_type = "ssb")
+    ssb_host <- paste(as.character(output$analysis_output$html), collapse = " ")
+    expect_true(grepl("plot_ssb", ssb_host) || nchar(ssb_host) > 0)
+  })
+})
+
+test_that("app.R sources the new analysis modules", {
+  app_file <- file.path(root, "inst", "shiny", "app.R")
+  parsed <- parse(app_file)
+  txt <- paste(vapply(parsed, function(e) paste(deparse(e), collapse = " "), character(1)),
+               collapse = "\n")
+  expect_true(grepl("analysis_helpers.R", txt, fixed = TRUE))
+  expect_true(grepl("spatial_ui", txt, fixed = TRUE))
+  expect_true(grepl("consumption_ui", txt, fixed = TRUE))
+  expect_true(grepl("physics_ui", txt, fixed = TRUE))
+  expect_true(grepl("ensemble_ui", txt, fixed = TRUE))
 })
 

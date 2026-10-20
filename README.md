@@ -30,15 +30,21 @@ launch_reactiveatlantis()
 
 1. Point the **Run** sidebar at an Atlantis output folder (or attach files).
    Files are detected by suffix (`*BiomIndx.txt`, `*DietCheck.txt`, `*CATCH.nc`,
-   `*.bgm`, groups vs fisheries CSV headers, `pPREY` vs `toutinc` in `.prm`).
+   `*PROD.nc`, `*.bgm`, groups vs fisheries vs observations CSV headers,
+   `pPREY` vs `toutinc` in `.prm`). `outputPROD.nc` is never treated as the
+   biology output NetCDF.
 2. Click **Load run**. The checklist shows which files are present and which
    tools are enabled. A tool whose files are missing stays on a short “needs”
    card instead of a blank plot.
-3. Start on **Overview**. Summary cards (groups, boxes, layers, time span in
+3. Optional: paste extra run folders (one path per line) for the Multi-run
+   tab, and attach an observations CSV (`Code, Year, Value, Lower, Upper,
+   Type` where Type is `Biomass`, `SSB` or `Recruitment`).
+4. Start on **Overview**. Summary cards (groups, boxes, layers, time span in
    years, start date from the NetCDF time units) sit above a sortable health
    table: groups that fall below 1% of initial biomass, or grow more than
-   tenfold.
-4. Use the other tabs as usual. Dark mode is the toggle in the navbar.
+   tenfold, plus age classes whose mean StructN or ResN at the end of the run
+   sits outside 0.5–1.5 of the initial value.
+5. Use the other tabs as usual. Dark mode is the toggle in the navbar.
 
 ![Group health](man/figures/overview_health.png)
 
@@ -46,16 +52,28 @@ launch_reactiveatlantis()
 
 | Tab | What you get |
 | --- | --- |
-| Compare | Faceted biomass with free y, GroupType / search filter, relative-to-initial toggle |
+| Compare | Faceted biomass with free y, GroupType / search filter, relative-to-initial toggle, optional 0.5–1.5 band on relative views, age-structure bars, observed biomass points |
+| Spatial | Biomass per box drawn from `.bgm` polygons, time slider, group selector, per-box series; boundary boxes outlined |
+| Consumption | Tonnes consumed from `outputPROD.nc` (`Eat_` / `Grazing_`) × volume × DietCheck; predator and prey views. Disabled with a message if PROD is missing |
+| Physics | Temperature, salinity, NO3, NH3, Chl_a and denitrification by box and layer, plus `nominal_dz` |
+| Multi-run | Overlay biomass, SSB, YOY or catch from extra run folders; ensemble mean and range when more than two runs are loaded |
 | Predation | Stacked diet composition, top N prey plus Other, year axis |
 | Food web | Interactive network (visNetwork when installed) with a time slider |
-| Recruitment | Beverton–Holt alpha/beta in a side panel; plots update as you type |
+| Recruitment | Beverton–Holt alpha/beta in a side panel; SSB view; observed Recruitment / SSB ribbons |
 | Growth | Light / nutrient / eddy limitation by layer, years on the x-axis |
 | Catch | Stacked catch by group or fleet; observed overlay and skill when a catch CSV is loaded |
 | Feeding | Searchable heatmap; cells with pPREY > 0 and gape overlap = 0 are flagged |
 | Mortality | Fishing, natural and predation mortality stacked per age (Age01…Age10) |
 
 ![Compare small multiples](man/figures/compare.png)
+
+![Spatial biomass map](man/figures/spatial.png)
+
+![Consumption from PROD.nc](man/figures/consumption.png)
+
+![Physics tracers](man/figures/physics.png)
+
+![Multi-run ensemble](man/figures/ensemble.png)
 
 ![Predation diet](man/figures/predation.png)
 
