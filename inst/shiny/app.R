@@ -18,7 +18,13 @@ library(proj4)
 library(tidyr)
 library(stats)
 
-options(shiny.maxRequestSize = 500 * 1024^2)
+## Keep a larger user- or launcher-set limit; default to 4 GB when unset.
+max_upload_mb <- getOption("reactiveatlantis.max_upload_mb", default = 4096)
+requested_upload <- as.numeric(max_upload_mb) * 1024^2
+current_upload <- getOption("shiny.maxRequestSize")
+if (is.null(current_upload) || is.na(current_upload) || current_upload < requested_upload) {
+  options(shiny.maxRequestSize = requested_upload)
+}
 
 app_dir <- getwd()
 source(file.path(app_dir, "modules", "colors.R"))
