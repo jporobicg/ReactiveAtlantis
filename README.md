@@ -54,7 +54,7 @@ launch_reactiveatlantis()
 | --- | --- |
 | Compare | Faceted biomass with free y, GroupType / search filter, relative-to-initial toggle, optional 0.5–1.5 band on relative views, age-structure bars, observed biomass points |
 | Spatial | Biomass per box drawn from `.bgm` polygons, time slider, group selector, per-box series; boundary boxes outlined |
-| Consumption | Tonnes consumed from `outputPROD.nc` (`Eat_` / `Grazing_`) × volume × DietCheck; predator and prey views. Disabled with a message if PROD is missing |
+| Consumption | Tonnes consumed from `outputPROD.nc`: age groups `<name><cohort>_Eat`, pools `<name>Grazing` (Name column, case-sensitive) × volume × DietCheck; predator and prey views. Disabled if PROD is missing |
 | Physics | Temperature, salinity, NO3, NH3, Chl_a and denitrification by box and layer, plus `nominal_dz` |
 | Multi-run | Overlay biomass, SSB, YOY or catch from extra run folders; ensemble mean and range when more than two runs are loaded |
 | Predation | Stacked diet composition, top N prey plus Other, year axis |

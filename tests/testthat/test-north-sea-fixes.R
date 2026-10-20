@@ -533,7 +533,7 @@ make_cod_groups_csv <- function(path) {
   write.csv(
     data.frame(
       Code = c("COD", "PHY"),
-      Name = c("Cod", "Phy"),
+      Name = c("cod", "diatoms"),
       LongName = c("Cod", "Phytoplankton"),
       NumCohorts = c(2, 1),
       IsImpacted = c(1, 0),
@@ -593,22 +593,22 @@ make_biology_nc <- function(path) {
     ncdf4::ncvar_def(name, units, list(dim_z, dim_b, dim_t), -999, prec = "float")
   }
   vars <- list(
-    mk("Cod1_StructN"), mk("Cod1_ResN"), mk("Cod1_Nums", "individuals"),
-    mk("Cod2_StructN"), mk("Cod2_ResN"), mk("Cod2_Nums", "individuals"),
-    mk("Phy_N"), mk("Temp", "degC"), mk("salt", "PSU"),
+    mk("cod1_StructN"), mk("cod1_ResN"), mk("cod1_Nums", "individuals"),
+    mk("cod2_StructN"), mk("cod2_ResN"), mk("cod2_Nums", "individuals"),
+    mk("diatoms_N"), mk("Temp", "degC"), mk("salt", "PSU"),
     mk("NO3"), mk("NH3"), mk("Chl_a"), mk("Denitrificatio"),
     mk("volume", "m3"),
     ncdf4::ncvar_def("nominal_dz", "m", list(dim_z, dim_b), -999, prec = "float")
   )
   nc <- ncdf4::nc_create(path, vars, force_v4 = TRUE)
   ncdf4::ncatt_put(nc, "t", "units", "days since 1970-01-01")
-  fill3(nc, "Cod1_StructN", 10, 15, 20)
-  fill3(nc, "Cod1_ResN", 5, 5, 5)
-  fill3(nc, "Cod1_Nums", 100, 100, 100)
-  fill3(nc, "Cod2_StructN", 8, 8, 8)
-  fill3(nc, "Cod2_ResN", 4, 4, 4)
-  fill3(nc, "Cod2_Nums", 50, 50, 50)
-  fill3(nc, "Phy_N", 2, 2, 2)
+  fill3(nc, "cod1_StructN", 10, 15, 20)
+  fill3(nc, "cod1_ResN", 5, 5, 5)
+  fill3(nc, "cod1_Nums", 100, 100, 100)
+  fill3(nc, "cod2_StructN", 8, 8, 8)
+  fill3(nc, "cod2_ResN", 4, 4, 4)
+  fill3(nc, "cod2_Nums", 50, 50, 50)
+  fill3(nc, "diatoms_N", 2, 2, 2)
   fill3(nc, "Temp", 8, 10, 12)
   fill3(nc, "salt", 34, 34, 34)
   fill3(nc, "NO3", 1, 1.1, 1.2)
@@ -625,13 +625,40 @@ make_prod_nc <- function(path) {
   dim_b <- ncdf4::ncdim_def("b", "box", 1:3)
   t_vals <- c(0, 365, 730)
   dim_t <- ncdf4::ncdim_def("t", "days since 1970-01-01", t_vals)
-  mk <- function(name) {
-    ncdf4::ncvar_def(name, "mg N m-3 d-1", list(dim_z, dim_b, dim_t), -999, prec = "float")
+  mk <- function(name, units = "mg N m-3 d-1") {
+    ncdf4::ncvar_def(name, units, list(dim_z, dim_b, dim_t), -999, prec = "float")
   }
-  nc <- ncdf4::nc_create(path, list(mk("Eat_COD"), mk("Grazing_PHY")), force_v4 = TRUE)
+  mk2 <- function(name, units = "m") {
+    ncdf4::ncvar_def(name, units, list(dim_z, dim_b), -999, prec = "float")
+  }
+  mk_b <- function(name, units = "1") {
+    ncdf4::ncvar_def(name, units, list(dim_b), -999, prec = "float")
+  }
+  vars <- list(
+    mk("cod1_Eat"), mk("cod2_Eat"),
+    mk("cod1_Growth"), mk("cod2_Growth"),
+    mk("diatomsGrazing"), mk("diatomsProdn"),
+    mk("squidGrazing"), mk("squidProdn"),
+    mk("volume", "m3"),
+    mk2("nominal_dz"), mk2("dz"),
+    mk_b("topk"), mk_b("numlayers"), mk_b("is_boundary")
+  )
+  nc <- ncdf4::nc_create(path, vars, force_v4 = TRUE)
   ncdf4::ncatt_put(nc, "t", "units", "days since 1970-01-01")
-  fill3(nc, "Eat_COD", 1, 1, 1)
-  fill3(nc, "Grazing_PHY", 0.4, 0.4, 0.4)
+  fill3(nc, "cod1_Eat", 1, 1, 1)
+  fill3(nc, "cod2_Eat", 0.5, 0.5, 0.5)
+  fill3(nc, "cod1_Growth", 0.2, 0.2, 0.2)
+  fill3(nc, "cod2_Growth", 0.1, 0.1, 0.1)
+  fill3(nc, "diatomsGrazing", 0.4, 0.4, 0.4)
+  fill3(nc, "diatomsProdn", 0.3, 0.3, 0.3)
+  fill3(nc, "squidGrazing", 0.2, 0.2, 0.2)
+  fill3(nc, "squidProdn", 0.1, 0.1, 0.1)
+  fill3(nc, "volume", 2e6, 2e6, 2e6)
+  ncdf4::ncvar_put(nc, "nominal_dz", array(c(10, 40), dim = c(2, 3)))
+  ncdf4::ncvar_put(nc, "dz", array(c(10, 40), dim = c(2, 3)))
+  ncdf4::ncvar_put(nc, "topk", c(1, 1, 1))
+  ncdf4::ncvar_put(nc, "numlayers", c(2, 2, 1))
+  ncdf4::ncvar_put(nc, "is_boundary", c(1, 0, 1))
   ncdf4::nc_close(nc)
 }
 
@@ -702,7 +729,7 @@ test_that("BGM polygons mark island and neighbour -1 boxes as boundary", {
   expect_true(unique(poly$boundary[poly$boxid == 2]))
 })
 
-test_that("biomass_by_box uses Cod1_StructN/ResN/Nums and Phy_N x volume", {
+test_that("biomass_by_box uses cod1_StructN/ResN/Nums and diatoms_N x volume", {
   tmpdir <- tempfile()
   dir.create(tmpdir)
   on.exit(unlink(tmpdir, recursive = TRUE), add = TRUE)
@@ -723,7 +750,25 @@ test_that("biomass_by_box uses Cod1_StructN/ResN/Nums and Phy_N x volume", {
   expect_equal(nrow(phy), 9)
 })
 
-test_that("Eat_COD and Grazing_PHY become tonnes split by DietCheck", {
+test_that("PROD names match groups CSV Name: cod1_Eat and diatomsGrazing", {
+  vars <- c("cod1_Eat", "cod2_Eat", "cod14_Eat", "cod1_Growth", "cod2_Growth",
+            "diatomsGrazing", "diatomsProdn", "squidGrazing", "squidProdn",
+            "volume", "nominal_dz", "dz", "topk", "numlayers", "is_boundary")
+  expect_equal(prod_consume_vars(vars, "cod", 2, "FISH"), c("cod1_Eat", "cod2_Eat"))
+  expect_equal(prod_consume_vars(vars, "cod", 14, "FISH"),
+               c("cod1_Eat", "cod2_Eat", "cod14_Eat"))
+  expect_equal(prod_consume_vars(vars, "Cod", 2, "FISH"), character())
+  expect_equal(prod_consume_vars(vars, "COD", 2, "FISH"), character())
+  expect_equal(prod_consume_vars(vars, "diatoms", 1, "LG_PHY"), "diatomsGrazing")
+  expect_equal(prod_consume_vars(vars, "squid", 2, "CEP"), "squidGrazing")
+  expect_equal(prod_growth_vars(vars, "cod", 2, "FISH"), c("cod1_Growth", "cod2_Growth"))
+  expect_equal(prod_growth_vars(vars, "diatoms", 1, "LG_PHY"), "diatomsProdn")
+  expect_equal(prod_growth_vars(vars, "squid", 10, "CEP"), "squidProdn")
+  expect_equal(prod_consume_vars(c("Eat_COD", "Grazing_PHY"), "cod", 2, "FISH"),
+               character())
+})
+
+test_that("cod1_Eat and diatomsGrazing become tonnes split by DietCheck", {
   tmpdir <- tempfile()
   dir.create(tmpdir)
   on.exit(unlink(tmpdir, recursive = TRUE), add = TRUE)
@@ -741,12 +786,24 @@ test_that("Eat_COD and Grazing_PHY become tonnes split by DietCheck", {
     ncdf4::nc_close(nc_out)
     ncdf4::nc_close(nc_prod)
   }, add = TRUE)
-  expect_equal(prod_eat_name(names(nc_prod$var), "COD", "Cod"), "Eat_COD")
-  expect_equal(prod_eat_name(names(nc_prod$var), "PHY", "Phy"), "Grazing_PHY")
+  expect_equal(
+    prod_consume_vars(names(nc_prod$var), "cod", 2, "FISH"),
+    c("cod1_Eat", "cod2_Eat")
+  )
+  expect_equal(
+    prod_consume_vars(names(nc_prod$var), "diatoms", 1, "LG_PHY"),
+    "diatomsGrazing"
+  )
+  expect_true(all(c("volume", "nominal_dz", "dz", "topk", "numlayers",
+                    "is_boundary", "cod1_Growth", "diatomsProdn") %in% names(nc_prod$var)))
   tot <- consumed_tonnes(nc_prod, nc_out, grp, "COD")
-  expect_equal(tot$variable, "Eat_COD")
+  expect_equal(tot$variables, c("cod1_Eat", "cod2_Eat"))
   expect_equal(length(tot$tonnes), 3)
   expect_true(all(tot$tonnes > 0))
+  ## PROD volume (2e6) is used, not biology output volume (1e6)
+  expect_equal(tot$tonnes[1], 2 * 3 * 2e6 * 1.5 * 0.00000002 * 5.7, tolerance = 1e-8)
+  phy <- consumed_tonnes(nc_prod, nc_out, grp, "PHY")
+  expect_equal(phy$variables, "diatomsGrazing")
   diet <- data.table::data.table(
     Time = c(0, 365, 730),
     Predator = "COD",
@@ -829,7 +886,7 @@ test_that("ensemble mean and range are computed when more than two runs", {
   expect_equal(st$Hi[st$Time == 0], 120)
 })
 
-test_that("overview_server reports problem cohorts from Cod1_StructN", {
+test_that("overview_server reports problem cohorts from cod1_StructN", {
   tmpdir <- tempfile()
   dir.create(tmpdir)
   on.exit(unlink(tmpdir, recursive = TRUE), add = TRUE)

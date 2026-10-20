@@ -273,10 +273,19 @@ read_bgm_polygons <- function(bgm_path) {
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
 
 nc_volume <- function(nc) {
+  if (is.null(nc)) return(NULL)
   vars <- names(nc$var)
   if ("volume" %in% vars) return(ncdf4::ncvar_get(nc, "volume"))
   if ("vol" %in% vars) return(ncdf4::ncvar_get(nc, "vol"))
   NULL
+}
+
+add_nc_arrays <- function(acc, arr) {
+  if (is.null(acc)) return(arr)
+  if (length(dim(acc)) == length(dim(arr)) && all(dim(acc) == dim(arr))) {
+    return(acc + arr)
+  }
+  acc
 }
 
 biomass_by_box <- function(nc, grp, fg_code, mg2t = 0.00000002, x.cn = 5.7) {
@@ -344,35 +353,74 @@ biomass_by_box <- function(nc, grp, fg_code, mg2t = 0.00000002, x.cn = 5.7) {
 ## ~          PROD Eat / Grazing                 ~ ##
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
 
-prod_eat_name <- function(nc_vars, code, name) {
-  code <- trimws(as.character(code))
-  name <- trimws(as.character(name))
-  cands <- c(
-    paste0("Eat_", code), paste0("Grazing_", code),
-    paste0("Eat_", name), paste0("Grazing_", name),
-    paste0(code, "_Eat"), paste0(name, "_Eat"),
-    paste0("Eat", code), paste0("Grazing", code),
-    paste0("Eat", name), paste0("Grazing", name)
-  )
-  hit <- cands[cands %in% nc_vars]
-  if (length(hit) == 0) {
-    hit <- nc_vars[tolower(nc_vars) %in% tolower(cands)]
+##' North Sea outputPROD.nc names, keyed by groups CSV Name (case-sensitive)
+##'
+##' Age-structured groups (numcohorts > 1, not CEP/PWN/…):
+##' \code{<name><cohort>_Eat} (and \code{<name><cohort>_Growth}).
+##' Biomass pools and AGE_SPECIAL groups: \code{<name>Grazing}
+##' (and \code{<name>Prodn}).
+prod_is_age_structured <- function(n_cohorts, grouptype = NULL) {
+  n_cohorts <- as.integer(n_cohorts)[1]
+  if (!is.finite(n_cohorts) || n_cohorts < 1) n_cohorts <- 1
+  gtype <- if (is.null(grouptype)) "" else as.character(grouptype)[1]
+  n_cohorts > 1 && !gtype %in% AGE_SPECIAL
+}
+
+prod_consume_vars <- function(nc_vars, name, n_cohorts = 1,
+                              grouptype = NULL, code = NULL) {
+  name <- trimws(as.character(name)[1])
+  n_cohorts <- as.integer(n_cohorts)[1]
+  if (!is.finite(n_cohorts) || n_cohorts < 1) n_cohorts <- 1
+  if (prod_is_age_structured(n_cohorts, grouptype)) {
+    hit <- paste0(name, seq_len(n_cohorts), "_Eat")
+    hit <- hit[hit %in% nc_vars]
+    if (length(hit) > 0) return(hit)
+  } else {
+    graz <- paste0(name, "Grazing")
+    if (graz %in% nc_vars) return(graz)
   }
-  if (length(hit) == 0) return(NA_character_)
-  hit[1]
+  character()
+}
+
+prod_growth_vars <- function(nc_vars, name, n_cohorts = 1, grouptype = NULL) {
+  name <- trimws(as.character(name)[1])
+  n_cohorts <- as.integer(n_cohorts)[1]
+  if (!is.finite(n_cohorts) || n_cohorts < 1) n_cohorts <- 1
+  if (prod_is_age_structured(n_cohorts, grouptype)) {
+    hit <- paste0(name, seq_len(n_cohorts), "_Growth")
+    return(hit[hit %in% nc_vars])
+  }
+  prodn <- paste0(name, "Prodn")
+  if (prodn %in% nc_vars) return(prodn)
+  character()
+}
+
+prod_eat_name <- function(nc_vars, code, name, n_cohorts = 1, grouptype = NULL) {
+  vars <- prod_consume_vars(nc_vars, name, n_cohorts, grouptype, code)
+  if (length(vars) == 0) return(NA_character_)
+  vars[1]
 }
 
 consumed_tonnes <- function(nc_prod, nc_out, grp, fg_code,
                             mg2t = 0.00000002, x.cn = 5.7) {
   row <- grp[grp$code == fg_code, , drop = FALSE]
   if (nrow(row) == 0) stop("Unknown functional group: ", fg_code)
-  vn <- prod_eat_name(names(nc_prod$var), row$code[1], row$name[1])
-  if (is.na(vn)) {
-    stop("No Eat_ / Grazing_ variable for ", fg_code,
-         ". Looked for Eat_", row$code[1], " and Grazing_", row$code[1], ".")
+  name <- as.character(row$name[1])
+  n.coh <- if ("numcohorts" %in% names(row)) as.integer(row$numcohorts[1]) else 1L
+  gtype <- if ("grouptype" %in% names(row)) as.character(row$grouptype[1]) else ""
+  vns <- prod_consume_vars(names(nc_prod$var), name, n.coh, gtype, row$code[1])
+  if (length(vns) == 0) {
+    stop("No consumption tracer for ", fg_code,
+         ". Looked for ", name, "1_Eat … ", name, n.coh, "_Eat or ",
+         name, "Grazing (groups CSV Name, case-sensitive).")
   }
-  eat <- ncdf4::ncvar_get(nc_prod, vn)
-  vol <- if (is.null(nc_out)) NULL else nc_volume(nc_out)
+  eat <- NULL
+  for (vn in vns) {
+    arr <- ncdf4::ncvar_get(nc_prod, vn)
+    eat <- add_nc_arrays(eat, arr)
+  }
+  vol <- nc_volume(nc_prod)
+  if (is.null(vol)) vol <- nc_volume(nc_out)
   if (!is.null(vol) && length(dim(eat)) == 3 && length(dim(vol)) %in% c(2, 3)) {
     if (length(dim(vol)) == 2) {
       mass <- sweep(eat, c(1, 2), vol, "*")
@@ -384,7 +432,7 @@ consumed_tonnes <- function(nc_prod, nc_out, grp, fg_code,
   } else {
     tonnes <- sum_space(eat) * mg2t * x.cn
   }
-  list(variable = vn, tonnes = as.numeric(tonnes))
+  list(variable = vns[1], variables = vns, tonnes = as.numeric(tonnes))
 }
 
 consumption_by_prey <- function(tonnes, diet_time, predator, stock = NULL) {

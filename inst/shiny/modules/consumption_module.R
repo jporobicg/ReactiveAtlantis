@@ -35,7 +35,7 @@ consumption_server <- function(id, project = NULL) {
           bslib::card_header("Consumption needs outputPROD.nc"),
           bslib::card_body(
             shiny::p("Load an Atlantis production NetCDF (usually named like outputPROD.nc) in the Run panel."),
-            shiny::p("Eat_* and Grazing_* tracers are converted to tonnes using the same mg N to wet-weight factor as biomass, then split across prey with DietCheck proportions when that file is present.")
+            shiny::p("Age-structured groups use <name><cohort>_Eat (from the groups CSV Name column, case-sensitive). Biomass pools use <name>Grazing. Those tracers times volume are converted to tonnes with the same mg N factor as biomass, then split across prey with DietCheck when that file is present.")
           )
         ))
       }
@@ -68,7 +68,7 @@ consumption_server <- function(id, project = NULL) {
       df <- cons_df()
       if (is.null(df) || nrow(df) == 0) {
         return(div(class = "alert alert-warning",
-                   "No Eat/Grazing tracer or diet proportions for this group."))
+                   "No <name><cohort>_Eat or <name>Grazing tracer, or no diet proportions, for this group."))
       }
       ns <- session$ns
       if (requireNamespace("plotly", quietly = TRUE)) {
