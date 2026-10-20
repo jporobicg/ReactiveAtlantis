@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "description": "Example manifest after the real corpus is available. Copy this file, fill in local paths, and set RA_AI_SOURCES_CONFIG to the copy. Keep fixture entries only until the corresponding real materials exist.",
+  "exclude_globs": [
+    "**/.git/**",
+    "**/node_modules/**",
+    "**/vendor/**",
+    "**/*.nc",
+    "**/*.png",
+    "**/*.o",
+    "**/*.so",
+    "**/CMakeFiles/**",
+    "**/build/**"
+  ],
+  "max_file_bytes": 800000,
+  "sources": [
+    {
+      "id": "atlantis-user-guide",
+      "type": "manual",
+      "path": "/path/to/Atlantis/docs",
+      "version": "replace-with-manual-version",
+      "include": ["**/*.pdf", "**/*.md", "**/*.txt"]
+    },
+    {
+      "id": "atlantis-source",
+      "type": "atlantis_code",
+      "path": "/path/to/Atlantis/src",
+      "version": "git:replace-with-commit",
+      "include": ["**/*.c", "**/*.h", "**/*.cpp"]
+    },
+    {
+      "id": "calibration-notes",
+      "type": "calibration",
+      "path": "/path/to/calibration-notes",
+      "version": "replace-with-collection-date",
+      "include": ["**/*.md", "**/*.txt"]
+    },
+    {
+      "id": "ra-readme",
+      "type": "reactive_code",
+      "path": "${RA_PKG_ROOT}/README.md",
+      "version": "package",
+      "include": ["README.md"]
+    },
+    {
+      "id": "ra-shiny-modules",
+      "type": "reactive_code",
+      "path": "${RA_SHINY_DIR}/modules",
+      "version": "package",
+      "include": ["*.R"]
+    }
+  ]
+}

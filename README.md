@@ -91,6 +91,16 @@ Time axes use years from the NetCDF time units, not raw seconds or days. Plots
 share `theme_reactiveatlantis()`. Time series use plotly when the view is small
 enough to hover.
 
+## Ask Atlantis (optional)
+
+An optional **Ask Atlantis** tab can answer modelling questions from a local
+index and point you at the existing tools above. It is off unless you set
+`RA_AI_ENABLED=true`, install [Ollama](https://ollama.com) on the same
+machine, and build the index. It never calls a cloud LLM. Setup, the sources
+manifest, and troubleshooting are in [`inst/ai/README.md`](inst/ai/README.md).
+Until the real Atlantis manuals and source tree are configured, the packaged
+index uses a clearly marked fixture corpus plus this package’s own help.
+
 ## Legacy functions
 
 The original exported functions still open their own apps for scripts:

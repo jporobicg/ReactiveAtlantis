@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "description": "Default Ask Atlantis corpus. Fixture manuals, fixture Atlantis code and fixture calibration notes stand in for materials that have not been supplied. ReactiveAtlantis source and the live navigation catalog are real.",
+  "exclude_globs": [
+    "**/.git/**",
+    "**/node_modules/**",
+    "**/vendor/**",
+    "**/*.nc",
+    "**/*.png",
+    "**/*.ico",
+    "**/*.jpg",
+    "**/*.jpeg",
+    "**/*.webp",
+    "**/*.rda",
+    "**/*.rdb",
+    "**/*.rds",
+    "**/*.so",
+    "**/*.o",
+    "**/www/**",
+    "**/fixtures/northsea/**"
+  ],
+  "max_file_bytes": 500000,
+  "sources": [
+    {
+      "id": "fixture-manuals",
+      "type": "manual",
+      "path": "${RA_AI_DIR}/fixtures/manuals",
+      "version": "FIXTURE-NOT-OFFICIAL",
+      "include": ["**/*.md", "**/*.txt"]
+    },
+    {
+      "id": "fixture-atlantis-code",
+      "type": "atlantis_code",
+      "path": "${RA_AI_DIR}/fixtures/atlantis_code",
+      "version": "FIXTURE-code-build-X",
+      "include": ["**/*.c", "**/*.h", "**/*.md"]
+    },
+    {
+      "id": "fixture-calibration",
+      "type": "calibration",
+      "path": "${RA_AI_DIR}/fixtures/calibration",
+      "version": "FIXTURE-NOT-OFFICIAL",
+      "include": ["**/*.md"]
+    },
+    {
+      "id": "ra-readme",
+      "type": "reactive_code",
+      "path": "${RA_PKG_ROOT}/README.md",
+      "version": "package",
+      "include": ["README.md"]
+    },
+    {
+      "id": "ra-shiny-modules",
+      "type": "reactive_code",
+      "path": "${RA_SHINY_DIR}/modules",
+      "version": "package",
+      "include": ["*.R"]
+    },
+    {
+      "id": "ra-r-source",
+      "type": "reactive_code",
+      "path": "${RA_R_DIR}",
+      "version": "package",
+      "include": ["*.R"]
+    }
+  ]
+}

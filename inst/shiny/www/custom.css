@@ -207,3 +207,135 @@ h2, h3, h4, h5 {
   opacity: 0.45;
   pointer-events: none;
 }
+
+/* Ask Atlantis panel */
+.ra-assistant {
+  max-width: 920px;
+  margin: 0 auto 2rem;
+}
+
+.ra-assistant-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.35rem;
+}
+
+.ra-assistant-header h3 {
+  margin: 0;
+}
+
+.ra-assistant-disclaimer {
+  color: var(--ra-muted);
+  font-size: 0.92rem;
+  margin-bottom: 0.75rem;
+}
+
+.ra-assistant-starters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 1rem;
+  margin-bottom: 0.85rem;
+  font-size: 0.92rem;
+}
+
+.ra-assistant-log {
+  min-height: 220px;
+  max-height: 520px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid rgba(11, 60, 93, 0.1);
+  border-radius: 0.6rem;
+  padding: 0.9rem 1rem;
+  margin-bottom: 0.85rem;
+}
+
+.ra-assistant-empty .ra-muted {
+  margin-bottom: 0;
+}
+
+.ra-msg {
+  margin-bottom: 0.85rem;
+  padding: 0.65rem 0.8rem;
+  border-radius: 0.5rem;
+}
+
+.ra-msg p {
+  margin-bottom: 0.4rem;
+}
+
+.ra-msg p:last-child {
+  margin-bottom: 0;
+}
+
+.ra-msg-user {
+  background: rgba(11, 60, 93, 0.08);
+  margin-left: 12%;
+}
+
+.ra-msg-assistant {
+  background: #fffdf8;
+  border: 1px solid rgba(29, 120, 116, 0.18);
+  margin-right: 8%;
+}
+
+.ra-msg-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.55rem;
+}
+
+.ra-msg-sources {
+  margin-top: 0.55rem;
+  font-size: 0.88rem;
+}
+
+.ra-msg-sources ul {
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.ra-msg-kinds {
+  margin-top: 0.45rem;
+  font-size: 0.8rem;
+}
+
+.ra-ai-badge {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+
+.ra-ai-badge.is-ready {
+  background: rgba(29, 120, 116, 0.15);
+  color: var(--ra-teal);
+  border-color: rgba(29, 120, 116, 0.35);
+}
+
+.ra-ai-badge.is-offline,
+.ra-ai-badge.is-model_missing,
+.ra-ai-badge.is-error {
+  background: rgba(196, 163, 90, 0.18);
+  color: #8a6d1f;
+  border-color: rgba(196, 163, 90, 0.45);
+}
+
+.ra-ai-badge.is-disabled {
+  background: rgba(92, 107, 115, 0.12);
+  color: var(--ra-muted);
+}
+
+[data-bs-theme="dark"] .ra-assistant-log,
+[data-bs-theme="dark"] .ra-msg-assistant {
+  background: #101820;
+  border-color: rgba(213, 228, 238, 0.12);
+}
+
+[data-bs-theme="dark"] .ra-msg-user {
+  background: rgba(50, 140, 193, 0.16);
+}

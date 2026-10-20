@@ -2,9 +2,11 @@
 
 export(catch)
 export(compare)
+export(diagnose_ask_atlantis_index)
 export(feeding.mat)
 export(food.web)
 export(growth.pp)
+export(index_ask_atlantis)
 export(launch_reactiveatlantis)
 export(mortality)
 export(predation)

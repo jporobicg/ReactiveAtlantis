@@ -48,6 +48,23 @@ source(file.path(app_dir, "modules", "consumption_module.R"))
 source(file.path(app_dir, "modules", "physics_module.R"))
 source(file.path(app_dir, "modules", "ensemble_module.R"))
 
+## Optional Ask Atlantis helpers. The panel is shown only when
+## RA_AI_ENABLED is true so the default app is unchanged. Failures here
+## must not prevent the calibration tools from starting.
+ai_load <- normalizePath(file.path(app_dir, "..", "ai", "load.R"),
+                         mustWork = FALSE)
+if (!file.exists(ai_load)) {
+  ai_load <- tryCatch(system.file("ai", "load.R", package = "ReactiveAtlantis"),
+                      error = function(e) "")
+}
+ra_ai_on <- isTRUE(tryCatch({
+  if (nzchar(ai_load) && file.exists(ai_load)) {
+    source(ai_load, local = FALSE)
+  }
+  source(file.path(app_dir, "modules", "assistant_module.R"))
+  ra_ai_enabled()
+}, error = function(e) FALSE))
+
 ra_navbar_title <- tags$span(
   class = "ra-brand",
   tags$img(
@@ -58,18 +75,29 @@ ra_navbar_title <- tags$span(
   tags$span("ReactiveAtlantis", class = "ra-brand-text")
 )
 
-ui <- page_navbar(
+ra_header <- tags$head(
+  tags$link(rel = "stylesheet", type = "text/css", href = "custom.css"),
+  tags$link(rel = "icon", type = "image/x-icon", href = "favicon.ico"),
+  tags$link(rel = "icon", type = "image/png", sizes = "32x32", href = "app-icon-32.png"),
+  tags$link(rel = "apple-touch-icon", sizes = "180x180", href = "app-icon-180.png"),
+  tags$link(rel = "manifest", href = "site.webmanifest"),
+  tags$script(HTML("
+    Shiny.addCustomMessageHandler('ra-open-tab', function(title) {
+      var el = Array.from(document.querySelectorAll('a.nav-link')).find(function(a){
+        return (a.textContent || '').trim() === title;
+      });
+      if (el) el.click();
+    });
+  "))
+)
+
+ra_nav_args <- list(
   title = ra_navbar_title,
+  id = "ra_page",
   window_title = "ReactiveAtlantis",
   theme = ra_theme(),
   fillable = FALSE,
-  header = tags$head(
-    tags$link(rel = "stylesheet", type = "text/css", href = "custom.css"),
-    tags$link(rel = "icon", type = "image/x-icon", href = "favicon.ico"),
-    tags$link(rel = "icon", type = "image/png", sizes = "32x32", href = "app-icon-32.png"),
-    tags$link(rel = "apple-touch-icon", sizes = "180x180", href = "app-icon-180.png"),
-    tags$link(rel = "manifest", href = "site.webmanifest")
-  ),
+  header = ra_header,
   sidebar = sidebar(
     title = "Run",
     width = 340,
@@ -92,6 +120,12 @@ ui <- page_navbar(
   nav_panel("Feeding", feeding_ui("feeding")),
   nav_panel("Mortality", mortality_ui("mortality"))
 )
+if (isTRUE(ra_ai_on)) {
+  ra_nav_args <- c(ra_nav_args, list(
+    nav_panel("Ask Atlantis", assistant_ui("assistant"))
+  ))
+}
+ui <- do.call(page_navbar, ra_nav_args)
 
 server <- function(input, output, session) {
   project <- project_server("project")
@@ -108,6 +142,9 @@ server <- function(input, output, session) {
   catch_server("catch", project)
   feeding_server("feeding", project)
   mortality_server("mortality", project)
+  if (isTRUE(ra_ai_on)) {
+    assistant_server("assistant", project, parent_session = session)
+  }
 }
 
 shinyApp(ui, server)
