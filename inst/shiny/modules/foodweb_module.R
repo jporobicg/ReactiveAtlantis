@@ -25,12 +25,17 @@ foodweb_ui <- function(id) {
 
 foodweb_server <- function(id, project = NULL) {
   moduleServer(id, function(input, output, session) {
+    ps <- shiny::reactive(project_snapshot(project))
+    diet_dat <- shiny::reactive({
+      req(ps()$data)
+      ensure_diet(ps()$data, ps()$paths)
+    })
 
-    output$banner <- renderUI(tool_banner(project, "foodweb"))
+    output$banner <- renderUI(tool_banner(ps(), "foodweb"))
 
     observe({
-      req(isTRUE(project$ready), project$data$grp, project$data$diet_time)
-      dat <- project$data
+      req(isTRUE(ps()$ready), diet_dat()$grp, diet_dat()$diet_time)
+      dat <- diet_dat()
       times <- sort(unique(dat$diet_time$Time))
       stocks <- if ("Stock" %in% names(dat$diet_time)) unique(dat$diet_time$Stock) else 0
       grp <- dat$grp
@@ -46,7 +51,7 @@ foodweb_server <- function(id, project = NULL) {
     })
 
     output$time_step_label <- renderText({
-      dat <- project$data
+      dat <- diet_dat()
       req(dat$diet_time, input$time_step)
       tstep <- nearest_time(as.numeric(input$time_step), sort(unique(dat$diet_time$Time)))
       origin <- dat$origin
@@ -56,7 +61,7 @@ foodweb_server <- function(id, project = NULL) {
     })
 
     time_prey_data <- reactive({
-      dat <- project$data
+      dat <- diet_dat()
       req(dat$diet_time, input$time_step)
       tstep <- nearest_time(as.numeric(input$time_step), sort(unique(dat$diet_time$Time)))
       dt <- dat$diet_time[Time == tstep]
@@ -68,7 +73,7 @@ foodweb_server <- function(id, project = NULL) {
     })
 
     prey_data <- reactive({
-      dat <- project$data
+      dat <- diet_dat()
       req(time_prey_data(), input$focal_fg, dat$grp)
       grp <- dat$grp
       if (!"Code" %in% names(grp) && "code" %in% names(grp)) {
@@ -82,7 +87,7 @@ foodweb_server <- function(id, project = NULL) {
 
     trophic_data <- reactive({
       req(prey_data())
-      dat <- project$data
+      dat <- diet_dat()
       grp <- dat$grp
       if (!"Code" %in% names(grp)) {
         grp$Code <- grp$code
@@ -96,7 +101,7 @@ foodweb_server <- function(id, project = NULL) {
         TL <- trophic_data()
         edges_src <- prey_data()
         req(TL, edges_src)
-        pal <- project$data$fg_palette
+        pal <- ps()$data$fg_palette
         nodes <- data.frame(
           id = TL$FG,
           label = TL$FG,
@@ -126,12 +131,12 @@ foodweb_server <- function(id, project = NULL) {
 
     output$network_gg <- renderPlot({
       plot_or_message("Load DietCheck.txt to draw the food web", {
-        if (!isTRUE(project$ready) || is.null(project$data$diet_time)) {
+        if (!isTRUE(ps()$ready) || is.null(diet_dat()$diet_time)) {
           plot_message("Load DietCheck.txt to draw the food web")
           return(invisible(NULL))
         }
         plot.tlvl(trophic_data(), prey_data(), input$focal_fg, NULL,
-                  get_foodweb_colors(), project$data$fg_palette)
+                  get_foodweb_colors(), ps()$data$fg_palette)
       })
     })
 

@@ -18,17 +18,18 @@ mortality_ui <- function(id) {
 
 mortality_server <- function(id, project = NULL) {
   moduleServer(id, function(input, output, session) {
+    ps <- shiny::reactive(project_snapshot(project))
 
-    output$banner <- renderUI(tool_banner(project, "mortality"))
+    output$banner <- renderUI(tool_banner(ps(), "mortality"))
 
     observe({
-      req(isTRUE(project$ready), project$data$grp)
-      update_select_keep(session, "fg", fg_select_choices(project$data$grp, on_only = FALSE),
+      req(isTRUE(ps()$ready), ps()$data$grp)
+      update_select_keep(session, "fg", fg_select_choices(ps()$data$grp, on_only = FALSE),
                          input$fg)
     })
 
     mort_data <- reactive({
-      dat <- project$data
+      dat <- ps()$data
       req(dat$spe_mort, dat$pred_mort, dat$grp, input$fg)
       FG <- input$fg
       if (FG %in% dat$grp$longname) {
@@ -39,7 +40,7 @@ mortality_server <- function(id, project = NULL) {
 
     output$mortality_plot_gg <- renderPlot({
       plot_or_message("Load SpecificMort.txt to plot mortality", {
-        if (!isTRUE(project$ready)) {
+        if (!isTRUE(ps()$ready)) {
           plot_message("Load SpecificMort.txt to plot mortality")
           return(invisible(NULL))
         }
@@ -53,7 +54,7 @@ mortality_server <- function(id, project = NULL) {
         plot_message("No mortality columns for this group in SpecificMort.txt")
         return(invisible(NULL))
       }
-      origin <- project$data$origin
+      origin <- ps()$data$origin
       mort$Time <- days_as_date(mort$Time, origin)
       long <- reshape2::melt(mort, id.var = c("Time", "Mtype"))
       names(long)[names(long) == "variable"] <- "Age"

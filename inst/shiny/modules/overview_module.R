@@ -24,21 +24,22 @@ overview_ui <- function(id) {
 
 overview_server <- function(id, project) {
   shiny::moduleServer(id, function(input, output, session) {
+    ps <- shiny::reactive(project_snapshot(project))
 
     health <- shiny::reactive({
-      dat <- project$data
+      dat <- ps()$data
       if (is.null(dat) || is.null(dat$grp) || is.null(dat$biomindx)) return(NULL)
       biomass_health(dat$biomindx, dat$grp)
     })
 
     cohorts <- shiny::reactive({
-      dat <- project$data
+      dat <- ps()$data
       if (is.null(dat) || is.null(dat$grp) || is.null(dat$nc_out)) return(NULL)
       problem_cohorts(dat$nc_out, dat$grp, ACCEPT_BAND)
     })
 
     output$cards <- shiny::renderUI({
-      if (!isTRUE(project$ready) || is.null(project$data)) {
+      if (!isTRUE(ps()$ready) || is.null(ps()$data)) {
         return(bslib::card(
           bslib::card_header("Load a run"),
           bslib::card_body(
@@ -48,7 +49,7 @@ overview_server <- function(id, project) {
           )
         ))
       }
-      dat <- project$data
+      dat <- ps()$data
       sm <- summarise_run(dat$grp, dat$nc_out, dat$biomindx, dat$time_dates)
       flags <- tryCatch(health(), error = function(e) NULL)
       n_ext <- if (is.null(flags)) NA else sum(flags$Flag == "Extinct (<1%)")
@@ -96,8 +97,8 @@ overview_server <- function(id, project) {
     })
 
     output$run_window <- shiny::renderUI({
-      if (!isTRUE(project$ready)) return(NULL)
-      dat <- project$data
+      if (!isTRUE(ps()$ready)) return(NULL)
+      dat <- ps()$data
       sm <- summarise_run(dat$grp, dat$nc_out, dat$biomindx, dat$time_dates)
       start_lab <- if (!is.na(sm$origin)) format(sm$origin, "%Y-%m-%d") else "not in NetCDF"
       bslib::card(
@@ -117,8 +118,7 @@ overview_server <- function(id, project) {
       tbl$Ratio <- round(tbl$Ratio, 3)
       tbl$Initial <- signif(tbl$Initial, 4)
       tbl$Final <- signif(tbl$Final, 4)
-      ra_datatable(tbl, filter = "top",
-                   options = list(pageLength = 20, order = list(list(5, "desc"))))
+      ra_datatable(tbl, options = list(pageLength = 20, order = list(list(5, "desc"))))
     })
 
     output$cohort_table <- DT::renderDataTable({
@@ -129,8 +129,7 @@ overview_server <- function(id, project) {
       tbl$Relative <- round(tbl$Relative, 3)
       tbl$Initial <- signif(tbl$Initial, 4)
       tbl$Final <- signif(tbl$Final, 4)
-      ra_datatable(tbl, filter = "top",
-                   options = list(pageLength = 15, order = list(list(7, "desc"))))
+      ra_datatable(tbl, options = list(pageLength = 15, order = list(list(7, "desc"))))
     })
 
     keep_outputs_alive(output, c("cards", "run_window", "health_table", "cohort_table"))

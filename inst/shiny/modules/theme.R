@@ -79,11 +79,14 @@ ra_is_plotly <- function(x) {
 }
 
 tool_missing_card <- function(missing_labels, tool_name) {
+  labs <- unname(as.character(missing_labels))
+  labs <- labs[!is.na(labs) & nzchar(labs)]
+  items <- lapply(seq_along(labs), function(i) shiny::tags$li(labs[[i]]))
   bslib::card(
     bslib::card_header(paste(tool_name, "needs more files")),
     bslib::card_body(
       shiny::p("Load these from the Run panel on the left:"),
-      shiny::tags$ul(lapply(missing_labels, function(lab) shiny::tags$li(lab)))
+      shiny::tags$ul(items)
     )
   )
 }

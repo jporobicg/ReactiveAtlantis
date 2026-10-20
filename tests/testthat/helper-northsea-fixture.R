@@ -169,3 +169,26 @@ write_northsea_fixture <- function(dest = northsea_fixture_dir(),
   write_northsea_catch_nc(file.path(dest, "outputNorthSeaCATCH.nc"))
   dest
 }
+
+##' Full-folder lookalike: duplicate BGM, extra MortPerPred / PredPropCheck, copy nc
+write_messy_northsea_fixture <- function(dest) {
+  src <- northsea_fixture_dir()
+  if (!dir.exists(src) || !file.exists(file.path(src, "functionalGroups.csv"))) {
+    stop("Packaged North Sea fixture is missing.")
+  }
+  if (!dir.exists(dest)) dir.create(dest, recursive = TRUE)
+  for (f in list.files(src, full.names = TRUE)) {
+    file.copy(f, file.path(dest, basename(f)), overwrite = TRUE)
+  }
+  file.copy(file.path(dest, "NorthSea.bgm"),
+            file.path(dest, "NorthSea (1).bgm"), overwrite = TRUE)
+  if (file.exists(file.path(dest, "outputNorthSea.nc"))) {
+    file.copy(file.path(dest, "outputNorthSea.nc"),
+              file.path(dest, "outputNorthSea (1).nc"), overwrite = TRUE)
+  }
+  writeLines(c("Time Pred COD", "0 X 0.1"),
+             file.path(dest, "outputNorthSeaMortPerPred.txt"))
+  writeLines(c("Time Pred Prop", "0 COD 0.2"),
+             file.path(dest, "outputNorthSeaPredPropCheck.txt"))
+  dest
+}

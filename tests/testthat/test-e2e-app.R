@@ -99,8 +99,8 @@ test_that("folder load fills every tab with a bound plot or table", {
   body <- app$get_html("body")
   expect_true(grepl("Scan:", body) || grepl("file roles found", body))
   expect_true(grepl("not provided", body))
-  expect_true(grepl("class=\"ok\"", body) || grepl("class='ok'", body) ||
-                grepl("li class=\"ok\"", body))
+  expect_true(grepl("is-loaded", body) || grepl("data-status=\"loaded\"", body) ||
+                grepl("class=\"ok\"", body) || grepl("class='ok'", body))
   save_shot(app, shot_dir, "01_scan_checklist")
 
   app$click("project-load_project")
@@ -215,8 +215,10 @@ test_that("North Sea real names load COD into every group tab", {
 
   body <- app$get_html("body")
   expect_false(grepl("needs more files: Groups CSV", body, ignore.case = TRUE))
-  expect_true(grepl("class=\"ok\"", body) || grepl("class='ok'", body))
+  expect_true(grepl("data-status=\"loaded\"", body) || grepl("is-loaded", body) ||
+                grepl("class=\"ok\"", body) || grepl("class='ok'", body))
   expect_true(grepl("Groups CSV", body))
+  expect_true(grepl(">loaded<", body) || grepl("loaded", body, ignore.case = TRUE))
   save_shot(app, shot_dir, "ns_01_loaded_checklist")
 
   click_nav(app, "Compare")
@@ -265,5 +267,66 @@ test_that("North Sea real names load COD into every group tab", {
   feed <- tryCatch(app$get_html("#feeding-feeding_plot_gg"), error = function(e) "")
   expect_true(plot_is_real(feed) || nchar(feed) > 40)
   save_shot(app, shot_dir, "ns_11_feeding")
+})
+
+test_that("messy North Sea folder first Load click fills Catch Mortality Recruitment Spatial", {
+  fx <- northsea_fixture_dir()
+  skip_if_not(dir.exists(fx) && file.exists(file.path(fx, "functionalGroups.csv")),
+              "North Sea fixture not packaged")
+  e2e_chrome()
+
+  messy <- tempfile("ns_messy_e2e_")
+  write_messy_northsea_fixture(messy)
+  on.exit(unlink(messy, recursive = TRUE), add = TRUE)
+
+  shot_dir <- file.path(tempdir(), "ra_e2e_messy_shots")
+  dir.create(shot_dir, showWarnings = FALSE)
+  root <- ra_pkg_root()
+
+  app <- shinytest2::AppDriver$new(
+    app_dir = file.path(root, "inst", "shiny"),
+    name = "reactiveatlantis-messy-e2e",
+    height = 1200,
+    width = 1600,
+    load_timeout = 60000,
+    timeout = 20000
+  )
+  on.exit(try(app$stop(), silent = TRUE), add = TRUE)
+
+  app$set_inputs(`project-folder_path` = messy, wait_ = FALSE)
+  app$wait_for_idle(timeout = 15000)
+  app$click("project-load_project")
+  app$wait_for_idle(timeout = 90000)
+
+  body <- app$get_html("body")
+  expect_true(grepl("Loaded", body))
+  expect_true(grepl("data-status=\"loaded\"", body) || grepl(">loaded<", body))
+  expect_false(grepl("needs more files: Groups CSV", body, ignore.case = TRUE))
+  check <- tryCatch(app$get_html("#project-file_checklist"), error = function(e) body)
+  expect_true(grepl("data-role=\"groups\"", check))
+  expect_true(grepl("data-status=\"loaded\"", check))
+  expect_true(grepl(">loaded<", check))
+  expect_lt(length(gregexpr(">not provided<", check)[[1]]), 8)
+  save_shot(app, shot_dir, "messy_01_checklist")
+
+  tab_cod <- list(
+    list(title = "Catch", id = "catch-fg", plot = "#catch-catch_plot_gg", shot = "messy_02_catch"),
+    list(title = "Mortality", id = "mortality-fg", plot = "#mortality-mortality_plot_gg", shot = "messy_03_mortality"),
+    list(title = "Recruitment", id = "recruitment-fg_yoy", plot = "#recruitment-plot_yoy", shot = "messy_04_recruitment"),
+    list(title = "Spatial", id = "spatial-fg", plot = "#spatial-map_plot", shot = "messy_05_spatial")
+  )
+  for (tab in tab_cod) {
+    expect_true(click_nav(app, tab$title), info = tab$title)
+    do.call(function(...) app$set_inputs(..., wait_ = FALSE),
+            setNames(list("COD"), tab$id))
+    app$wait_for_idle(timeout = 40000)
+    expect_identical(app$get_value(input = tab$id), "COD", info = tab$title)
+    html <- tryCatch(app$get_html(tab$plot), error = function(e) "")
+    expect_true(plot_is_real(html), info = paste(tab$title, "empty:", substr(html, 1, 300)))
+    page <- app$get_html("body")
+    expect_false(grepl("needs more files: Groups CSV", page, ignore.case = TRUE),
+                 info = tab$title)
+    save_shot(app, shot_dir, tab$shot)
+  }
 })
 

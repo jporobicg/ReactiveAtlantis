@@ -54,11 +54,21 @@ make_project <- function(..., ensemble = NULL) {
   args <- list(...)
   for (nm in names(args)) paths[[nm]] <- args[[nm]]
   loaded <- load_project(paths)
-  shiny::reactiveValues(
+  st <- list(
     ready = !is.null(loaded$grp),
-    paths = paths,
+    paths = normalize_paths(paths),
     data = loaded,
-    ensemble = ensemble
+    ensemble = ensemble,
+    scan_note = NULL,
+    gen = 1L
+  )
+  shiny::reactiveValues(
+    state = st,
+    ready = st$ready,
+    paths = st$paths,
+    data = st$data,
+    ensemble = ensemble,
+    scan_note = NULL
   )
 }
 
@@ -1224,7 +1234,8 @@ test_that("keep_choice, dummy_inf_box and Scan folder update the checklist", {
     note <- paste(as.character(output$scan_note$html), collapse = " ")
     expect_true(grepl("Scan:", note) || grepl("file roles", note))
     check <- paste(as.character(output$file_checklist$html), collapse = " ")
-    expect_true(grepl("not provided", check) || grepl("ok", check))
+    expect_true(grepl("not provided", check) || grepl("ok", check) ||
+                  grepl("loaded", check) || grepl("is-loaded", check))
     session$setInputs(load_project = 1)
     note2 <- paste(as.character(output$scan_note$html), collapse = " ")
     expect_true(grepl("Loaded", note2) || grepl("file roles", note2))
@@ -1299,6 +1310,68 @@ test_that("YOY COD-0 and SpecificMort hyphen ages 0-13 work", {
   ages <- setdiff(names(mort), c("Time", "Mtype"))
   expect_true("Age14" %in% ages)
   expect_false("Age010" %in% ages)
+})
+
+test_that("duplicate BGM and extra DietCheck-like files do not unload roles", {
+  fx <- northsea_fixture_dir()
+  skip_if_not(dir.exists(fx) && file.exists(file.path(fx, "functionalGroups.csv")),
+              "North Sea fixture not packaged")
+  messy <- tempfile("ns_messy_")
+  write_messy_northsea_fixture(messy)
+  on.exit(unlink(messy, recursive = TRUE), add = TRUE)
+
+  expect_true(file.exists(file.path(messy, "NorthSea (1).bgm")))
+  expect_true(file.exists(file.path(messy, "outputNorthSeaMortPerPred.txt")))
+  expect_true(file.exists(file.path(messy, "outputNorthSeaPredPropCheck.txt")))
+
+  found <- detect_project_files(messy)
+  expect_equal(basename(found$bgm), "NorthSea.bgm")
+  expect_equal(basename(found$output_nc), "outputNorthSea.nc")
+  expect_equal(basename(found$prod_nc), "outputNorthSeaPROD.nc")
+  expect_equal(basename(found$specific_mort), "outputNorthSeaSpecificMort.txt")
+  expect_equal(basename(found$specific_pred_mort), "outputNorthSeaSpecificPredMort.txt")
+  expect_false(grepl("MortPerPred", found$specific_mort, ignore.case = TRUE))
+  expect_false(grepl("PredPropCheck", found$specific_pred_mort, ignore.case = TRUE))
+  expect_false(is_os_duplicate("NorthSea.bgm"))
+  expect_true(is_os_duplicate("NorthSea (1).bgm"))
+
+  old_max <- getOption("reactiveatlantis.eager_table_bytes")
+  on.exit(options(reactiveatlantis.eager_table_bytes = old_max), add = TRUE)
+  options(reactiveatlantis.eager_table_bytes = 10)
+  loaded <- load_project(found)
+  snap <- list(ready = TRUE, paths = found, data = loaded, gen = 1L)
+  expect_true(role_is_loaded(snap, "dietcheck"))
+  expect_true(role_is_loaded(snap, "groups"))
+  expect_true(role_is_loaded(snap, "output_nc"))
+  expect_true(role_is_loaded(snap, "catch_nc"))
+  expect_true(role_is_loaded(snap, "yoy"))
+  expect_true(role_is_loaded(snap, "bgm"))
+  expect_true(role_is_loaded(snap, "specific_mort"))
+  expect_equal(tool_missing(found, "catch", snap), character(0))
+  expect_equal(tool_missing(found, "mortality", snap), character(0))
+  expect_equal(tool_missing(found, "recruitment", snap), character(0))
+  expect_equal(tool_missing(found, "spatial", snap), character(0))
+
+  html <- paste(as.character(role_checklist_ui(snap)), collapse = " ")
+  expect_true(grepl("data-status=\"loaded\"", html))
+  expect_true(grepl("data-role=\"groups\"", html))
+  expect_true(grepl(">loaded<", html))
+  n_loaded <- length(gregexpr("data-status=\"loaded\"", html)[[1]])
+  expect_gte(n_loaded, 15)
+
+  two <- as_path(c(found$bgm, file.path(messy, "NorthSea (1).bgm")))
+  expect_equal(basename(two), "NorthSea.bgm")
+  expect_true(path_ok(c(found$bgm, file.path(messy, "NorthSea (1).bgm"))))
+
+  shiny::testServer(project_server, {
+    session$setInputs(folder_path = messy)
+    session$setInputs(load_project = 1)
+    note <- paste(as.character(output$scan_note$html), collapse = " ")
+    expect_true(grepl("Loaded", note))
+    check <- paste(as.character(output$file_checklist$html), collapse = " ")
+    expect_true(grepl("data-status=\"loaded\"", check))
+    expect_true(grepl(">loaded<", check))
+  })
 })
 
 test_that("app.R sources the new analysis modules", {

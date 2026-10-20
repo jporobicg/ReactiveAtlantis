@@ -24,9 +24,10 @@ physics_ui <- function(id) {
 
 physics_server <- function(id, project = NULL) {
   moduleServer(id, function(input, output, session) {
+    ps <- shiny::reactive(project_snapshot(project))
 
     available <- reactive({
-      dat <- project$data
+      dat <- ps()$data
       req(dat$nc_out)
       vars <- names(dat$nc_out$var)
       found <- vapply(PHYSICS_CANDIDATES, function(cands) match_nc_var(vars, cands),
@@ -34,20 +35,20 @@ physics_server <- function(id, project = NULL) {
       found[!is.na(found)]
     })
 
-    output$banner <- renderUI(tool_banner(project, "physics"))
+    output$banner <- renderUI(tool_banner(ps(), "physics"))
 
     observe({
-      req(isTRUE(project$ready), project$data$nc_out)
+      req(isTRUE(ps()$ready), ps()$data$nc_out)
       tr <- available()
       if (length(tr) == 0) return()
-      n_box <- if (!is.null(project$data$nc_out$dim$b)) project$data$nc_out$dim$b$len else 1
+      n_box <- if (!is.null(ps()$data$nc_out$dim$b)) ps()$data$nc_out$dim$b$len else 1
       update_select_keep(session, "tracer", tr, input$tracer)
       update_select_keep(session, "box", as.character(seq(0, max(0, n_box - 1))), input$box)
     })
 
     output$tracer_plot <- renderPlot({
       plot_or_message("Load output.nc to plot temperature, salt and nutrients", {
-      dat <- project$data
+      dat <- ps()$data
       req(dat$nc_out, input$tracer)
       box <- if (isTRUE(input$all_boxes)) NULL else as.integer(input$box)
       df <- physics_long(dat$nc_out, input$tracer, box = box)
@@ -77,7 +78,7 @@ physics_server <- function(id, project = NULL) {
 
     output$dz_plot <- renderPlot({
       plot_or_message("Load output.nc to plot layer thickness", {
-      dat <- project$data
+      dat <- ps()$data
       req(dat$nc_out)
       dz <- layer_thickness(dat$nc_out)
       if (is.null(dz)) {

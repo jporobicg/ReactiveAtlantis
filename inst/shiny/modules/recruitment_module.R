@@ -51,15 +51,16 @@ recruitment_ui <- function(id) {
 
 recruitment_server <- function(id, project = NULL) {
   moduleServer(id, function(input, output, session) {
+    ps <- shiny::reactive(project_snapshot(project))
     rv <- reactiveValues(rec_params = NULL, pp_list = NULL, n_box = 1, built = FALSE,
                          token = NULL, alpha_use = NA_real_, beta_use = NA_real_,
                          fspb = NULL)
 
-    output$banner <- renderUI(tool_banner(project, "recruitment"))
+    output$banner <- renderUI(tool_banner(ps(), "recruitment"))
 
     observe({
-      req(isTRUE(project$ready), project$data$grp)
-      grp <- project$data$grp
+      req(isTRUE(ps()$ready), ps()$data$grp)
+      grp <- ps()$data$grp
       age_groups <- grp[grp$numcohorts > 1, ]
       pp.pos <- with(grp, which(grouptype %in% c("MED_ZOO", "LG_ZOO", "LG_PHY", "SM_PHY",
                                                  "PHYTOBEN", "DINOFLAG", "TURF") &
@@ -70,12 +71,12 @@ recruitment_server <- function(id, project = NULL) {
     })
 
     observe({
-      req(!is.null(project), isTRUE(project$ready), project$data)
-      miss <- tool_missing(project$paths, "recruitment", project)
-      token <- paste(unlist(project$paths), collapse = "|")
+      req(!is.null(project), isTRUE(ps()$ready), ps()$data)
+      miss <- tool_missing(ps()$paths, "recruitment", ps())
+      token <- paste(unlist(ps()$paths), collapse = "|")
       if (length(miss) || (isTRUE(rv$built) && identical(rv$token, token))) return()
       rv$token <- token
-      dat <- project$data
+      dat <- ps()$data
       req(dat$nc_out, dat$grp, dat$prm_bio, dat$yoy)
       grp <- dat$grp
       prm <- dat$prm_bio
@@ -171,7 +172,7 @@ recruitment_server <- function(id, project = NULL) {
     }, ignoreInit = TRUE)
 
     yoy_series <- reactive({
-      dat <- project$data
+      dat <- ps()$data
       req(dat$yoy, input$fg_yoy)
       col <- find_yoy_column(dat$yoy, input$fg_yoy)
       if (is.na(col)) return(NULL)
@@ -184,7 +185,7 @@ recruitment_server <- function(id, project = NULL) {
     })
 
     rec_overlay <- reactive({
-      dat <- project$data
+      dat <- ps()$data
       req(input$fg_yoy, rv$rec_params)
       yoy <- yoy_series()
       rec_row <- rv$rec_params[rv$rec_params$FG == input$fg_yoy, , drop = FALSE]
@@ -199,7 +200,7 @@ recruitment_server <- function(id, project = NULL) {
     })
 
     yoy_dates <- function(time) {
-      days_as_date(time, project$data$origin)
+      days_as_date(time, ps()$data$origin)
     }
 
     output$plot_yoy <- renderPlot({
@@ -246,7 +247,7 @@ recruitment_server <- function(id, project = NULL) {
         x = "Year", y = "Young of the year / larvae"
       )
       p <- p + theme_reactiveatlantis()
-      add_obs_overlay(p, project$data$observations, input$fg_yoy, "Recruitment")
+      add_obs_overlay(p, ps()$data$observations, input$fg_yoy, "Recruitment")
       })
     })
 
@@ -279,7 +280,7 @@ recruitment_server <- function(id, project = NULL) {
 
     output$plot_ssb <- renderPlot({
       plot_or_message("Load SSB.txt to plot spawning stock biomass", {
-      dat <- project$data
+      dat <- ps()$data
       if (is.null(dat$ssb)) {
         plot.new()
         title("Load SSB.txt to plot spawning stock biomass")
@@ -310,7 +311,7 @@ recruitment_server <- function(id, project = NULL) {
       req(rv$pp_list, input$fg_growth, input$box)
       fg_data <- rv$pp_list[[input$fg_growth]]
       if (is.null(fg_data)) return()
-      Time <- project$data$time_dates
+      Time <- ps()$data$time_dates
       rows <- list()
       if (length(dim(fg_data)) == 3) {
         box_num <- as.numeric(input$box) + 1

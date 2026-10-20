@@ -22,31 +22,17 @@ consumption_ui <- function(id) {
 
 consumption_server <- function(id, project = NULL) {
   moduleServer(id, function(input, output, session) {
+    ps <- shiny::reactive(project_snapshot(project))
 
-    output$banner <- renderUI({
-      if (is.null(project) || !isTRUE(project$ready)) {
-        return(tool_missing_card(FILE_LABELS[TOOL_REQUIREMENTS$consumption], "Consumption"))
-      }
-      miss <- tool_missing(project$paths, "consumption", project)
-      if (length(miss)) {
-        return(bslib::card(
-          bslib::card_header("Consumption needs outputPROD.nc"),
-          bslib::card_body(
-            shiny::p("Load an Atlantis production NetCDF (usually named like outputPROD.nc) in the Run panel."),
-            shiny::p("Age-structured groups use <name><cohort>_Eat (from the groups CSV Name column, case-sensitive). Biomass pools use <name>Grazing.")
-          )
-        ))
-      }
-      NULL
-    })
+    output$banner <- renderUI(tool_banner(ps(), "consumption"))
 
     observe({
-      req(isTRUE(project$ready), project$data$grp)
-      update_select_keep(session, "fg", fg_select_choices(project$data$grp), input$fg)
+      req(isTRUE(ps()$ready), ps()$data$grp)
+      update_select_keep(session, "fg", fg_select_choices(ps()$data$grp), input$fg)
     })
 
     cons_df <- reactive({
-      dat <- project$data
+      dat <- ps()$data
       req(dat$nc_prod, dat$grp, input$fg, input$view)
       if (identical(input$view, "predator")) {
         tot <- consumed_tonnes(dat$nc_prod, dat$nc_out, dat$grp, input$fg)
@@ -73,9 +59,9 @@ consumption_server <- function(id, project = NULL) {
         plot_message("No Eat/Grazing tracer, or no diet proportions, for this group.")
         return(invisible(NULL))
       }
-      origin <- project$data$origin
+      origin <- ps()$data$origin
       df$Date <- days_as_date(df$Time, origin)
-      pal <- get_fg_colors(setdiff(unique(df$series), "Other"), project$data$fg_palette)
+      pal <- get_fg_colors(setdiff(unique(df$series), "Other"), ps()$data$fg_palette)
       pal <- c(pal, Other = "#8D99AE", Total = "#0B3C5D")
       title <- if (identical(input$view, "predator")) {
         paste("Tonnes consumed by", input$fg)

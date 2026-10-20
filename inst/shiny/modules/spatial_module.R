@@ -22,31 +22,32 @@ spatial_ui <- function(id) {
 
 spatial_server <- function(id, project = NULL) {
   moduleServer(id, function(input, output, session) {
+    ps <- shiny::reactive(project_snapshot(project))
 
-    output$banner <- renderUI(tool_banner(project, "spatial"))
+    output$banner <- renderUI(tool_banner(ps(), "spatial"))
 
     observe({
-      req(isTRUE(project$ready), project$data$grp)
-      n_t <- if (!is.null(project$data$time_dates)) length(project$data$time_dates) else 1
-      update_select_keep(session, "fg", fg_select_choices(project$data$grp), input$fg)
+      req(isTRUE(ps()$ready), ps()$data$grp)
+      n_t <- if (!is.null(ps()$data$time_dates)) length(ps()$data$time_dates) else 1
+      update_select_keep(session, "fg", fg_select_choices(ps()$data$grp), input$fg)
       shiny::updateSliderInput(session, "time_i", min = 1, max = max(1, n_t),
                                value = keep_numeric(input$time_i, 1, max(1, n_t), 1))
     })
 
     polys <- reactive({
-      dat <- project$data
+      dat <- ps()$data
       req(dat$bgm_path)
       read_bgm_polygons(dat$bgm_path)
     })
 
     box_bio <- reactive({
-      dat <- project$data
+      dat <- ps()$data
       req(dat$nc_out, dat$grp, input$fg)
       biomass_by_box(dat$nc_out, dat$grp, input$fg)
     })
 
     output$time_lab <- renderText({
-      dat <- project$data
+      dat <- ps()$data
       req(input$time_i)
       tdates <- dat$time_dates
       if (!is.null(tdates) && length(tdates) >= input$time_i) {
@@ -63,7 +64,7 @@ spatial_server <- function(id, project = NULL) {
       req(nrow(poly) > 0, nrow(bio) > 0, input$time_i)
       snap <- bio[bio$Time == input$time_i, ]
       poly$Biomass <- snap$Biomass[match(poly$boxid, snap$Box)]
-      pal <- get_fg_colors(input$fg, project$data$fg_palette)
+      pal <- get_fg_colors(input$fg, ps()$data$fg_palette)
       p <- ggplot2::ggplot(poly, ggplot2::aes(x = x, y = y, group = boxid, fill = Biomass))
       p <- p + ggplot2::geom_polygon(colour = "#F7F4EC", linewidth = 0.25)
       p <- p + ggplot2::coord_equal()
@@ -88,11 +89,11 @@ spatial_server <- function(id, project = NULL) {
       plot_or_message("Load a run to plot biomass in each box", {
       bio <- box_bio()
       req(nrow(bio) > 0)
-      tdates <- project$data$time_dates
+      tdates <- ps()$data$time_dates
       if (!is.null(tdates) && length(tdates) >= max(bio$Time)) {
         bio$Date <- tdates[bio$Time]
       } else {
-        bio$Date <- days_as_date(bio$Time, project$data$origin)
+        bio$Date <- days_as_date(bio$Time, ps()$data$origin)
       }
       poly <- tryCatch(polys(), error = function(e) NULL)
       bio$Boundary <- FALSE

@@ -29,29 +29,36 @@ catch_ui <- function(id) {
 
 catch_server <- function(id, project = NULL) {
   moduleServer(id, function(input, output, session) {
+    ps <- shiny::reactive(project_snapshot(project))
 
-    output$banner <- renderUI(tool_banner(project, "catch"))
+    output$banner <- renderUI(tool_banner(ps(), "catch"))
 
     observe({
-      req(isTRUE(project$ready), project$data$grp, project$data$fish)
-      fish <- project$data$fish
-      grp <- project$data$grp
-      fish_labels <- if ("name" %in% names(fish)) {
-        stats::setNames(as.character(fish$code), paste(fish$code, fish$name, sep = " — "))
-      } else {
-        as.character(fish$code)
+      req(isTRUE(ps()$ready), ps()$data$grp)
+      dat <- ps()$data
+      grp <- dat$grp
+      fish <- dat$fish
+      if (is.null(fish) || NROW(fish) == 0) {
+        fish <- fisheries_from_catch_nc(dat$nc_catch)
+      }
+      if (!is.null(fish) && NROW(fish) > 0) {
+        fish_labels <- if ("name" %in% names(fish)) {
+          stats::setNames(as.character(fish$code), paste(fish$code, fish$name, sep = " — "))
+        } else {
+          as.character(fish$code)
+        }
+        update_select_keep(session, "fishery", fish_labels, input$fishery)
       }
       impacted <- grp
       if ("isimpacted" %in% names(grp)) {
         on <- grp[grp$isimpacted == 1, , drop = FALSE]
         if (nrow(on) > 0) impacted <- on
       }
-      update_select_keep(session, "fishery", fish_labels, input$fishery)
       update_select_keep(session, "fg", c("All", as.character(impacted$code)), input$fg)
     })
 
     catch_time <- reactive({
-      dat <- project$data
+      dat <- ps()$data
       req(dat$nc_catch)
       t <- tryCatch(time_calc(dat$nc_catch), error = function(e) NULL)
       if (!is.null(t)) return(t)
@@ -60,14 +67,18 @@ catch_server <- function(id, project = NULL) {
     })
 
     nc_vars <- reactive({
-      dat <- project$data
+      dat <- ps()$data
       req(dat$nc_catch)
       names(dat$nc_catch$var)
     })
 
     catch_result <- reactive({
-      dat <- project$data
-      req(dat$nc_catch, dat$grp, dat$fish, input$view)
+      dat <- ps()$data
+      req(dat$nc_catch, dat$grp, input$view)
+      if (is.null(dat$fish) || NROW(dat$fish) == 0) {
+        dat$fish <- fisheries_from_catch_nc(dat$nc_catch)
+      }
+      req(dat$fish)
       quantity <- if (identical(input$view, "numbers")) "numbers" else "biomass"
       fishery_code <- input$fishery
       fg_code <- input$fg
@@ -91,7 +102,7 @@ catch_server <- function(id, project = NULL) {
     })
 
     fleet_stack <- reactive({
-      dat <- project$data
+      dat <- ps()$data
       req(dat$nc_catch, dat$grp, dat$fish, input$fg)
       fg_code <- input$fg
       if (identical(fg_code, "All")) fg_code <- ""
@@ -119,7 +130,7 @@ catch_server <- function(id, project = NULL) {
     })
 
     observed_overlay <- function(p, fg_code, time_col_df) {
-      dat <- project$data
+      dat <- ps()$data
       ext <- dat$ext_catch
       if (is.null(ext) || is.null(fg_code) || !nzchar(fg_code) || !(fg_code %in% names(ext))) {
         return(p)
@@ -139,7 +150,7 @@ catch_server <- function(id, project = NULL) {
 
     make_catch_plot <- function() {
       view <- input$view
-      pal <- project$data$fg_palette
+      pal <- ps()$data$fg_palette
       xlab <- if (isTRUE(input$by_year)) "Year" else "Date"
 
       if (identical(view, "by_fleet")) {
@@ -212,7 +223,7 @@ catch_server <- function(id, project = NULL) {
     }
 
     output$skill_table <- DT::renderDataTable({
-      dat <- project$data
+      dat <- ps()$data
       res <- tryCatch(catch_result(), error = function(e) NULL)
       if (!isTRUE(res$ok) || is.null(dat$ext_catch)) {
         return(ra_datatable(data.frame(Note = "Load an external catch CSV to score skill.")))
@@ -249,6 +260,22 @@ normalise_groups_catch <- function(grp) {
   if ("code" %in% names(grp)) grp$code <- trimws(as.character(grp$code))
   if ("name" %in% names(grp)) grp$name <- trimws(as.character(grp$name))
   grp
+}
+
+fisheries_from_catch_nc <- function(nc) {
+  if (is.null(nc) || is.null(nc$var)) return(NULL)
+  vars <- names(nc$var)
+  hits <- grep("_FC[0-9]+$", vars, value = TRUE)
+  if (length(hits) == 0) return(NULL)
+  idx <- unique(as.integer(sub(".*_FC", "", hits)))
+  idx <- idx[is.finite(idx)]
+  if (length(idx) == 0) return(NULL)
+  data.frame(
+    index = idx,
+    code = paste0("FC", idx),
+    name = paste0("Fleet ", idx),
+    stringsAsFactors = FALSE
+  )
 }
 
 normalise_fisheries <- function(fish) {

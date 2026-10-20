@@ -52,13 +52,50 @@ empty_paths <- function() {
   setNames(as.list(rep(NA_character_, length(FILE_ROLES))), FILE_ROLES)
 }
 
+empty_state <- function() {
+  list(
+    ready = FALSE,
+    paths = empty_paths(),
+    data = NULL,
+    ensemble = NULL,
+    scan_note = NULL,
+    gen = 0L
+  )
+}
+
+##' Browser / OS duplicate names ("NorthSea (1).bgm", "copy", AppleDouble)
+is_os_duplicate <- function(bn) {
+  bn <- as.character(bn)[1]
+  if (is.na(bn) || !nzchar(bn)) return(FALSE)
+  grepl(" \\([0-9]+\\)\\.[^.]+$", bn) ||
+    grepl("[- _]copy\\.", bn, ignore.case = TRUE) ||
+    grepl("^\\._", bn)
+}
+
+##' Single existing path; length>1 or mixed NA never counts as missing
+as_path <- function(p) {
+  if (is.null(p) || length(p) < 1) return(NA_character_)
+  p <- as.character(unlist(p, use.names = FALSE))
+  p <- p[!is.na(p) & nzchar(trimws(p))]
+  p <- trimws(p)
+  if (length(p) == 0) return(NA_character_)
+  exist <- p[file.exists(p)]
+  if (length(exist) == 0) return(p[1])
+  exist <- exist[!is_os_duplicate(basename(exist))]
+  if (length(exist) == 0) exist <- p[file.exists(p)]
+  exist[order(nchar(basename(exist)), basename(exist))][1]
+}
+
 pick_first <- function(files, pattern, exclude = NULL) {
+  if (length(files) == 0) return(NA_character_)
   bn <- basename(files)
   hit <- grepl(pattern, bn, ignore.case = TRUE)
   if (!is.null(exclude)) hit <- hit & !grepl(exclude, bn, ignore.case = TRUE)
   cand <- files[hit]
   if (length(cand) == 0) return(NA_character_)
-  cand[order(nchar(basename(cand)))][1]
+  primary <- cand[!is_os_duplicate(basename(cand))]
+  if (length(primary) == 0) primary <- cand
+  as_path(primary[order(nchar(basename(primary)), basename(primary))])
 }
 
 classify_csv <- function(path) {
@@ -75,6 +112,8 @@ classify_csv <- function(path) {
 }
 
 classify_prm <- function(path) {
+  sz <- suppressWarnings(file.size(path))
+  if (is.finite(sz) && sz > 20 * 1024^2) return(NA_character_)
   lines <- tryCatch(readLines(path, warn = FALSE), error = function(e) character())
   if (length(lines) == 0) return(NA_character_)
   ## Comments can mention pPREY; require a real token (pPREY1COD / KUP_COD).
@@ -95,26 +134,61 @@ normalize_paths <- function(paths) {
   out <- empty_paths()
   if (is.null(paths)) return(out)
   nms <- names(paths)
-  if (is.null(nms) || !any(nzchar(nms))) {
+  if (is.null(nms) || !any(nzchar(nms), na.rm = TRUE)) {
     if (length(paths) == length(FILE_ROLES)) nms <- FILE_ROLES else return(out)
   }
+  nms[is.na(nms)] <- ""
   for (i in seq_along(paths)) {
-    nm <- nms[i]
-    if (!nm %in% FILE_ROLES) next
-    val <- paths[[i]]
-    if (is.null(val) || length(val) < 1) next
-    val <- as.character(val)[1]
+    nm <- as.character(nms[i])[1]
+    if (!nzchar(nm) || !nm %in% FILE_ROLES) next
+    val <- as_path(paths[[i]])
     if (!is.na(val) && nzchar(val)) out[[nm]] <- val
   }
   out
 }
 
+##' One consistent view of the run: paths + in-memory objects + ready flag
+project_snapshot <- function(project) {
+  if (is.null(project)) return(empty_state())
+  if (inherits(project, "reactivevalues") || inherits(project, "reactiveValues")) {
+    st <- project$state
+    if (is.list(st) && !is.null(st$paths)) {
+      st$paths <- normalize_paths(st$paths)
+      st$ready <- isTRUE(st$ready)
+      if (is.null(st$gen)) st$gen <- 0L
+      return(st)
+    }
+    return(list(
+      ready = isTRUE(project$ready),
+      paths = normalize_paths(project$paths),
+      data = project$data,
+      ensemble = project$ensemble,
+      scan_note = project$scan_note,
+      gen = 0L
+    ))
+  }
+  if (is.list(project)) {
+    dat <- project$data
+    if (is.null(dat) && !is.null(project$grp)) dat <- project
+    return(list(
+      ready = isTRUE(project$ready),
+      paths = normalize_paths(project$paths),
+      data = dat,
+      ensemble = project$ensemble,
+      scan_note = project$scan_note,
+      gen = if (is.null(project$gen)) 0L else project$gen
+    ))
+  }
+  empty_state()
+}
+
 ##' True when a role has a readable path or the object is already in memory
 role_is_loaded <- function(project, role) {
-  if (is.null(project) || is.null(role) || !nzchar(role)) return(FALSE)
-  paths <- tryCatch(normalize_paths(project$paths), error = function(e) empty_paths())
+  if (is.null(project) || is.null(role) || !nzchar(as.character(role)[1])) return(FALSE)
+  snap <- project_snapshot(project)
+  paths <- snap$paths
   if (path_ok(paths[[role]])) return(TRUE)
-  dat <- tryCatch(project$data, error = function(e) NULL)
+  dat <- snap$data
   if (is.null(dat)) return(FALSE)
   if (!is.null(dat$paths) && path_ok(normalize_paths(dat$paths)[[role]])) return(TRUE)
   switch(as.character(role),
@@ -126,20 +200,63 @@ role_is_loaded <- function(project, role) {
     init_nc = !is.null(dat$nc_init),
     prod_nc = !is.null(dat$nc_prod),
     biomindx = !is.null(dat$biomindx) && NROW(dat$biomindx) > 0,
-    dietcheck = !is.null(dat$diet_time) || !is.null(dat$diet_full),
+    dietcheck = !is.null(dat$diet_time) || !is.null(dat$diet_full) || isTRUE(dat$diet_deferred),
     diet_bypol = path_ok(paths$diet_bypol),
     ssb = !is.null(dat$ssb) && NROW(dat$ssb) > 0,
     yoy = !is.null(dat$yoy) && NROW(dat$yoy) > 0,
     bio_prm = !is.null(dat$prm_bio) && length(dat$prm_bio) > 0,
     run_prm = !is.null(dat$prm_run) && length(dat$prm_run) > 0,
     force_prm = path_ok(paths$force_prm),
-    bgm = !is.null(dat$bgm_path) || !is.null(dat$inf_box),
+    bgm = path_ok(dat$bgm_path) || !is.null(dat$inf_box),
     specific_mort = !is.null(dat$spe_mort) && NROW(dat$spe_mort) > 0,
     specific_pred_mort = !is.null(dat$pred_mort) && NROW(dat$pred_mort) > 0,
     ext_catch = !is.null(dat$ext_catch),
     obs_csv = !is.null(dat$observations),
     FALSE
   )
+}
+
+role_checklist_ui <- function(project) {
+  snap <- project_snapshot(project)
+  rows <- vector("list", length(FILE_ROLES))
+  for (i in seq_along(FILE_ROLES)) {
+    role <- FILE_ROLES[[i]]
+    ok <- isTRUE(role_is_loaded(snap, role))
+    p <- snap$paths[[role]]
+    rows[[i]] <- shiny::div(
+      class = paste("ra-check-row", if (ok) "is-loaded" else "is-missing"),
+      `data-role` = role,
+      `data-status` = if (ok) "loaded" else "not-provided",
+      title = if (ok && path_ok(p)) p else unname(FILE_LABELS[[role]]),
+      shiny::span(class = "ra-dot"),
+      shiny::span(class = "ra-check-label", unname(FILE_LABELS[[role]])),
+      shiny::span(class = if (ok) "ra-have" else "ra-need",
+                  if (ok) "loaded" else "not provided")
+    )
+  }
+  shiny::div(class = "ra-check", rows)
+}
+
+tool_checklist_ui <- function(project) {
+  snap <- project_snapshot(project)
+  tools <- names(TOOL_REQUIREMENTS)
+  rows <- vector("list", length(tools))
+  for (i in seq_along(tools)) {
+    tool <- tools[[i]]
+    miss <- tool_missing(snap$paths, tool, snap)
+    ok <- length(miss) == 0 && isTRUE(snap$ready)
+    tip <- if (ok) "Ready" else paste("Needs:", paste(miss, collapse = ", "))
+    lab <- paste0(toupper(substring(tool, 1, 1)), substring(tool, 2))
+    rows[[i]] <- shiny::div(
+      class = paste("ra-check-row", if (ok) "is-loaded" else "is-missing"),
+      `data-tool` = tool,
+      title = tip,
+      shiny::span(class = "ra-dot"),
+      shiny::span(class = "ra-check-label", lab),
+      if (!ok) shiny::span(class = "ra-need", tip)
+    )
+  }
+  shiny::div(class = "ra-check", rows)
 }
 
 ##' Detect Atlantis files in a folder by suffix and header
@@ -260,20 +377,54 @@ summarise_run <- function(grp, nc, biomindx, time_dates) {
 tool_missing <- function(paths, tool, project = NULL) {
   need <- TOOL_REQUIREMENTS[[tool]]
   if (is.null(need)) return(character())
-  loaded <- function(role) {
-    if (!is.null(project)) return(role_is_loaded(project, role))
-    path_ok(normalize_paths(paths)[[role]])
+  snap <- if (!is.null(project)) {
+    st <- project_snapshot(project)
+    if (is.null(st$paths) || !any(vapply(st$paths, path_ok, logical(1)))) {
+      st$paths <- normalize_paths(paths)
+    }
+    st
+  } else {
+    list(ready = TRUE, paths = normalize_paths(paths), data = NULL)
   }
+  loaded <- function(role) role_is_loaded(snap, role)
   miss <- need[!vapply(need, loaded, logical(1))]
-  labs <- unname(FILE_LABELS[miss])
+  labs <- unname(as.character(FILE_LABELS[miss]))
   if (identical(tool, "compare") && !loaded("biomindx") && !loaded("output_nc")) {
-    labs <- unique(c(labs, unname(FILE_LABELS[c("biomindx", "output_nc")])))
+    labs <- unique(c(labs, unname(as.character(FILE_LABELS[c("biomindx", "output_nc")]))))
   }
   labs
 }
 
 path_ok <- function(p) {
-  !is.null(p) && length(p) == 1 && !is.na(p) && nzchar(p) && file.exists(p)
+  x <- as_path(p)
+  !is.na(x) && nzchar(x) && file.exists(x)
+}
+
+eager_table_max_bytes <- function() {
+  as.numeric(getOption("reactiveatlantis.eager_table_bytes", 48 * 1024^2))
+}
+
+file_too_big <- function(path) {
+  sz <- suppressWarnings(file.size(path))
+  is.finite(sz) && sz > eager_table_max_bytes()
+}
+
+##' Read DietCheck when load skipped a huge file; path still counts as loaded
+ensure_diet <- function(dat, paths = NULL) {
+  if (is.null(dat)) return(dat)
+  if (!is.null(dat$diet_time) || !is.null(dat$diet_full)) return(dat)
+  p <- NA_character_
+  if (!is.null(paths)) p <- as_path(normalize_paths(paths)$dietcheck)
+  if (!path_ok(p) && path_ok(dat$paths$dietcheck)) p <- as_path(dat$paths$dietcheck)
+  if (!path_ok(p)) return(dat)
+  diet_raw <- tryCatch(read_space_table(p), error = function(e) NULL)
+  if (is.null(diet_raw)) return(dat)
+  agg <- tryCatch(preaggregate_diet(diet_raw), error = function(e) NULL)
+  if (is.null(agg)) return(dat)
+  dat$diet_full <- agg$diet_full
+  dat$diet_time <- agg$diet_time
+  dat$diet_deferred <- FALSE
+  dat
 }
 
 upload_path <- function(x) {
@@ -318,6 +469,7 @@ load_project <- function(paths) {
     fg_palette = NULL,
     ext_catch = NULL,
     observations = NULL,
+    diet_deferred = FALSE,
     errors = character()
   )
 
@@ -367,13 +519,17 @@ load_project <- function(paths) {
     })
   }
   if (path_ok(paths$dietcheck)) {
-    diet_raw <- tryCatch(read_space_table(paths$dietcheck), error = function(e) {
-      add_err(paste("DietCheck:", e$message)); NULL
-    })
-    if (!is.null(diet_raw)) {
-      agg <- preaggregate_diet(diet_raw)
-      out$diet_full <- agg$diet_full
-      out$diet_time <- agg$diet_time
+    if (file_too_big(paths$dietcheck)) {
+      out$diet_deferred <- TRUE
+    } else {
+      diet_raw <- tryCatch(read_space_table(paths$dietcheck), error = function(e) {
+        add_err(paste("DietCheck:", e$message)); NULL
+      })
+      if (!is.null(diet_raw)) {
+        agg <- preaggregate_diet(diet_raw)
+        out$diet_full <- agg$diet_full
+        out$diet_time <- agg$diet_time
+      }
     }
   }
   if (path_ok(paths$ext_catch)) {
@@ -475,6 +631,7 @@ project_sidebar_ui <- function(id) {
 project_server <- function(id) {
   shiny::moduleServer(id, function(input, output, session) {
     rv <- shiny::reactiveValues(
+      state = empty_state(),
       ready = FALSE,
       paths = empty_paths(),
       data = NULL,
@@ -524,28 +681,39 @@ project_server <- function(id) {
       runs
     }
 
-    try_autoload <- function() {
-      folder <- trimws(input$folder_path)
-      if (!nzchar(folder) || !dir.exists(folder) || isTRUE(rv$ready)) return()
-      detected <- detect_project_files(folder)
-      paths <- normalize_paths(merge_paths(detected, collect_uploads()))
-      loaded <- tryCatch(load_project(paths), error = function(e) NULL)
-      if (is.null(loaded) || is.null(loaded$grp)) return()
-      rv$paths <- paths
-      rv$data <- loaded
-      rv$ensemble <- build_ensemble(loaded, folder)
-      rv$ready <- TRUE
-      n_found <- sum(vapply(paths, path_ok, logical(1)))
-      rv$scan_note <- paste0("Loaded ", n_found, " of ", length(FILE_ROLES), " file roles.")
+    commit <- function(paths = NULL, data = NULL, ensemble = NULL, note = NULL,
+                       ready = NULL, touch_data = FALSE) {
+      prev <- shiny::isolate(rv$state)
+      if (is.null(prev) || !is.list(prev)) prev <- empty_state()
+      if (!is.null(paths)) prev$paths <- normalize_paths(paths)
+      if (isTRUE(touch_data)) {
+        prev$data <- data
+        prev$ensemble <- ensemble
+      }
+      if (!is.null(note)) prev$scan_note <- note
+      if (!is.null(ready)) prev$ready <- isTRUE(ready)
+      prev$gen <- prev$gen + 1L
+      ## One list assignment so every module sees paths, data and ready together.
+      rv$state <- prev
+      rv$ready <- prev$ready
+      rv$paths <- prev$paths
+      rv$data <- prev$data
+      rv$ensemble <- prev$ensemble
+      rv$scan_note <- prev$scan_note
+      prev
     }
 
-    auto_done <- FALSE
     shiny::observeEvent(input$folder_path, {
-      if (isTRUE(auto_done) || isTRUE(rv$ready)) return()
       folder <- trimws(input$folder_path)
       if (!nzchar(folder) || !dir.exists(folder)) return()
-      auto_done <<- TRUE
-      try_autoload()
+      if (isTRUE(shiny::isolate(rv$state$ready))) return()
+      detected <- detect_project_files(folder)
+      n_found <- sum(vapply(detected, path_ok, logical(1)))
+      commit(
+        paths = normalize_paths(merge_paths(detected, collect_uploads())),
+        note = paste0("Found ", n_found, " of ", length(FILE_ROLES),
+                      " file roles. Click Load run to open them.")
+      )
     }, ignoreInit = FALSE)
 
     shiny::observeEvent(input$scan_folder, {
@@ -557,9 +725,11 @@ project_server <- function(id) {
       }
       detected <- detect_project_files(folder)
       n_found <- sum(vapply(detected, path_ok, logical(1)))
-      rv$paths <- normalize_paths(merge_paths(detected, collect_uploads()))
-      rv$scan_note <- paste0("Scan: ", n_found, " of ", length(FILE_ROLES),
-                             " file roles found. Click Load run to open them.")
+      commit(
+        paths = normalize_paths(merge_paths(detected, collect_uploads())),
+        note = paste0("Scan: ", n_found, " of ", length(FILE_ROLES),
+                      " file roles found. Click Load run to open them.")
+      )
       shiny::showNotification(paste("Found", n_found, "Atlantis files in the folder."),
                               type = "message", duration = 5)
     }, ignoreInit = TRUE)
@@ -579,68 +749,35 @@ project_server <- function(id) {
       })
       shiny::removeNotification("load_run")
       if (is.null(loaded)) return()
-      rv$paths <- paths
-      rv$data <- loaded
-      rv$ensemble <- build_ensemble(loaded, folder)
-      rv$ready <- !is.null(loaded$grp)
       n_found <- sum(vapply(paths, path_ok, logical(1)))
-      rv$scan_note <- paste0("Loaded ", n_found, " of ", length(FILE_ROLES), " file roles.")
+      commit(
+        paths = paths,
+        data = loaded,
+        ensemble = build_ensemble(loaded, folder),
+        note = paste0("Loaded ", n_found, " of ", length(FILE_ROLES), " file roles."),
+        ready = !is.null(loaded$grp),
+        touch_data = TRUE
+      )
       msg <- if (length(loaded$errors)) {
         paste("Loaded with notes:", paste(loaded$errors, collapse = "; "))
       } else {
         "Run loaded. Tools with the required files are ready."
       }
       shiny::showNotification(msg, type = if (length(loaded$errors)) "warning" else "message", duration = 6)
-    }, ignoreInit = TRUE)
+    }, ignoreInit = TRUE, ignoreNULL = TRUE)
 
     output$scan_note <- shiny::renderUI({
-      note <- rv$scan_note
+      note <- rv$state$scan_note
       if (is.null(note) || !nzchar(note)) return(NULL)
       shiny::tags$p(class = "ra-scan-note", note)
     })
 
     output$file_checklist <- shiny::renderUI({
-      proj <- list(paths = rv$paths, data = rv$data, ready = rv$ready)
-      paths <- normalize_paths(rv$paths)
-      shiny::tags$ul(
-        class = "ra-check",
-        unname(lapply(FILE_ROLES, function(role) {
-          ok <- role_is_loaded(proj, role)
-          shiny::tags$li(
-            class = if (ok) "ok" else "missing",
-            title = if (ok) {
-              p <- paths[[role]]
-              if (path_ok(p)) p else paste("Loaded:", FILE_LABELS[[role]])
-            } else paste("Not provided:", FILE_LABELS[[role]]),
-            shiny::span(
-              class = "ra-dot",
-              `aria-label` = if (ok) "loaded" else "not provided"
-            ),
-            FILE_LABELS[[role]],
-            if (!ok) shiny::span(class = "ra-need", "not provided")
-          )
-        }))
-      )
+      role_checklist_ui(rv$state)
     })
 
     output$tool_checklist <- shiny::renderUI({
-      proj <- list(paths = rv$paths, data = rv$data, ready = rv$ready)
-      tools <- names(TOOL_REQUIREMENTS)
-      shiny::tags$ul(
-        class = "ra-check",
-        unname(lapply(tools, function(tool) {
-          miss <- tool_missing(rv$paths, tool, proj)
-          ok <- length(miss) == 0 && isTRUE(rv$ready)
-          tip <- if (ok) "Ready" else paste("Needs:", paste(miss, collapse = ", "))
-          shiny::tags$li(
-            class = if (ok) "ok" else "missing",
-            title = tip,
-            shiny::span(class = "ra-dot"),
-            paste0(toupper(substring(tool, 1, 1)), substring(tool, 2)),
-            if (!ok) shiny::span(class = "ra-need", tip)
-          )
-        }))
-      )
+      tool_checklist_ui(rv$state)
     })
 
     keep_outputs_alive(output, c("scan_note", "file_checklist", "tool_checklist"))

@@ -28,14 +28,19 @@ keep_outputs_alive <- function(output, names) {
 }
 
 ##' DT without Bootstrap 5 CSS (missing on some Debian DT builds)
-ra_datatable <- function(data, ...) {
-  DT::datatable(
-    data,
+ra_datatable <- function(data, ..., filter = "none") {
+  dots <- list(...)
+  opts <- dots$options
+  if (is.null(opts)) opts <- list()
+  dots$options <- NULL
+  do.call(DT::datatable, c(list(
+    data = data,
     rownames = FALSE,
     style = "default",
     class = "display compact",
-    ...
-  )
+    filter = filter,
+    options = opts
+  ), dots))
 }
 
 plot_message <- function(msg) {
@@ -104,11 +109,13 @@ dummy_inf_box <- function(n_box = 1, n_z = 2) {
 }
 
 tool_banner <- function(project, tool) {
-  if (is.null(project) || !isTRUE(project$ready)) {
-    return(tool_missing_card(FILE_LABELS[TOOL_REQUIREMENTS[[tool]]],
-                             paste0(toupper(substring(tool, 1, 1)), substring(tool, 2))))
+  snap <- project_snapshot(project)
+  title <- paste0(toupper(substring(tool, 1, 1)), substring(tool, 2))
+  if (!isTRUE(snap$ready)) {
+    return(tool_missing_card(unname(as.character(FILE_LABELS[TOOL_REQUIREMENTS[[tool]]])),
+                             title))
   }
-  miss <- tool_missing(project$paths, tool, project)
+  miss <- tool_missing(snap$paths, tool, snap)
   if (length(miss)) return(tool_missing_card(miss, tool))
   NULL
 }

@@ -26,12 +26,13 @@ ensemble_ui <- function(id) {
 
 ensemble_server <- function(id, project = NULL) {
   moduleServer(id, function(input, output, session) {
+    ps <- shiny::reactive(project_snapshot(project))
 
-    output$banner <- renderUI(tool_banner(project, "ensemble"))
+    output$banner <- renderUI(tool_banner(ps(), "ensemble"))
 
     output$empty_state <- renderUI({
-      if (!isTRUE(project$ready)) return(NULL)
-      runs <- project$ensemble
+      if (!isTRUE(ps()$ready)) return(NULL)
+      runs <- ps()$ensemble
       if (is.null(runs) || length(runs) < 2) {
         return(bslib::card(
           bslib::card_header("Only one run is loaded"),
@@ -45,18 +46,18 @@ ensemble_server <- function(id, project = NULL) {
     })
 
     observe({
-      req(isTRUE(project$ready), project$data$grp)
-      update_select_keep(session, "fg", fg_select_choices(project$data$grp, on_only = FALSE),
+      req(isTRUE(ps()$ready), ps()$data$grp)
+      update_select_keep(session, "fg", fg_select_choices(ps()$data$grp, on_only = FALSE),
                          input$fg)
     })
 
     output$ens_plot <- renderPlot({
       plot_or_message("Load a run, then paste extra folders to overlay them", {
-      if (!isTRUE(project$ready)) {
+      if (!isTRUE(ps()$ready)) {
         plot_message("Load a run to overlay BiomIndx, SSB or YOY")
         return(invisible(NULL))
       }
-      runs <- project$ensemble
+      runs <- ps()$ensemble
       if (is.null(runs) || length(runs) < 2) {
         plot_message("Paste extra run folders in the Run panel to overlay more than one simulation")
         return(invisible(NULL))
@@ -67,7 +68,7 @@ ensemble_server <- function(id, project = NULL) {
         plot_message("No series for this group in the loaded runs")
         return(invisible(NULL))
       }
-      origin <- project$data$origin
+      origin <- ps()$data$origin
       df$Date <- days_as_date(df$Time, origin)
       n_runs <- length(unique(df$Run))
       pal <- cycle_pool(n_runs, c("#0B3C5D", "#1D7874", "#C4A35A", "#A33B20",

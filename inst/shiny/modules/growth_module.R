@@ -22,12 +22,13 @@ growth_ui <- function(id) {
 
 growth_server <- function(id, project = NULL) {
   moduleServer(id, function(input, output, session) {
+    ps <- shiny::reactive(project_snapshot(project))
     rv <- reactiveValues(
       l_nut = NULL, l_light = NULL, l_eddy = NULL,
       cod_fg = NULL, n_box = NULL, n_layer = NULL, built = FALSE, token = NULL
     )
 
-    output$banner <- renderUI(tool_banner(project, "growth"))
+    output$banner <- renderUI(tool_banner(ps(), "growth"))
 
     observe({
       req(rv$built, rv$cod_fg)
@@ -37,12 +38,12 @@ growth_server <- function(id, project = NULL) {
     })
 
     observe({
-      req(!is.null(project), isTRUE(project$ready), project$data)
-      miss <- tool_missing(project$paths, "growth", project)
-      token <- paste(unlist(project$paths), collapse = "|")
+      req(!is.null(project), isTRUE(ps()$ready), ps()$data)
+      miss <- tool_missing(ps()$paths, "growth", ps())
+      token <- paste(unlist(ps()$paths), collapse = "|")
       if (length(miss) || (isTRUE(rv$built) && identical(rv$token, token))) return()
       rv$token <- token
-      dat <- project$data
+      dat <- ps()$data
       req(dat$nc_out, dat$grp, dat$prm_bio)
       grp <- dat$grp
       prm <- dat$prm_bio
@@ -134,7 +135,7 @@ growth_server <- function(id, project = NULL) {
       eddy_data <- rv$l_eddy
       n_layers <- dim(nut_data)[1]
       n_time <- dim(nut_data)[3]
-      Time <- project$data$time_dates
+      Time <- ps()$data$time_dates
       if (is.null(Time) || length(Time) != n_time) Time <- seq_len(n_time)
 
       layers <- if (isTRUE(input$all_layers)) seq_len(n_layers) else {

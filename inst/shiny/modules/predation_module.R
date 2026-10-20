@@ -25,12 +25,17 @@ predation_ui <- function(id) {
 
 predation_server <- function(id, project = NULL) {
   moduleServer(id, function(input, output, session) {
+    ps <- shiny::reactive(project_snapshot(project))
+    diet_dat <- shiny::reactive({
+      req(ps()$data)
+      ensure_diet(ps()$data, ps()$paths)
+    })
 
-    output$banner <- renderUI(tool_banner(project, "predation"))
+    output$banner <- renderUI(tool_banner(ps(), "predation"))
 
     observe({
-      req(isTRUE(project$ready), project$data$grp)
-      dat <- project$data
+      req(isTRUE(ps()$ready), diet_dat()$grp)
+      dat <- diet_dat()
       update_select_keep(session, "fg", fg_select_choices(dat$grp, on_only = FALSE), input$fg)
       stocks <- if (!is.null(dat$diet_time) && "Stock" %in% names(dat$diet_time)) {
         unique(dat$diet_time$Stock)
@@ -46,7 +51,7 @@ predation_server <- function(id, project = NULL) {
     })
 
     new_bio <- reactive({
-      dat <- project$data
+      dat <- diet_dat()
       req(dat$biomindx, dat$diet_time)
       biom <- as.data.frame(dat$biomindx)
       preds <- unique(as.character(dat$diet_time$Predator))
@@ -61,20 +66,20 @@ predation_server <- function(id, project = NULL) {
     })
 
     predator_df <- reactive({
-      dat <- project$data
+      dat <- diet_dat()
       req(dat$diet_time, input$fg)
       diet_through_time_predator(dat$diet_time, new_bio(), input$fg, input$stock,
                                  input$threshold, FALSE)
     })
 
     prey_df <- reactive({
-      dat <- project$data
+      dat <- diet_dat()
       req(dat$diet_time, input$fg)
       diet_through_time_prey(dat$diet_time, new_bio(), input$fg, input$threshold, FALSE)
     })
 
     to_year <- function(df) {
-      origin <- project$data$origin
+      origin <- ps()$data$origin
       df$Time <- days_as_date(df$Time, origin)
       df
     }
@@ -84,7 +89,7 @@ predation_server <- function(id, project = NULL) {
       req(nrow(df) > 0)
       df <- bucket_top_n(df, "variable", "consum", input$top_n)
       agg <- stats::aggregate(consum ~ Time + series, data = df, sum)
-      pal <- get_fg_colors(setdiff(unique(agg$series), "Other"), project$data$fg_palette)
+      pal <- get_fg_colors(setdiff(unique(agg$series), "Other"), ps()$data$fg_palette)
       pal <- c(pal, Other = "#8D99AE")
       ylab <- if (isTRUE(input$scaled)) "Proportion of diet" else "Consumption (tons)"
       p <- ggplot2::ggplot(agg, ggplot2::aes(x = Time, y = consum, fill = series))
@@ -99,7 +104,7 @@ predation_server <- function(id, project = NULL) {
       req(nrow(df) > 0)
       df <- bucket_top_n(df, "Predator", "eff.pred", input$top_n)
       agg <- stats::aggregate(eff.pred ~ Time + series, data = df, sum)
-      pal <- get_fg_colors(setdiff(unique(agg$series), "Other"), project$data$fg_palette)
+      pal <- get_fg_colors(setdiff(unique(agg$series), "Other"), ps()$data$fg_palette)
       pal <- c(pal, Other = "#8D99AE")
       ylab <- if (isTRUE(input$scaled)) "Proportion of predation" else "Predation pressure (tons)"
       p <- ggplot2::ggplot(agg, ggplot2::aes(x = Time, y = eff.pred, fill = series))
@@ -128,7 +133,7 @@ predation_server <- function(id, project = NULL) {
 
     output$plot_age <- renderPlot({
       plot_or_message("Load DietCheck.txt to plot diet by age", {
-      dat <- project$data
+      dat <- diet_dat()
       req(dat$diet_full, input$fg, input$time_age)
       df <- age_diet_slice(dat$diet_full, input$fg, input$stock, input$time_age, input$threshold)
       req(nrow(df) > 0)

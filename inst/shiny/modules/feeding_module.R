@@ -31,12 +31,13 @@ feeding_ui <- function(id) {
 
 feeding_server <- function(id, project = NULL) {
   moduleServer(id, function(input, output, session) {
+    ps <- shiny::reactive(project_snapshot(project))
     rv <- reactiveValues(
       ava_mat = NULL, overlap_mat = NULL, real_feed = NULL,
       pressure = NULL, bugs = NULL, built = FALSE, token = NULL
     )
 
-    output$banner <- renderUI(tool_banner(project, "feeding"))
+    output$banner <- renderUI(tool_banner(ps(), "feeding"))
 
     observe({
       req(rv$ava_mat)
@@ -47,14 +48,14 @@ feeding_server <- function(id, project = NULL) {
     })
 
     observe({
-      req(!is.null(project), isTRUE(project$ready), project$data)
-      miss <- tool_missing(project$paths, "feeding", project)
-      token <- paste(unlist(project$paths), collapse = "|")
+      req(!is.null(project), isTRUE(ps()$ready), ps()$data)
+      miss <- tool_missing(ps()$paths, "feeding", ps())
+      token <- paste(unlist(ps()$paths), collapse = "|")
       if (length(miss) || (isTRUE(rv$built) && identical(rv$token, token))) return()
       rv$token <- token
-      dat <- project$data
+      dat <- ps()$data
       req(dat$grp, dat$prm_bio)
-      paths <- tryCatch(normalize_paths(project$paths), error = function(e) empty_paths())
+      paths <- tryCatch(normalize_paths(ps()$paths), error = function(e) empty_paths())
       if (!is.null(dat$paths)) {
         dp <- tryCatch(normalize_paths(dat$paths), error = function(e) NULL)
         if (!is.null(dp) && path_ok(dp$init_nc)) paths$init_nc <- dp$init_nc
@@ -128,34 +129,59 @@ feeding_server <- function(id, project = NULL) {
       ava <- rv$ava_mat
       pred_keep <- seq_len(nrow(ava))
       prey_keep <- seq_len(ncol(ava))
-      if (!is.null(input$pred_search) && nzchar(trimws(input$pred_search))) {
-        pred_keep <- grep(trimws(input$pred_search), rownames(ava), ignore.case = TRUE)
+      q_pred <- if (is.null(input$pred_search)) "" else trimws(input$pred_search)
+      q_prey <- if (is.null(input$prey_search)) "" else trimws(input$prey_search)
+      rn <- rownames(ava)
+      if (is.null(rn)) rn <- as.character(seq_len(nrow(ava)))
+      cn <- colnames(ava)
+      if (is.null(cn)) cn <- as.character(seq_len(ncol(ava)))
+      if (nzchar(q_pred)) {
+        pred_keep <- tryCatch(grep(q_pred, rn, ignore.case = TRUE),
+                              error = function(e) integer(0))
+        if (length(pred_keep) == 0) {
+          pred_keep <- tryCatch(grep(q_pred, gsub("^pPREY[0-9]*", "", rn), ignore.case = TRUE),
+                                error = function(e) integer(0))
+        }
       }
-      if (!is.null(input$prey_search) && nzchar(trimws(input$prey_search))) {
-        prey_keep <- grep(trimws(input$prey_search), colnames(ava), ignore.case = TRUE)
+      if (nzchar(q_prey)) {
+        prey_keep <- tryCatch(grep(q_prey, cn, ignore.case = TRUE),
+                              error = function(e) integer(0))
       }
       if (!is.null(input$predator) && nzchar(input$predator) && input$predator != "(all)") {
-        hit <- which(rownames(ava) == input$predator)
+        hit <- which(rn == input$predator)
         if (length(hit)) pred_keep <- intersect(pred_keep, hit)
       }
       if (!is.null(input$prey) && nzchar(input$prey) && input$prey != "(all)") {
-        hit <- which(colnames(ava) == input$prey)
+        hit <- which(cn == input$prey)
         if (length(hit)) prey_keep <- intersect(prey_keep, hit)
       }
-      if (length(pred_keep) == 0) pred_keep <- seq_len(nrow(ava))
-      if (length(prey_keep) == 0) prey_keep <- seq_len(ncol(ava))
+      searching <- nzchar(q_pred) || nzchar(q_prey)
+      if (!searching && length(pred_keep) == 0) pred_keep <- seq_len(nrow(ava))
+      if (!searching && length(prey_keep) == 0) prey_keep <- seq_len(ncol(ava))
       list(
         ava = ava[pred_keep, prey_keep, drop = FALSE],
-        overlap = if (is.null(rv$overlap_mat)) NULL else rv$overlap_mat[pred_keep, prey_keep, drop = FALSE],
-        real = if (is.null(rv$real_feed)) NULL else rv$real_feed[pred_keep, prey_keep, drop = FALSE],
-        pressure = if (is.null(rv$pressure)) NULL else {
+        overlap = if (is.null(rv$overlap_mat) || length(pred_keep) == 0 || length(prey_keep) == 0) {
+          NULL
+        } else rv$overlap_mat[pred_keep, prey_keep, drop = FALSE],
+        real = if (is.null(rv$real_feed) || length(pred_keep) == 0 || length(prey_keep) == 0) {
+          NULL
+        } else rv$real_feed[pred_keep, prey_keep, drop = FALSE],
+        pressure = if (is.null(rv$pressure) || length(pred_keep) == 0 || length(prey_keep) == 0) {
+          NULL
+        } else {
           rv$pressure[prey_keep, pred_keep, drop = FALSE]
-        }
+        },
+        empty_search = searching && (length(pred_keep) == 0 || length(prey_keep) == 0)
       )
     })
 
     make_feed_plot <- function() {
       mats <- filtered_mats()
+      if (isTRUE(mats$empty_search) || is.null(mats$ava) || nrow(mats$ava) == 0 || ncol(mats$ava) == 0) {
+        return(ggplot2::ggplot() +
+                 ggplot2::labs(title = "No predators or prey match that search") +
+                 theme_reactiveatlantis())
+      }
       req(mats$ava, input$view_type)
       bugs <- if (is.null(mats$overlap)) NULL else gape_mismatch(mats$ava, mats$overlap)
       hl_pred <- if (is.null(input$predator) || input$predator %in% c("", "(all)")) NULL else input$predator

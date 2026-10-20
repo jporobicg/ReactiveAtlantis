@@ -56,13 +56,14 @@ compare_ui <- function(id) {
 
 compare_server <- function(id, project = NULL) {
   moduleServer(id, function(input, output, session) {
+    ps <- shiny::reactive(project_snapshot(project))
     rv <- reactiveValues(t_biomass = NULL, rel_bio = NULL, built = FALSE, token = NULL)
 
-    output$banner <- renderUI(tool_banner(project, "compare"))
+    output$banner <- renderUI(tool_banner(ps(), "compare"))
 
     observe({
-      req(isTRUE(project$ready), project$data$grp)
-      grp <- project$data$grp
+      req(isTRUE(ps()$ready), ps()$data$grp)
+      grp <- ps()$data$grp
       types <- c("All", sort(unique(as.character(grp$grouptype))))
       update_select_keep(session, "group_type", types, input$group_type)
       update_select_keep(session, "fg_total", fg_select_choices(grp), input$fg_total)
@@ -70,12 +71,12 @@ compare_server <- function(id, project = NULL) {
     })
 
     observe({
-      req(!is.null(project), isTRUE(project$ready), project$data)
-      miss <- tool_missing(project$paths, "compare", project)
-      token <- paste(unlist(project$paths), collapse = "|")
+      req(!is.null(project), isTRUE(ps()$ready), ps()$data)
+      miss <- tool_missing(ps()$paths, "compare", ps())
+      token <- paste(unlist(ps()$paths), collapse = "|")
       if (length(miss) || (isTRUE(rv$built) && identical(rv$token, token))) return()
       rv$token <- token
-      dat <- project$data
+      dat <- ps()$data
       req(dat$grp)
       t.biomass <- NULL
       if (!is.null(dat$biomindx) && NROW(dat$biomindx) > 0) {
@@ -96,9 +97,9 @@ compare_server <- function(id, project = NULL) {
     })
 
     filtered <- reactive({
-      req(rv$t_biomass, project$data$grp)
+      req(rv$t_biomass, ps()$data$grp)
       df <- if (isTRUE(input$relative)) rv$rel_bio else rv$t_biomass
-      grp <- project$data$grp
+      grp <- ps()$data$grp
       if (!is.null(input$group_type) && input$group_type != "All") {
         codes <- grp$code[grp$grouptype == input$group_type]
         keep <- grepl(paste0("\\((", paste(codes, collapse = "|"), ")\\)$"), df$FG)
@@ -120,7 +121,7 @@ compare_server <- function(id, project = NULL) {
       ycol <- if ("Relative" %in% names(df) && isTRUE(input$relative)) "Relative" else "Biomass"
       ylab <- if (isTRUE(input$relative)) "Relative biomass (Bt/B0)" else "Biomass (tons)"
       y_scale <- if (is.null(input$y_scale) || !nzchar(input$y_scale)) "free" else input$y_scale
-      pal <- get_fg_colors(unique(as.character(df$Code)), project$data$fg_palette)
+      pal <- get_fg_colors(unique(as.character(df$Code)), ps()$data$fg_palette)
       p <- ggplot2::ggplot(
         df,
         ggplot2::aes(x = Time, y = .data[[ycol]], colour = Code,
@@ -161,7 +162,7 @@ compare_server <- function(id, project = NULL) {
         p <- acceptable_band_layer(p, ACCEPT_BAND[1], ACCEPT_BAND[2],
                                    xmin = min(df$Time), xmax = max(df$Time))
       } else if (!isTRUE(input$relative)) {
-        obs <- project$data$observations
+        obs <- ps()$data$observations
         sub <- obs_for(obs, unique(df$Code), "Biomass")
         if (!is.null(sub) && nrow(sub) > 0) {
           lookup <- unique(data.frame(Code = df$Code, FG = df$FG, stringsAsFactors = FALSE))
@@ -185,7 +186,7 @@ compare_server <- function(id, project = NULL) {
     }
 
     output$plot_facets_gg <- renderPlot({
-      if (!isTRUE(project$ready) || is.null(rv$t_biomass)) {
+      if (!isTRUE(ps()$ready) || is.null(rv$t_biomass)) {
         plot_message("Load a run to compare biomass")
         return(invisible(NULL))
       }
@@ -199,7 +200,7 @@ compare_server <- function(id, project = NULL) {
 
     output$plot_total <- renderPlot({
       plot_or_message("Load a run and pick a functional group", {
-      dat <- project$data
+      dat <- ps()$data
       req(dat$nc_out, input$fg_total, dat$inf_box, dat$time_dates)
       mg2t <- 0.00000002
       x.cn <- 5.7
@@ -230,7 +231,7 @@ compare_server <- function(id, project = NULL) {
 
     output$plot_age <- renderPlot({
       plot_or_message("Load a run and pick an age-structured group", {
-      dat <- project$data
+      dat <- ps()$data
       req(dat$nc_out, input$fg_age, dat$inf_box, dat$time_dates)
       mg2t <- 0.00000002
       x.cn <- 5.7
@@ -259,7 +260,7 @@ compare_server <- function(id, project = NULL) {
 
     output$plot_age_bars <- renderPlot({
       plot_or_message("Load a run and pick an age-structured group", {
-      dat <- project$data
+      dat <- ps()$data
       req(dat$nc_out, input$fg_age, dat$inf_box, dat$time_dates)
       mg2t <- 0.00000002
       x.cn <- 5.7
