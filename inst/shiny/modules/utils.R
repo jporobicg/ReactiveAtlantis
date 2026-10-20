@@ -202,3 +202,47 @@ n_water_layers <- function(depths){
   }
   length(depths)
 }
+
+##' Y-axis range for scaled relative time series
+##'
+##' Relative values are typically near 1. Use the data maximum (at least 1)
+##' instead of a fixed 0-3 window that leaves empty space.
+##' @param values Numeric series
+##' @return Length-2 numeric vector
+relative_axis_ylim <- function(values) {
+  ymax <- suppressWarnings(max(as.numeric(values), na.rm = TRUE))
+  if (!is.finite(ymax) || ymax <= 0) {
+    ymax <- 1
+  }
+  c(0, max(1, ymax) * 1.05)
+}
+
+##' Zero-padded age-class labels (Age01 ... Age10)
+##' @param n Number of age classes
+##' @return Character vector
+format_age_labels <- function(n) {
+  n <- as.integer(n)
+  if (!is.finite(n) || n < 1) {
+    return(character(0))
+  }
+  sprintf("Age%02d", seq_len(n))
+}
+
+##' Snap a requested time to the nearest observed value
+##' @param requested Numeric time
+##' @param times Unique observed times
+##' @return One value from \code{times}
+nearest_time <- function(requested, times) {
+  times <- times[is.finite(times)]
+  if (length(times) == 0) {
+    return(requested)
+  }
+  times[which.min(abs(times - requested))]
+}
+
+##' Axis label for DietCheck time (days unless melted to steps)
+##' @param melt_time Logical, TRUE when time was divided into steps
+##' @return Character axis label
+diet_time_axis_label <- function(melt_time = FALSE) {
+  if (isTRUE(melt_time)) "Time step" else "Time (days)"
+}
