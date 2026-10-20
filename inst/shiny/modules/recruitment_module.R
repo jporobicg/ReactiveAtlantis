@@ -18,14 +18,22 @@ recruitment_body_ui <- function(ns, grp, rec, n_box) {
       width = 280, open = "open",
       selectInput(ns("analysis_type"), "View",
                   choices = c("Recruits and YOY" = "yoy",
+                              "Spawning stock biomass" = "ssb",
                               "Zooplankton and primary producers" = "growth")),
       conditionalPanel(
-        "input.analysis_type == 'yoy'", ns = ns,
+        "input.analysis_type == 'yoy' || input.analysis_type == 'ssb'", ns = ns,
         selectInput(ns("fg_yoy"), "Functional group",
-                    choices = as.character(age_groups$code)),
+                    choices = as.character(age_groups$code))
+      ),
+      conditionalPanel(
+        "input.analysis_type == 'yoy'", ns = ns,
         numericInput(ns("new_alpha"), "New alpha", value = 0, step = 0.1),
         numericInput(ns("new_beta"), "New beta", value = 0, step = 0.1),
-        p(class = "ra-muted", "The Beverton-Holt overlay uses alpha * YOY / (1 + beta * YOY) and updates as you edit alpha and beta.")
+        p(class = "ra-muted", "The Beverton-Holt overlay uses alpha * YOY / (1 + beta * YOY) and updates as you edit alpha and beta. Observed Recruitment points come from the observations CSV in the Run panel.")
+      ),
+      conditionalPanel(
+        "input.analysis_type == 'ssb'", ns = ns,
+        p(class = "ra-muted", "SSB.txt from the run, with observed SSB ribbons when an observations CSV is loaded.")
       ),
       conditionalPanel(
         "input.analysis_type == 'growth'", ns = ns,
@@ -121,6 +129,8 @@ recruitment_server <- function(id, project = NULL) {
           plotOutput(ns("plot_yoy"), height = "340px"),
           plotOutput(ns("plot_relative_yoy"), height = "340px")
         )
+      } else if (input$analysis_type == "ssb") {
+        plotOutput(ns("plot_ssb"), height = "480px")
       } else {
         plotOutput(ns("plot_pp_growth"), height = "640px")
       }
@@ -174,7 +184,8 @@ recruitment_server <- function(id, project = NULL) {
       p <- p + ggplot2::geom_line(linewidth = 0.9, na.rm = TRUE)
       p <- p + ggplot2::scale_color_manual(values = pal)
       p <- p + ggplot2::labs(title = paste("YOY —", input$fg_yoy), x = "Year", y = "Young of the year")
-      p + theme_reactiveatlantis()
+      p <- p + theme_reactiveatlantis()
+      add_obs_overlay(p, project$data$observations, input$fg_yoy, "Recruitment")
     })
 
     output$plot_relative_yoy <- renderPlot({
@@ -197,6 +208,32 @@ recruitment_server <- function(id, project = NULL) {
       p <- p + ggplot2::scale_color_manual(values = pal)
       p <- p + ggplot2::labs(title = "Relative YOY (YOY/YOY0)", x = "Year", y = "Relative YOY")
       p + theme_reactiveatlantis()
+    })
+
+    output$plot_ssb <- renderPlot({
+      dat <- project$data
+      if (is.null(dat$ssb)) {
+        plot.new()
+        title("Load SSB.txt to plot spawning stock biomass")
+        return(invisible(NULL))
+      }
+      req(input$fg_yoy)
+      if (!(input$fg_yoy %in% names(dat$ssb))) {
+        plot.new()
+        title(paste("No SSB column for", input$fg_yoy))
+        return(invisible(NULL))
+      }
+      tcol <- if ("Time" %in% names(dat$ssb)) dat$ssb$Time else seq_len(nrow(dat$ssb))
+      df <- data.frame(
+        Time = yoy_dates(tcol),
+        Value = as.numeric(dat$ssb[[input$fg_yoy]]),
+        stringsAsFactors = FALSE
+      )
+      p <- ggplot2::ggplot(df, ggplot2::aes(x = Time, y = Value))
+      p <- p + ggplot2::geom_line(linewidth = 0.9, colour = "#0B3C5D", na.rm = TRUE)
+      p <- p + ggplot2::labs(title = paste("SSB —", input$fg_yoy), x = "Year", y = "SSB")
+      p <- p + theme_reactiveatlantis()
+      add_obs_overlay(p, dat$observations, input$fg_yoy, "SSB")
     })
 
     output$plot_pp_growth <- renderPlot({
