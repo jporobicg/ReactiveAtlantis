@@ -14,6 +14,11 @@ compare_ui <- function(id) {
         textInput(ns("search"), "Search code or name", placeholder = "COD, haddock…"),
         checkboxInput(ns("relative"), "Relative to initial (Bt/B0)", FALSE),
         checkboxInput(ns("show_band"), "0.5–1.5 acceptable band", TRUE),
+        selectInput(ns("y_scale"), "Y axis",
+                    choices = c("Free (each panel)" = "free",
+                                "Log scale" = "log",
+                                "Shared" = "shared"),
+                    selected = "free"),
         hr(),
         selectInput(ns("view"), "View",
                     choices = c("Small multiples" = "facets",
@@ -38,7 +43,7 @@ compare_ui <- function(id) {
         )
       ),
       conditionalPanel("input.view == 'facets'", ns = ns,
-                       plotOutput(ns("plot_facets_gg"), height = "760px")),
+                       plotOutput(ns("plot_facets_gg"), height = "2200px")),
       conditionalPanel("input.view == 'total'", ns = ns,
                        plotOutput(ns("plot_total"), height = "560px")),
       conditionalPanel("input.view == 'age'", ns = ns,
@@ -66,51 +71,24 @@ compare_server <- function(id, project = NULL) {
 
     observe({
       req(!is.null(project), isTRUE(project$ready), project$data)
-      miss <- tool_missing(project$paths, "compare")
+      miss <- tool_missing(project$paths, "compare", project)
       token <- paste(unlist(project$paths), collapse = "|")
       if (length(miss) || (isTRUE(rv$built) && identical(rv$token, token))) return()
       rv$token <- token
       dat <- project$data
-      req(dat$nc_out, dat$grp, dat$inf_box, dat$time_dates)
-
-      grp <- dat$grp[dat$grp$isturnedon == 1,
-                     c("code", "name", "longname", "grouptype", "numcohorts")]
-      mg2t <- 0.00000002
-      x.cn <- 5.7
-      Time <- dat$time_dates
-      inf_box <- dat$inf_box
-      nc_cur <- dat$nc_out
-
-      age.grp <- grp[grp$numcohorts > 1 &
-                     !grp$grouptype %in% c("PWN", "PRAWNS", "PRAWN", "CEP", "MOB_EP_OTHER",
-                                           "SEAGRASS", "CORAL", "MANGROVE", "MANGROVES", "SPONGE"), ]
-      pol.grp <- grp[grp$numcohorts == 1, ]
-      pwn.grp <- grp[grp$numcohorts > 1 &
-                     grp$grouptype %in% c("PWN", "PRAWNS", "PRAWN", "CEP", "MOB_EP_OTHER",
-                                          "SEAGRASS", "CORAL", "MANGROVE", "MANGROVES", "SPONGE"), ]
-
-      age.cur.bio <- if (nrow(age.grp) > 0) bio.age(age.grp, nc_cur, "Current", mg2t, x.cn, inf_box, Time) else NULL
-      pool.cur.bio <- if (nrow(pol.grp) > 0) {
-        tryCatch(bio.pool(pol.grp, nc_cur, "Current", mg2t, xcn, inf_box, Time),
-                 error = function(e) NULL)
-      } else NULL
-      old.bio <- NULL
-      Time_old <- NULL
-      if (!is.null(dat$nc_old)) {
-        Time_old <- tryCatch(time_calc(dat$nc_old), error = function(e) Time)
-        age.old.bio <- if (nrow(age.grp) > 0) bio.age(age.grp, dat$nc_old, "Previous", mg2t, x.cn, inf_box, Time_old) else NULL
-        pool.old.bio <- bio.pool(pol.grp, dat$nc_old, "Previous", mg2t, x.cn, inf_box, Time_old)
-        old.bio <- rbind(pool.old.bio, age.old.bio)
+      req(dat$grp)
+      t.biomass <- NULL
+      if (!is.null(dat$biomindx) && NROW(dat$biomindx) > 0) {
+        t.biomass <- tryCatch(
+          biomindx_facet_df(dat$biomindx, dat$grp, dat$origin),
+          error = function(e) NULL
+        )
       }
-      pwn.bio <- NULL
-      if (nrow(pwn.grp) > 0) {
-        pwn.cur.bio <- bio.pwn(pwn.grp, nc_cur, "Current", mg2t, x.cn, inf_box, Time)
-        pwn.bio <- pwn.cur.bio
-        if (!is.null(dat$nc_old)) {
-          pwn.bio <- rbind(pwn.cur.bio, bio.pwn(pwn.grp, dat$nc_old, "Previous", mg2t, x.cn, inf_box, Time_old))
-        }
+      if (is.null(t.biomass) || nrow(t.biomass) == 0) {
+        req(dat$nc_out, dat$inf_box, dat$time_dates)
+        t.biomass <- nc_facet_biomass(dat)
       }
-      t.biomass <- rbind(age.cur.bio, pool.cur.bio, old.bio, pwn.bio)
+      req(!is.null(t.biomass), nrow(t.biomass) > 0)
       rel.bio <- do.call(rbind.data.frame, by(t.biomass, t.biomass$FG, relative))
       rv$t_biomass <- t.biomass
       rv$rel_bio <- rel.bio
@@ -133,35 +111,57 @@ compare_server <- function(id, project = NULL) {
       df
     })
 
-    output$plot_facets_gg <- renderPlot({
-      if (!isTRUE(project$ready) || is.null(rv$t_biomass)) {
-        plot_message("Load a run to compare biomass")
-        return(invisible(NULL))
-      }
-      make_facet_plot()
-    })
-
     make_facet_plot <- function() {
       df <- filtered()
       req(nrow(df) > 0)
+      if (!"Code" %in% names(df)) {
+        df$Code <- code_from_fg_label(as.character(df$FG))
+      }
       ycol <- if ("Relative" %in% names(df) && isTRUE(input$relative)) "Relative" else "Biomass"
       ylab <- if (isTRUE(input$relative)) "Relative biomass (Bt/B0)" else "Biomass (tons)"
-      colors <- get_comparison_colors()
-      p <- ggplot2::ggplot(df, ggplot2::aes(x = Time, y = .data[[ycol]], colour = Simulation))
-      p <- p + ggplot2::geom_line(linewidth = 0.7, na.rm = TRUE)
-      p <- p + ggplot2::facet_wrap(~ FG, ncol = 4, scales = "free_y")
-      p <- p + ggplot2::scale_color_manual(values = colors)
-      p <- p + ggplot2::labs(x = "Year", y = ylab, title = "Biomass by functional group")
+      y_scale <- if (is.null(input$y_scale) || !nzchar(input$y_scale)) "free" else input$y_scale
+      pal <- get_fg_colors(unique(as.character(df$Code)), project$data$fg_palette)
+      p <- ggplot2::ggplot(
+        df,
+        ggplot2::aes(x = Time, y = .data[[ycol]], colour = Code,
+                     group = interaction(Code, Simulation, drop = TRUE))
+      )
+      p <- p + ggplot2::geom_line(ggplot2::aes(linetype = Simulation),
+                                  linewidth = 0.7, na.rm = TRUE)
+      facet_scales <- if (identical(y_scale, "shared")) "fixed" else "free_y"
+      p <- p + ggplot2::facet_wrap(~ FG, ncol = 4, scales = facet_scales)
+      p <- p + ggplot2::scale_color_manual(values = pal, guide = "none")
+      if (length(unique(as.character(df$Simulation))) <= 1) {
+        p <- p + ggplot2::scale_linetype_discrete(guide = "none")
+      }
+      p <- p + ggplot2::labs(
+        x = "Year", y = ylab,
+        title = "Biomass by functional group",
+        subtitle = paste(length(unique(df$FG)), "groups")
+      )
       p <- p + theme_reactiveatlantis()
-      if (isTRUE(input$relative)) {
-        p <- p + ggplot2::coord_cartesian(ylim = relative_axis_ylim(df[[ycol]]))
-        if (isTRUE(input$show_band) && nrow(df) > 0) {
-          p <- acceptable_band_layer(p, ACCEPT_BAND[1], ACCEPT_BAND[2],
-                                     xmin = min(df$Time), xmax = max(df$Time))
-        }
+      p <- p + ggplot2::theme(
+        axis.text = ggplot2::element_text(size = 10, colour = RA_MUTED),
+        axis.text.x = ggplot2::element_text(size = 10, colour = RA_MUTED),
+        axis.text.y = ggplot2::element_text(size = 10, colour = RA_MUTED),
+        strip.text = ggplot2::element_text(size = 10, face = "bold", colour = RA_NAVY),
+        panel.spacing = ggplot2::unit(10, "pt")
+      )
+      xr <- range(df$Time, na.rm = TRUE)
+      if (inherits(df$Time, "Date")) {
+        br <- pretty(xr, n = 4)
+        p <- p + ggplot2::scale_x_date(breaks = br, date_labels = "%Y")
       } else {
+        p <- p + ggplot2::scale_x_continuous(breaks = pretty(as.numeric(xr), n = 4))
+      }
+      if (identical(y_scale, "log")) {
+        p <- p + ggplot2::scale_y_log10()
+      }
+      if (isTRUE(input$relative) && isTRUE(input$show_band) && nrow(df) > 0) {
+        p <- acceptable_band_layer(p, ACCEPT_BAND[1], ACCEPT_BAND[2],
+                                   xmin = min(df$Time), xmax = max(df$Time))
+      } else if (!isTRUE(input$relative)) {
         obs <- project$data$observations
-        df$Code <- code_from_fg_label(as.character(df$FG))
         sub <- obs_for(obs, unique(df$Code), "Biomass")
         if (!is.null(sub) && nrow(sub) > 0) {
           lookup <- unique(data.frame(Code = df$Code, FG = df$FG, stringsAsFactors = FALSE))
@@ -183,6 +183,19 @@ compare_server <- function(id, project = NULL) {
       }
       p
     }
+
+    output$plot_facets_gg <- renderPlot({
+      if (!isTRUE(project$ready) || is.null(rv$t_biomass)) {
+        plot_message("Load a run to compare biomass")
+        return(invisible(NULL))
+      }
+      make_facet_plot()
+    }, height = function() {
+      n <- 8L
+      df <- tryCatch(filtered(), error = function(e) NULL)
+      if (!is.null(df) && nrow(df) > 0) n <- length(unique(df$FG))
+      as.integer(max(700, ceiling(max(n, 1) / 4) * 175))
+    })
 
     output$plot_total <- renderPlot({
       plot_or_message("Load a run and pick a functional group", {
@@ -291,6 +304,101 @@ compare_server <- function(id, project = NULL) {
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
 ## ~            Helper Functions                ~ ##
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
+
+##' Small-multiples table from BiomIndx.txt (every group code, not just vertebrates)
+biomindx_facet_df <- function(biomindx, grp, origin = NULL) {
+  biom <- as.data.frame(biomindx)
+  names(biom) <- trimws(as.character(names(biom)))
+  skip <- c("Time", grep("^(Rel|Mig)", names(biom), value = TRUE),
+            "PelDemRatio", "PiscivPlankRatio", "DivCount", "InfEpiRatio",
+            "BSSslope", "HabitCover", "DIN")
+  codes <- as.character(grp$code)
+  if ("isturnedon" %in% names(grp)) {
+    on <- grp$code[grp$isturnedon == 1]
+    if (length(on) > 0) codes <- as.character(on)
+  }
+  codes <- codes[codes %in% names(biom)]
+  if (length(codes) == 0) {
+    codes <- setdiff(names(biom), skip)
+  }
+  time_raw <- as.numeric(biom[[if ("Time" %in% names(biom)) "Time" else names(biom)[1]]])
+  if (length(time_raw) > 0 && is.finite(max(time_raw, na.rm = TRUE)) &&
+      max(time_raw, na.rm = TRUE) > 1e6) {
+    time_raw <- time_raw / 86400
+  }
+  Time <- days_as_date(time_raw, origin)
+  longname <- if ("longname" %in% names(grp)) {
+    grp$longname[match(codes, grp$code)]
+  } else codes
+  longname[is.na(longname) | !nzchar(as.character(longname))] <- codes
+  rows <- lapply(seq_along(codes), function(i) {
+    code <- codes[i]
+    data.frame(
+      Time = Time,
+      FG = paste0(as.character(longname[i]), " (", code, ")"),
+      Code = code,
+      Biomass = as.numeric(biom[[code]]),
+      Simulation = "Current",
+      stringsAsFactors = FALSE
+    )
+  })
+  do.call(rbind, rows)
+}
+
+nc_facet_biomass <- function(dat) {
+  grp <- dat$grp[dat$grp$isturnedon == 1,
+                 c("code", "name", "longname", "grouptype", "numcohorts")]
+  mg2t <- 0.00000002
+  x.cn <- 5.7
+  Time <- dat$time_dates
+  inf_box <- dat$inf_box
+  nc_cur <- dat$nc_out
+  age.grp <- grp[grp$numcohorts > 1 & !grp$grouptype %in% AGE_SPECIAL, ]
+  pol.grp <- grp[grp$numcohorts == 1, ]
+  pwn.grp <- grp[grp$numcohorts > 1 & grp$grouptype %in% AGE_SPECIAL, ]
+  age.cur.bio <- if (nrow(age.grp) > 0) {
+    tryCatch(bio.age(age.grp, nc_cur, "Current", mg2t, x.cn, inf_box, Time),
+             error = function(e) NULL)
+  } else NULL
+  pool.cur.bio <- if (nrow(pol.grp) > 0) {
+    tryCatch(bio.pool(pol.grp, nc_cur, "Current", mg2t, x.cn, inf_box, Time),
+             error = function(e) NULL)
+  } else NULL
+  old.bio <- NULL
+  Time_old <- NULL
+  if (!is.null(dat$nc_old)) {
+    Time_old <- tryCatch(time_calc(dat$nc_old), error = function(e) Time)
+    age.old.bio <- if (nrow(age.grp) > 0) {
+      tryCatch(bio.age(age.grp, dat$nc_old, "Previous", mg2t, x.cn, inf_box, Time_old),
+               error = function(e) NULL)
+    } else NULL
+    pool.old.bio <- tryCatch(
+      bio.pool(pol.grp, dat$nc_old, "Previous", mg2t, x.cn, inf_box, Time_old),
+      error = function(e) NULL
+    )
+    old.bio <- rbind(pool.old.bio, age.old.bio)
+  }
+  pwn.bio <- NULL
+  if (nrow(pwn.grp) > 0) {
+    pwn.cur.bio <- tryCatch(
+      bio.pwn(pwn.grp, nc_cur, "Current", mg2t, x.cn, inf_box, Time),
+      error = function(e) NULL
+    )
+    pwn.bio <- pwn.cur.bio
+    if (!is.null(dat$nc_old)) {
+      pwn.old <- tryCatch(
+        bio.pwn(pwn.grp, dat$nc_old, "Previous", mg2t, x.cn, inf_box, Time_old),
+        error = function(e) NULL
+      )
+      pwn.bio <- rbind(pwn.cur.bio, pwn.old)
+    }
+  }
+  out <- rbind(age.cur.bio, pool.cur.bio, old.bio, pwn.bio)
+  if (!is.null(out) && nrow(out) > 0 && !"Code" %in% names(out)) {
+    out$Code <- code_from_fg_label(as.character(out$FG))
+  }
+  out
+}
 
 bio.age <- function(age.grp, nc.out, ctg, mg2t, x.cn, inf.box, Time){
   bound <- ifelse(inf.box$info$Depth_Bound > 0, 1, 0)

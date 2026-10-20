@@ -27,7 +27,7 @@ consumption_server <- function(id, project = NULL) {
       if (is.null(project) || !isTRUE(project$ready)) {
         return(tool_missing_card(FILE_LABELS[TOOL_REQUIREMENTS$consumption], "Consumption"))
       }
-      miss <- tool_missing(project$paths, "consumption")
+      miss <- tool_missing(project$paths, "consumption", project)
       if (length(miss)) {
         return(bslib::card(
           bslib::card_header("Consumption needs outputPROD.nc"),

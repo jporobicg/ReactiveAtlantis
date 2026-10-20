@@ -38,7 +38,7 @@ growth_server <- function(id, project = NULL) {
 
     observe({
       req(!is.null(project), isTRUE(project$ready), project$data)
-      miss <- tool_missing(project$paths, "growth")
+      miss <- tool_missing(project$paths, "growth", project)
       token <- paste(unlist(project$paths), collapse = "|")
       if (length(miss) || (isTRUE(rv$built) && identical(rv$token, token))) return()
       rv$token <- token

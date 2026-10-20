@@ -1,4 +1,6 @@
 ## End-to-end browser test: load a synthetic run and visit every nav panel.
+## AppDriver skips when it thinks this is CRAN; this test is meant to run in CI.
+Sys.setenv(NOT_CRAN = "true")
 
 has_plot_image <- function(html) {
   grepl("<img", html, ignore.case = TRUE) &&
@@ -155,3 +157,113 @@ test_that("folder load fills every tab with a bound plot or table", {
   dark_html <- app$get_html("html")
   expect_true(grepl("data-bs-theme", dark_html) || grepl("Scan folder", dark_html, ignore.case = TRUE))
 })
+
+plot_is_real <- function(html) {
+  has_plot_image(html) && !grepl("needs more files", html, ignore.case = TRUE)
+}
+
+e2e_chrome <- function() {
+  skip_if_not_installed("shinytest2")
+  skip_if_not_installed("chromote")
+  skip_if_not(file.exists("/usr/local/bin/google-chrome") ||
+                file.exists("/usr/bin/google-chrome-stable"),
+              "Google Chrome is required for shinytest2")
+  chrome <- if (file.exists("/usr/local/bin/google-chrome")) {
+    "/usr/local/bin/google-chrome"
+  } else {
+    "/usr/bin/google-chrome-stable"
+  }
+  Sys.setenv(CHROMOTE_CHROME = chrome)
+  chrome_dir <- tempfile("chrome-data-")
+  dir.create(chrome_dir)
+  chromote::set_chrome_args(c(
+    "--no-sandbox",
+    "--disable-gpu",
+    "--disable-dev-shm-usage",
+    "--headless=new",
+    paste0("--user-data-dir=", chrome_dir)
+  ))
+  chrome_dir
+}
+
+test_that("North Sea real names load COD into every group tab", {
+  fx <- northsea_fixture_dir()
+  skip_if_not(dir.exists(fx) && file.exists(file.path(fx, "functionalGroups.csv")),
+              "North Sea fixture not packaged")
+  e2e_chrome()
+
+  shot_dir <- file.path(tempdir(), "ra_e2e_ns_shots")
+  dir.create(shot_dir, showWarnings = FALSE)
+  root <- ra_pkg_root()
+
+  app <- shinytest2::AppDriver$new(
+    app_dir = file.path(root, "inst", "shiny"),
+    name = "reactiveatlantis-ns-e2e",
+    height = 1200,
+    width = 1600,
+    load_timeout = 60000,
+    timeout = 20000
+  )
+  on.exit(try(app$stop(), silent = TRUE), add = TRUE)
+
+  app$set_inputs(`project-folder_path` = fx, wait_ = FALSE)
+  app$wait_for_idle(timeout = 20000)
+  app$click("project-scan_folder")
+  app$wait_for_idle(timeout = 20000)
+  app$click("project-load_project")
+  app$wait_for_idle(timeout = 90000)
+
+  body <- app$get_html("body")
+  expect_false(grepl("needs more files: Groups CSV", body, ignore.case = TRUE))
+  expect_true(grepl("class=\"ok\"", body) || grepl("class='ok'", body))
+  expect_true(grepl("Groups CSV", body))
+  save_shot(app, shot_dir, "ns_01_loaded_checklist")
+
+  click_nav(app, "Compare")
+  app$set_inputs(`compare-fg_total` = "COD", `compare-view` = "facets",
+                 `compare-relative` = FALSE, `compare-y_scale` = "free",
+                 wait_ = FALSE)
+  app$wait_for_idle(timeout = 40000)
+  expect_identical(app$get_value(input = "compare-fg_total"), "COD")
+  expect_true(plot_is_real(app$get_html("#compare-plot_facets_gg")))
+  save_shot(app, shot_dir, "ns_02_compare_facets")
+
+  app$set_inputs(`compare-relative` = TRUE, `compare-show_band` = TRUE,
+                 `compare-y_scale` = "free", wait_ = FALSE)
+  app$wait_for_idle(timeout = 40000)
+  expect_true(plot_is_real(app$get_html("#compare-plot_facets_gg")))
+  save_shot(app, shot_dir, "ns_03_compare_relative")
+
+  tab_cod <- list(
+    list(title = "Spatial", id = "spatial-fg", plot = "#spatial-map_plot", shot = "ns_04_spatial"),
+    list(title = "Consumption", id = "consumption-fg", plot = "#consumption-cons_plot_gg", shot = "ns_05_consumption"),
+    list(title = "Predation", id = "predation-fg", plot = "#predation-plot_pred_gg", shot = "ns_06_predation"),
+    list(title = "Recruitment", id = "recruitment-fg_yoy", plot = "#recruitment-plot_yoy", shot = "ns_07_recruitment"),
+    list(title = "Catch", id = "catch-fg", plot = "#catch-catch_plot_gg", shot = "ns_08_catch"),
+    list(title = "Mortality", id = "mortality-fg", plot = "#mortality-mortality_plot_gg", shot = "ns_09_mortality")
+  )
+  for (tab in tab_cod) {
+    expect_true(click_nav(app, tab$title), info = tab$title)
+    do.call(function(...) app$set_inputs(..., wait_ = FALSE),
+            setNames(list("COD"), tab$id))
+    app$wait_for_idle(timeout = 40000)
+    expect_identical(app$get_value(input = tab$id), "COD", info = tab$title)
+    html <- tryCatch(app$get_html(tab$plot), error = function(e) "")
+    expect_true(plot_is_real(html), info = paste(tab$title, "empty:", substr(html, 1, 300)))
+    save_shot(app, shot_dir, tab$shot)
+  }
+
+  expect_true(click_nav(app, "Growth"))
+  app$set_inputs(`growth-fg` = "PHD", wait_ = FALSE)
+  app$wait_for_idle(timeout = 40000)
+  expect_identical(app$get_value(input = "growth-fg"), "PHD")
+  expect_true(plot_is_real(app$get_html("#growth-growth_plot")))
+  save_shot(app, shot_dir, "ns_10_growth_phd")
+
+  expect_true(click_nav(app, "Feeding"))
+  app$wait_for_idle(timeout = 60000)
+  feed <- tryCatch(app$get_html("#feeding-feeding_plot_gg"), error = function(e) "")
+  expect_true(plot_is_real(feed) || nchar(feed) > 40)
+  save_shot(app, shot_dir, "ns_11_feeding")
+})
+

@@ -79,22 +79,26 @@ mortality_server <- function(id, project = NULL) {
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
 
 calc_mort <- function(SpeMort, PredMort, FG){
-  F.mort <- paste(as.character(FG), c(0:9), 'S0', 'F', sep = '.')
-  N.mort <- paste(as.character(FG), c(0:9), 'S0', 'M1', sep = '.')
-  P.mort <- paste(as.character(FG), c(0:9), 'S0', 'M2', sep = '.')
-  
-  Fmort <- SpeMort[, c(1, which(colnames(SpeMort) %in% F.mort))]
-  colnames(Fmort) <- c('Time', format_age_labels(ncol(Fmort) - 1))
-  
-  Nmort <- SpeMort[, c(1, which(colnames(SpeMort) %in% N.mort))]
-  colnames(Nmort) <- c('Time', format_age_labels(ncol(Nmort) - 1))
-  
-  Pmort <- SpeMort[, c(1, which(colnames(SpeMort) %in% P.mort))]
-  colnames(Pmort) <- c('Time', format_age_labels(ncol(Pmort) - 1))
-  
-  Fmort$Mtype <- 'Fishing Mortality'
-  Nmort$Mtype <- 'Natural Mortality'
-  Pmort$Mtype <- 'Predation Mortality'
-  
-  return(rbind(Fmort, Nmort, Pmort))
+  if (is.null(SpeMort) || ncol(SpeMort) < 2) {
+    return(data.frame(Time = numeric(), Mtype = character(), stringsAsFactors = FALSE))
+  }
+  nms <- gsub("-", ".", as.character(colnames(SpeMort)))
+  colnames(SpeMort) <- nms
+  FG <- as.character(FG)[1]
+  ages <- 0:20
+  pick <- function(kind) {
+    want <- paste(FG, ages, "S0", kind, sep = ".")
+    have <- want[want %in% colnames(SpeMort)]
+    time_col <- if ("Time" %in% colnames(SpeMort)) "Time" else colnames(SpeMort)[1]
+    out <- SpeMort[, c(time_col, have), drop = FALSE]
+    colnames(out) <- c("Time", format_age_labels(max(0, ncol(out) - 1)))
+    out
+  }
+  Fmort <- pick("F")
+  Nmort <- pick("M1")
+  Pmort <- pick("M2")
+  Fmort$Mtype <- "Fishing Mortality"
+  Nmort$Mtype <- "Natural Mortality"
+  Pmort$Mtype <- "Predation Mortality"
+  rbind(Fmort, Nmort, Pmort)
 }

@@ -166,21 +166,47 @@ read_yoy_table <- function(path) {
   raw
 }
 
+##' Read SpecificMort / SpecificPredMort, keeping Atlantis hyphen names usable
+##'
+##' North Sea writes \code{COD-0-S0-M1}. \code{read.csv} would turn those into
+##' dots; this reader accepts either form and normalises hyphens to dots so
+##' \code{calc_mort} can match \code{COD.0.S0.M1}.
+read_mort_table <- function(path) {
+  raw <- tryCatch(
+    data.table::fread(path, header = TRUE, strip.white = TRUE, fill = TRUE,
+                      showProgress = FALSE, data.table = FALSE,
+                      check.names = FALSE, blank.lines.skip = TRUE),
+    error = function(e) NULL
+  )
+  if (is.null(raw) || ncol(raw) < 2) {
+    raw <- utils::read.table(path, header = TRUE, check.names = FALSE,
+                             stringsAsFactors = FALSE, comment.char = "#",
+                             fill = TRUE, strip.white = TRUE)
+  }
+  names(raw) <- gsub("-", ".", sub("^\ufeff", "", trimws(as.character(names(raw)))))
+  keep <- nzchar(names(raw)) & !grepl("^X\\.?[0-9]*$", names(raw))
+  raw <- raw[, keep, drop = FALSE]
+  tname <- names(raw)[tolower(names(raw)) %in% c("time", "t", "day", "days")]
+  if (length(tname) > 0) names(raw)[names(raw) == tname[1]] <- "Time"
+  raw
+}
+
 find_yoy_column <- function(yoy, code) {
   if (is.null(yoy) || ncol(yoy) == 0) return(NA_character_)
   nms <- trimws(names(yoy))
   nms <- nms[tolower(nms) != "time"]
   code <- trimws(as.character(code)[1])
   cands <- c(
-    paste0(code, ".0"), paste0(code, "_0"), paste0("X", code, ".0"),
-    paste0(code, ".0.0"), paste0("Time.", code), paste0("Time ", code),
+    paste0(code, ".0"), paste0(code, "-0"), paste0(code, "_0"),
+    paste0("X", code, ".0"), paste0(code, ".0.0"),
+    paste0("Time.", code), paste0("Time ", code),
     code
   )
   hit <- cands[cands %in% nms]
   if (length(hit) > 0) return(hit[1])
   ci <- nms[tolower(nms) %in% tolower(cands)]
   if (length(ci) > 0) return(ci[1])
-  rx <- paste0("^", gsub("([.|()\\^$*+?{}])", "\\\\\\1", code), "[._]0$")
+  rx <- paste0("^", gsub("([.|()\\^$*+?{}])", "\\\\\\1", code), "[._-]0$")
   g <- grep(rx, nms, ignore.case = TRUE, value = TRUE)
   if (length(g) > 0) return(g[1])
   NA_character_

@@ -71,7 +71,7 @@ recruitment_server <- function(id, project = NULL) {
 
     observe({
       req(!is.null(project), isTRUE(project$ready), project$data)
-      miss <- tool_missing(project$paths, "recruitment")
+      miss <- tool_missing(project$paths, "recruitment", project)
       token <- paste(unlist(project$paths), collapse = "|")
       if (length(miss) || (isTRUE(rv$built) && identical(rv$token, token))) return()
       rv$token <- token
@@ -128,8 +128,10 @@ recruitment_server <- function(id, project = NULL) {
         pp.fg <- grp$name[pp.pos]
         pp.cod <- as.character(grp$code[pp.pos])
         for (l.pp in seq_along(pp.fg)) {
-          pp.list[[l.pp]] <- ncdf4::ncvar_get(nc.out, paste0(pp.fg[l.pp], "_N"))
-          names(pp.list)[l.pp] <- pp.cod[l.pp]
+          vn <- paste0(pp.fg[l.pp], "_N")
+          arr <- tryCatch(ncdf4::ncvar_get(nc.out, vn), error = function(e) NULL)
+          if (is.null(arr)) next
+          pp.list[[pp.cod[l.pp]]] <- arr
         }
       }
       quiet_nc <- function(name) {

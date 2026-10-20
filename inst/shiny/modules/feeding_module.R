@@ -48,14 +48,18 @@ feeding_server <- function(id, project = NULL) {
 
     observe({
       req(!is.null(project), isTRUE(project$ready), project$data)
-      miss <- tool_missing(project$paths, "feeding")
+      miss <- tool_missing(project$paths, "feeding", project)
       token <- paste(unlist(project$paths), collapse = "|")
       if (length(miss) || (isTRUE(rv$built) && identical(rv$token, token))) return()
       rv$token <- token
       dat <- project$data
       req(dat$grp, dat$prm_bio)
-      init_path <- project$paths$init_nc
-      req(path_ok(init_path))
+      paths <- tryCatch(normalize_paths(project$paths), error = function(e) empty_paths())
+      if (!is.null(dat$paths)) {
+        dp <- tryCatch(normalize_paths(dat$paths), error = function(e) NULL)
+        if (!is.null(dp) && path_ok(dp$init_nc)) paths$init_nc <- dp$init_nc
+      }
+      init_path <- paths$init_nc
       grp <- dat$grp
       if (any(grepl("invertype", names(grp)))) {
         names(grp)[which(grepl("invertype", names(grp)))] <- "grouptype"

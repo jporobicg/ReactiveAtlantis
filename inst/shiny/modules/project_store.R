@@ -5,7 +5,7 @@
 FILE_ROLES <- c(
   "groups", "fisheries", "output_nc", "output_nc_old", "catch_nc", "init_nc",
   "prod_nc", "biomindx", "dietcheck", "diet_bypol", "ssb", "yoy",
-  "bio_prm", "run_prm", "bgm", "specific_mort", "specific_pred_mort",
+  "bio_prm", "run_prm", "force_prm", "bgm", "specific_mort", "specific_pred_mort",
   "ext_catch", "obs_csv"
 )
 
@@ -23,6 +23,7 @@ FILE_LABELS <- c(
   yoy = "YOY.txt",
   bio_prm = "Biology .prm",
   run_prm = "Run .prm",
+  force_prm = "Forcing .prm",
   bgm = "BGM geometry",
   prod_nc = "Production NetCDF (PROD)",
   specific_mort = "SpecificMort.txt",
@@ -33,7 +34,7 @@ FILE_LABELS <- c(
 
 TOOL_REQUIREMENTS <- list(
   overview = c("groups"),
-  compare = c("groups", "output_nc", "bgm"),
+  compare = c("groups"),
   predation = c("groups", "biomindx", "dietcheck"),
   foodweb = c("groups", "dietcheck"),
   recruitment = c("groups", "output_nc", "yoy", "bio_prm"),
@@ -74,10 +75,71 @@ classify_csv <- function(path) {
 }
 
 classify_prm <- function(path) {
-  lines <- tryCatch(readLines(path, n = 400, warn = FALSE), error = function(e) character())
-  if (any(grepl("pPREY", lines, ignore.case = TRUE))) return("bio_prm")
-  if (any(grepl("toutinc|flagrecruit|tinc", lines, ignore.case = TRUE))) return("run_prm")
+  lines <- tryCatch(readLines(path, warn = FALSE), error = function(e) character())
+  if (length(lines) == 0) return(NA_character_)
+  ## Comments can mention pPREY; require a real token (pPREY1COD / KUP_COD).
+  if (any(grepl("(^|[[:space:]])pPREY[A-Za-z0-9_]*[[:space:]]", lines)) ||
+      any(grepl("(^|[[:space:]])KUP_[A-Za-z0-9]+", lines))) {
+    return("bio_prm")
+  }
+  if (any(grepl("hd[0-9]+\\.name", lines, ignore.case = TRUE))) return("force_prm")
+  if (any(grepl("(^|[[:space:]])tstop([[:space:]]|$)", lines, ignore.case = TRUE)) ||
+      any(grepl("(^|[[:space:]])dt([[:space:]]|$)", lines))) {
+    return("run_prm")
+  }
   NA_character_
+}
+
+##' Named length-1 character list of roles, always aligned with FILE_ROLES
+normalize_paths <- function(paths) {
+  out <- empty_paths()
+  if (is.null(paths)) return(out)
+  nms <- names(paths)
+  if (is.null(nms) || !any(nzchar(nms))) {
+    if (length(paths) == length(FILE_ROLES)) nms <- FILE_ROLES else return(out)
+  }
+  for (i in seq_along(paths)) {
+    nm <- nms[i]
+    if (!nm %in% FILE_ROLES) next
+    val <- paths[[i]]
+    if (is.null(val) || length(val) < 1) next
+    val <- as.character(val)[1]
+    if (!is.na(val) && nzchar(val)) out[[nm]] <- val
+  }
+  out
+}
+
+##' True when a role has a readable path or the object is already in memory
+role_is_loaded <- function(project, role) {
+  if (is.null(project) || is.null(role) || !nzchar(role)) return(FALSE)
+  paths <- tryCatch(normalize_paths(project$paths), error = function(e) empty_paths())
+  if (path_ok(paths[[role]])) return(TRUE)
+  dat <- tryCatch(project$data, error = function(e) NULL)
+  if (is.null(dat)) return(FALSE)
+  if (!is.null(dat$paths) && path_ok(normalize_paths(dat$paths)[[role]])) return(TRUE)
+  switch(as.character(role),
+    groups = !is.null(dat$grp) && NROW(dat$grp) > 0,
+    fisheries = !is.null(dat$fish) && NROW(dat$fish) > 0,
+    output_nc = !is.null(dat$nc_out),
+    output_nc_old = !is.null(dat$nc_old),
+    catch_nc = !is.null(dat$nc_catch),
+    init_nc = !is.null(dat$nc_init),
+    prod_nc = !is.null(dat$nc_prod),
+    biomindx = !is.null(dat$biomindx) && NROW(dat$biomindx) > 0,
+    dietcheck = !is.null(dat$diet_time) || !is.null(dat$diet_full),
+    diet_bypol = path_ok(paths$diet_bypol),
+    ssb = !is.null(dat$ssb) && NROW(dat$ssb) > 0,
+    yoy = !is.null(dat$yoy) && NROW(dat$yoy) > 0,
+    bio_prm = !is.null(dat$prm_bio) && length(dat$prm_bio) > 0,
+    run_prm = !is.null(dat$prm_run) && length(dat$prm_run) > 0,
+    force_prm = path_ok(paths$force_prm),
+    bgm = !is.null(dat$bgm_path) || !is.null(dat$inf_box),
+    specific_mort = !is.null(dat$spe_mort) && NROW(dat$spe_mort) > 0,
+    specific_pred_mort = !is.null(dat$pred_mort) && NROW(dat$pred_mort) > 0,
+    ext_catch = !is.null(dat$ext_catch),
+    obs_csv = !is.null(dat$observations),
+    FALSE
+  )
 }
 
 ##' Detect Atlantis files in a folder by suffix and header
@@ -120,11 +182,15 @@ detect_project_files <- function(folder) {
     kind <- classify_prm(p)
     if (isTRUE(kind == "bio_prm") && is.na(paths$bio_prm)) paths$bio_prm <- p
     if (isTRUE(kind == "run_prm") && is.na(paths$run_prm)) paths$run_prm <- p
+    if (isTRUE(kind == "force_prm") && is.na(paths$force_prm)) paths$force_prm <- p
   }
   if (is.na(paths$bio_prm)) paths$bio_prm <- pick_first(files, "bio.*\\.prm$|biol.*\\.prm$")
   if (is.na(paths$run_prm)) paths$run_prm <- pick_first(files, "run.*\\.prm$")
+  if (is.na(paths$force_prm)) {
+    paths$force_prm <- pick_first(files, "force.*\\.prm$|forcing.*\\.prm$")
+  }
 
-  paths
+  normalize_paths(paths)
 }
 
 read_space_table <- function(path) {
@@ -191,11 +257,19 @@ summarise_run <- function(grp, nc, biomindx, time_dates) {
   )
 }
 
-tool_missing <- function(paths, tool) {
+tool_missing <- function(paths, tool, project = NULL) {
   need <- TOOL_REQUIREMENTS[[tool]]
   if (is.null(need)) return(character())
-  missing <- need[is.na(unlist(paths[need], use.names = FALSE)) | !nzchar(unlist(paths[need], use.names = FALSE))]
-  unname(FILE_LABELS[missing])
+  loaded <- function(role) {
+    if (!is.null(project)) return(role_is_loaded(project, role))
+    path_ok(normalize_paths(paths)[[role]])
+  }
+  miss <- need[!vapply(need, loaded, logical(1))]
+  labs <- unname(FILE_LABELS[miss])
+  if (identical(tool, "compare") && !loaded("biomindx") && !loaded("output_nc")) {
+    labs <- unique(c(labs, unname(FILE_LABELS[c("biomindx", "output_nc")])))
+  }
+  labs
 }
 
 path_ok <- function(p) {
@@ -218,6 +292,7 @@ merge_paths <- function(detected, uploads) {
 }
 
 load_project <- function(paths) {
+  paths <- normalize_paths(paths)
   out <- list(
     paths = paths,
     grp = NULL,
@@ -319,10 +394,10 @@ load_project <- function(paths) {
     out$ssb <- tryCatch(read_space_table(paths$ssb), error = function(e) NULL)
   }
   if (path_ok(paths$specific_mort)) {
-    out$spe_mort <- tryCatch(utils::read.csv(paths$specific_mort, sep = " "), error = function(e) NULL)
+    out$spe_mort <- tryCatch(read_mort_table(paths$specific_mort), error = function(e) NULL)
   }
   if (path_ok(paths$specific_pred_mort)) {
-    out$pred_mort <- tryCatch(utils::read.csv(paths$specific_pred_mort, sep = " "), error = function(e) NULL)
+    out$pred_mort <- tryCatch(read_mort_table(paths$specific_pred_mort), error = function(e) NULL)
   }
   if (path_ok(paths$bio_prm)) {
     out$prm_bio <- tryCatch(readLines(paths$bio_prm, warn = FALSE), error = function(e) NULL)
@@ -453,7 +528,7 @@ project_server <- function(id) {
       folder <- trimws(input$folder_path)
       if (!nzchar(folder) || !dir.exists(folder) || isTRUE(rv$ready)) return()
       detected <- detect_project_files(folder)
-      paths <- merge_paths(detected, collect_uploads())
+      paths <- normalize_paths(merge_paths(detected, collect_uploads()))
       loaded <- tryCatch(load_project(paths), error = function(e) NULL)
       if (is.null(loaded) || is.null(loaded$grp)) return()
       rv$paths <- paths
@@ -482,7 +557,7 @@ project_server <- function(id) {
       }
       detected <- detect_project_files(folder)
       n_found <- sum(vapply(detected, path_ok, logical(1)))
-      rv$paths <- merge_paths(detected, collect_uploads())
+      rv$paths <- normalize_paths(merge_paths(detected, collect_uploads()))
       rv$scan_note <- paste0("Scan: ", n_found, " of ", length(FILE_ROLES),
                              " file roles found. Click Load run to open them.")
       shiny::showNotification(paste("Found", n_found, "Atlantis files in the folder."),
@@ -496,7 +571,7 @@ project_server <- function(id) {
       if (nzchar(folder) && dir.exists(folder)) {
         detected <- detect_project_files(folder)
       }
-      paths <- merge_paths(detected, collect_uploads())
+      paths <- normalize_paths(merge_paths(detected, collect_uploads()))
       loaded <- tryCatch(load_project(paths), error = function(e) {
         shiny::removeNotification("load_run")
         shiny::showNotification(paste("Could not load run:", e$message), type = "error", duration = 12)
@@ -525,14 +600,18 @@ project_server <- function(id) {
     })
 
     output$file_checklist <- shiny::renderUI({
-      paths <- rv$paths
+      proj <- list(paths = rv$paths, data = rv$data, ready = rv$ready)
+      paths <- normalize_paths(rv$paths)
       shiny::tags$ul(
         class = "ra-check",
-        lapply(FILE_ROLES, function(role) {
-          ok <- path_ok(paths[[role]])
+        unname(lapply(FILE_ROLES, function(role) {
+          ok <- role_is_loaded(proj, role)
           shiny::tags$li(
             class = if (ok) "ok" else "missing",
-            title = if (ok) paths[[role]] else paste("Not provided:", FILE_LABELS[[role]]),
+            title = if (ok) {
+              p <- paths[[role]]
+              if (path_ok(p)) p else paste("Loaded:", FILE_LABELS[[role]])
+            } else paste("Not provided:", FILE_LABELS[[role]]),
             shiny::span(
               class = "ra-dot",
               `aria-label` = if (ok) "loaded" else "not provided"
@@ -540,17 +619,17 @@ project_server <- function(id) {
             FILE_LABELS[[role]],
             if (!ok) shiny::span(class = "ra-need", "not provided")
           )
-        })
+        }))
       )
     })
 
     output$tool_checklist <- shiny::renderUI({
-      paths <- rv$paths
+      proj <- list(paths = rv$paths, data = rv$data, ready = rv$ready)
       tools <- names(TOOL_REQUIREMENTS)
       shiny::tags$ul(
         class = "ra-check",
-        lapply(tools, function(tool) {
-          miss <- tool_missing(paths, tool)
+        unname(lapply(tools, function(tool) {
+          miss <- tool_missing(rv$paths, tool, proj)
           ok <- length(miss) == 0 && isTRUE(rv$ready)
           tip <- if (ok) "Ready" else paste("Needs:", paste(miss, collapse = ", "))
           shiny::tags$li(
@@ -560,7 +639,7 @@ project_server <- function(id) {
             paste0(toupper(substring(tool, 1, 1)), substring(tool, 2)),
             if (!ok) shiny::span(class = "ra-need", tip)
           )
-        })
+        }))
       )
     })
 

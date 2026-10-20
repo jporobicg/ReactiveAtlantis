@@ -108,7 +108,7 @@ tool_banner <- function(project, tool) {
     return(tool_missing_card(FILE_LABELS[TOOL_REQUIREMENTS[[tool]]],
                              paste0(toupper(substring(tool, 1, 1)), substring(tool, 2))))
   }
-  miss <- tool_missing(project$paths, tool)
+  miss <- tool_missing(project$paths, tool, project)
   if (length(miss)) return(tool_missing_card(miss, tool))
   NULL
 }
