@@ -240,9 +240,48 @@ nearest_time <- function(requested, times) {
   times[which.min(abs(times - requested))]
 }
 
-##' Axis label for DietCheck time (days unless melted to steps)
+##' Axis label for DietCheck time
 ##' @param melt_time Logical, TRUE when time was divided into steps
 ##' @return Character axis label
 diet_time_axis_label <- function(melt_time = FALSE) {
-  if (isTRUE(melt_time)) "Time step" else "Time (days)"
+  if (isTRUE(melt_time)) "Time step" else "Year"
+}
+
+##' Origin date from a NetCDF time units attribute
+##' @param ncfile Open ncdf4 connection
+##' @return Date or NA
+nc_time_origin <- function(ncfile) {
+  att <- tryCatch(ncdf4::ncatt_get(ncfile, "t"), error = function(e) NULL)
+  if (is.null(att) || is.null(att$units)) return(as.Date(NA))
+  parts <- unlist(strsplit(att$units, " ", fixed = TRUE))
+  since <- which(tolower(parts) == "since")
+  if (length(since) == 0 || since[1] >= length(parts)) return(as.Date(NA))
+  as.Date(parts[since[1] + 1])
+}
+
+##' Convert model days to calendar dates using the NetCDF origin
+##' @param days Numeric days since model start
+##' @param origin Date origin
+##' @return Date vector, or numeric years if origin is missing
+days_as_date <- function(days, origin = NULL) {
+  days <- as.numeric(days)
+  if (!is.null(origin) && length(origin) == 1 && !is.na(origin)) {
+    return(as.Date(origin) + days)
+  }
+  days / 365.25
+}
+
+##' Human-readable time span from a Date vector
+time_span_label <- function(times) {
+  times <- times[!is.na(times)]
+  if (length(times) == 0) return("unknown")
+  tmin <- min(times)
+  tmax <- max(times)
+  if (inherits(times, "Date")) {
+    years <- as.numeric(tmax - tmin, units = "days") / 365.25
+    paste0(format(tmin, "%Y-%m-%d"), " to ", format(tmax, "%Y-%m-%d"),
+           " (", round(years, 1), " years)")
+  } else {
+    paste0(round(min(times), 1), " to ", round(max(times), 1), " years")
+  }
 }
