@@ -4,28 +4,26 @@
 
 consumption_ui <- function(id) {
   ns <- NS(id)
-  tagList(uiOutput(ns("body")))
-}
-
-consumption_body_ui <- function(ns, grp) {
-  codes <- as.character(grp$code[if ("isturnedon" %in% names(grp)) grp$isturnedon == 1 else TRUE])
-  layout_sidebar(
-    sidebar = sidebar(
-      width = 280, open = "open",
-      selectInput(ns("view"), "View",
-                  choices = c("What this group eats" = "predator",
-                              "Who eats this group" = "prey")),
-      selectInput(ns("fg"), "Functional group", choices = codes),
-      numericInput(ns("top_n"), "Top N (rest = Other)", 8, min = 3, max = 20)
-    ),
-    uiOutput(ns("plot_host"))
+  tagList(
+    uiOutput(ns("banner")),
+    layout_sidebar(
+      sidebar = sidebar(
+        width = 280, open = "open",
+        selectInput(ns("view"), "View",
+                    choices = c("What this group eats" = "predator",
+                                "Who eats this group" = "prey")),
+        selectInput(ns("fg"), "Functional group", choices = character()),
+        numericInput(ns("top_n"), "Top N (rest = Other)", 8, min = 3, max = 20)
+      ),
+      plotOutput(ns("cons_plot_gg"), height = "560px")
+    )
   )
 }
 
 consumption_server <- function(id, project = NULL) {
   moduleServer(id, function(input, output, session) {
 
-    output$body <- renderUI({
+    output$banner <- renderUI({
       if (is.null(project) || !isTRUE(project$ready)) {
         return(tool_missing_card(FILE_LABELS[TOOL_REQUIREMENTS$consumption], "Consumption"))
       }
@@ -35,11 +33,16 @@ consumption_server <- function(id, project = NULL) {
           bslib::card_header("Consumption needs outputPROD.nc"),
           bslib::card_body(
             shiny::p("Load an Atlantis production NetCDF (usually named like outputPROD.nc) in the Run panel."),
-            shiny::p("Age-structured groups use <name><cohort>_Eat (from the groups CSV Name column, case-sensitive). Biomass pools use <name>Grazing. Those tracers times volume are converted to tonnes with the same mg N factor as biomass, then split across prey with DietCheck when that file is present.")
+            shiny::p("Age-structured groups use <name><cohort>_Eat (from the groups CSV Name column, case-sensitive). Biomass pools use <name>Grazing.")
           )
         ))
       }
-      consumption_body_ui(session$ns, project$data$grp)
+      NULL
+    })
+
+    observe({
+      req(isTRUE(project$ready), project$data$grp)
+      update_select_keep(session, "fg", fg_select_choices(project$data$grp), input$fg)
     })
 
     cons_df <- reactive({
@@ -64,23 +67,12 @@ consumption_server <- function(id, project = NULL) {
       stats::aggregate(Tonnes ~ Time + series, data = long, sum)
     })
 
-    output$plot_host <- renderUI({
-      df <- cons_df()
-      if (is.null(df) || nrow(df) == 0) {
-        return(div(class = "alert alert-warning",
-                   "No <name><cohort>_Eat or <name>Grazing tracer, or no diet proportions, for this group."))
-      }
-      ns <- session$ns
-      if (requireNamespace("plotly", quietly = TRUE)) {
-        plotly::plotlyOutput(ns("cons_plot"), height = "560px")
-      } else {
-        plotOutput(ns("cons_plot_gg"), height = "560px")
-      }
-    })
-
     make_plot <- function() {
       df <- cons_df()
-      req(nrow(df) > 0)
+      if (is.null(df) || nrow(df) == 0) {
+        plot_message("No Eat/Grazing tracer, or no diet proportions, for this group.")
+        return(invisible(NULL))
+      }
       origin <- project$data$origin
       df$Date <- days_as_date(df$Time, origin)
       pal <- get_fg_colors(setdiff(unique(df$series), "Other"), project$data$fg_palette)
@@ -97,11 +89,10 @@ consumption_server <- function(id, project = NULL) {
       p + theme_reactiveatlantis()
     }
 
-    output$cons_plot_gg <- renderPlot({ make_plot() })
-    if (requireNamespace("plotly", quietly = TRUE)) {
-      output$cons_plot <- plotly::renderPlotly({
-        ra_ggplotly(make_plot(), n_series = 12)
-      })
-    }
+    output$cons_plot_gg <- renderPlot({
+      plot_or_message("Load outputPROD.nc to plot consumption", make_plot())
+    })
+
+    keep_outputs_alive(output, c("banner", "cons_plot_gg"))
   })
 }

@@ -4,58 +4,67 @@
 
 ensemble_ui <- function(id) {
   ns <- NS(id)
-  tagList(uiOutput(ns("body")))
-}
-
-ensemble_body_ui <- function(ns, grp, n_runs) {
-  codes <- as.character(grp$code)
-  layout_sidebar(
-    sidebar = sidebar(
-      width = 280, open = "open",
-      selectInput(ns("kind"), "Series",
-                  choices = c("Biomass (BiomIndx)" = "biomass",
-                              "SSB" = "ssb",
-                              "YOY" = "yoy",
-                              "Catch (CATCH.nc)" = "catch")),
-      selectInput(ns("fg"), "Functional group", choices = codes),
-      p(class = "ra-muted",
-        if (n_runs > 2) {
-          "More than two runs: individual lines plus the ensemble mean and range."
-        } else {
-          "Add extra run folders in the Run panel (one path per line) to overlay them here."
-        })
-    ),
-    plotOutput(ns("ens_plot"), height = "560px")
+  tagList(
+    uiOutput(ns("banner")),
+    uiOutput(ns("empty_state")),
+    layout_sidebar(
+      sidebar = sidebar(
+        width = 280, open = "open",
+        selectInput(ns("kind"), "Series",
+                    choices = c("Biomass (BiomIndx)" = "biomass",
+                                "SSB" = "ssb",
+                                "YOY" = "yoy",
+                                "Catch (CATCH.nc)" = "catch")),
+        selectInput(ns("fg"), "Functional group", choices = character()),
+        p(class = "ra-muted",
+          "Add extra run folders in the Run panel (one path per line) to overlay them here.")
+      ),
+      plotOutput(ns("ens_plot"), height = "560px")
+    )
   )
 }
 
 ensemble_server <- function(id, project = NULL) {
   moduleServer(id, function(input, output, session) {
 
-    output$body <- renderUI({
-      if (is.null(project) || !isTRUE(project$ready)) {
-        return(tool_missing_card(FILE_LABELS[TOOL_REQUIREMENTS$overview], "Multi-run"))
-      }
+    output$banner <- renderUI(tool_banner(project, "ensemble"))
+
+    output$empty_state <- renderUI({
+      if (!isTRUE(project$ready)) return(NULL)
       runs <- project$ensemble
-      if (is.null(runs) || length(runs) == 0) {
+      if (is.null(runs) || length(runs) < 2) {
         return(bslib::card(
-          bslib::card_header("Add other run folders"),
+          bslib::card_header("Only one run is loaded"),
           bslib::card_body(
             shiny::p("Paste extra Atlantis output folders (one per line) in the Run panel, then click Load run."),
-            shiny::p("Each folder is scanned for BiomIndx, SSB and YOY. The current run is always included.")
+            shiny::p("Each folder is scanned for BiomIndx, SSB and YOY. The current run is always included. With more than two runs the plot adds the ensemble mean and range.")
           )
         ))
       }
-      ensemble_body_ui(session$ns, project$data$grp, length(runs))
+      NULL
+    })
+
+    observe({
+      req(isTRUE(project$ready), project$data$grp)
+      update_select_keep(session, "fg", fg_select_choices(project$data$grp, on_only = FALSE),
+                         input$fg)
     })
 
     output$ens_plot <- renderPlot({
+      plot_or_message("Load a run, then paste extra folders to overlay them", {
+      if (!isTRUE(project$ready)) {
+        plot_message("Load a run to overlay BiomIndx, SSB or YOY")
+        return(invisible(NULL))
+      }
       runs <- project$ensemble
-      req(length(runs) > 0, input$fg, input$kind)
+      if (is.null(runs) || length(runs) < 2) {
+        plot_message("Paste extra run folders in the Run panel to overlay more than one simulation")
+        return(invisible(NULL))
+      }
+      req(input$fg, input$kind)
       df <- ensemble_table(runs, input$fg, input$kind)
       if (is.null(df) || nrow(df) == 0) {
-        plot.new()
-        title("No series for this group in the loaded runs")
+        plot_message("No series for this group in the loaded runs")
         return(invisible(NULL))
       }
       origin <- project$data$origin
@@ -86,6 +95,9 @@ ensemble_server <- function(id, project = NULL) {
         x = "Year", y = ylab
       )
       p + theme_reactiveatlantis()
+      })
     })
+
+    keep_outputs_alive(output, c("banner", "empty_state", "ens_plot"))
   })
 }

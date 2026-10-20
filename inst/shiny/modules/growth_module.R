@@ -4,20 +4,19 @@
 
 growth_ui <- function(id) {
   ns <- NS(id)
-  tagList(uiOutput(ns("body")))
-}
-
-growth_body_ui <- function(ns, cod_fg, n_box, n_layer) {
-  layout_sidebar(
-    sidebar = sidebar(
-      width = 280, open = "open",
-      selectInput(ns("fg"), "Primary producer", choices = cod_fg),
-      selectInput(ns("box"), "Box", choices = seq(0, max(0, n_box - 1))),
-      selectInput(ns("layer"), "Layer", choices = seq(0, max(0, n_layer - 1))),
-      checkboxInput(ns("all_layers"), "All layers (facets)", FALSE),
-      checkboxInput(ns("log_scale"), "Logarithmic", FALSE)
-    ),
-    uiOutput(ns("plot_host"))
+  tagList(
+    uiOutput(ns("banner")),
+    layout_sidebar(
+      sidebar = sidebar(
+        width = 280, open = "open",
+        selectInput(ns("fg"), "Primary producer", choices = character()),
+        selectInput(ns("box"), "Box", choices = 0),
+        selectInput(ns("layer"), "Layer", choices = 0),
+        checkboxInput(ns("all_layers"), "All layers (facets)", FALSE),
+        checkboxInput(ns("log_scale"), "Logarithmic", FALSE)
+      ),
+      plotOutput(ns("growth_plot"), height = "720px")
+    )
   )
 }
 
@@ -28,17 +27,13 @@ growth_server <- function(id, project = NULL) {
       cod_fg = NULL, n_box = NULL, n_layer = NULL, built = FALSE, token = NULL
     )
 
-    output$body <- renderUI({
-      if (is.null(project) || !isTRUE(project$ready)) {
-        return(tool_missing_card(FILE_LABELS[TOOL_REQUIREMENTS$growth], "Growth"))
-      }
-      miss <- tool_missing(project$paths, "growth")
-      if (length(miss)) return(tool_missing_card(miss, "Growth"))
-      if (is.null(rv$cod_fg)) {
-        return(bslib::card(bslib::card_header("Growth"),
-                           bslib::card_body("Reading limitation factors from the run…")))
-      }
-      growth_body_ui(session$ns, rv$cod_fg, rv$n_box, rv$n_layer)
+    output$banner <- renderUI(tool_banner(project, "growth"))
+
+    observe({
+      req(rv$built, rv$cod_fg)
+      update_select_keep(session, "fg", rv$cod_fg, input$fg)
+      update_select_keep(session, "box", as.character(seq(0, max(0, rv$n_box - 1))), input$box)
+      update_select_keep(session, "layer", as.character(seq(0, max(0, rv$n_layer - 1))), input$layer)
     })
 
     observe({
@@ -127,12 +122,8 @@ growth_server <- function(id, project = NULL) {
       rv$built <- TRUE
     })
 
-    output$plot_host <- renderUI({
-      ns <- session$ns
-      plotOutput(ns("growth_plot"), height = "720px")
-    })
-
     output$growth_plot <- renderPlot({
+      plot_or_message("Load output.nc with Light and a biology .prm to plot growth limitation", {
       req(rv$built, input$fg, input$box)
       fg_idx <- which(rv$cod_fg == input$fg)
       box_idx <- as.numeric(input$box) + 1
@@ -197,7 +188,10 @@ growth_server <- function(id, project = NULL) {
           legend.text = ggplot2::element_text(size = 13),
           strip.text = ggplot2::element_text(size = 14)
         )
+      })
     })
+
+    keep_outputs_alive(output, c("banner", "growth_plot"))
   })
 }
 

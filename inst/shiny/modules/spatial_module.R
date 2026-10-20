@@ -4,36 +4,33 @@
 
 spatial_ui <- function(id) {
   ns <- NS(id)
-  tagList(uiOutput(ns("body")))
-}
-
-spatial_body_ui <- function(ns, grp, n_time) {
-  codes <- as.character(grp$code[if ("isturnedon" %in% names(grp)) grp$isturnedon == 1 else TRUE])
-  layout_sidebar(
-    sidebar = sidebar(
-      width = 280, open = "open",
-      selectInput(ns("fg"), "Functional group", choices = codes),
-      sliderInput(ns("time_i"), "Time step", min = 1, max = max(1, n_time),
-                  value = 1, step = 1),
-      textOutput(ns("time_lab")),
-      checkboxInput(ns("highlight_boundary"), "Highlight boundary boxes", TRUE)
-    ),
-    plotOutput(ns("map_plot"), height = "420px"),
-    plotOutput(ns("box_ts"), height = "320px")
+  tagList(
+    uiOutput(ns("banner")),
+    layout_sidebar(
+      sidebar = sidebar(
+        width = 280, open = "open",
+        selectInput(ns("fg"), "Functional group", choices = character()),
+        sliderInput(ns("time_i"), "Time step", min = 1, max = 1, value = 1, step = 1),
+        textOutput(ns("time_lab")),
+        checkboxInput(ns("highlight_boundary"), "Highlight boundary boxes", TRUE)
+      ),
+      plotOutput(ns("map_plot"), height = "420px"),
+      plotOutput(ns("box_ts"), height = "320px")
+    )
   )
 }
 
 spatial_server <- function(id, project = NULL) {
   moduleServer(id, function(input, output, session) {
 
-    output$body <- renderUI({
-      if (is.null(project) || !isTRUE(project$ready)) {
-        return(tool_missing_card(FILE_LABELS[TOOL_REQUIREMENTS$spatial], "Spatial"))
-      }
-      miss <- tool_missing(project$paths, "spatial")
-      if (length(miss)) return(tool_missing_card(miss, "Spatial"))
+    output$banner <- renderUI(tool_banner(project, "spatial"))
+
+    observe({
+      req(isTRUE(project$ready), project$data$grp)
       n_t <- if (!is.null(project$data$time_dates)) length(project$data$time_dates) else 1
-      spatial_body_ui(session$ns, project$data$grp, n_t)
+      update_select_keep(session, "fg", fg_select_choices(project$data$grp), input$fg)
+      shiny::updateSliderInput(session, "time_i", min = 1, max = max(1, n_t),
+                               value = keep_numeric(input$time_i, 1, max(1, n_t), 1))
     })
 
     polys <- reactive({
@@ -60,6 +57,7 @@ spatial_server <- function(id, project = NULL) {
     })
 
     output$map_plot <- renderPlot({
+      plot_or_message("Load a run with output.nc and a BGM to map biomass", {
       poly <- polys()
       bio <- box_bio()
       req(nrow(poly) > 0, nrow(bio) > 0, input$time_i)
@@ -83,9 +81,11 @@ spatial_server <- function(id, project = NULL) {
       p + theme_reactiveatlantis() +
         ggplot2::theme(axis.text = ggplot2::element_blank(),
                        panel.grid = ggplot2::element_blank())
+      })
     })
 
     output$box_ts <- renderPlot({
+      plot_or_message("Load a run to plot biomass in each box", {
       bio <- box_bio()
       req(nrow(bio) > 0)
       tdates <- project$data$time_dates
@@ -114,6 +114,9 @@ spatial_server <- function(id, project = NULL) {
       p <- p + ggplot2::labs(title = "Biomass through time in each box",
                              x = "Year", y = "Biomass (tons)", colour = "Box")
       p + theme_reactiveatlantis()
+      })
     })
+
+    keep_outputs_alive(output, c("banner", "time_lab", "map_plot", "box_ts"))
   })
 }

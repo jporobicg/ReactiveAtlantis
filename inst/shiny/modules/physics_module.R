@@ -4,22 +4,21 @@
 
 physics_ui <- function(id) {
   ns <- NS(id)
-  tagList(uiOutput(ns("body")))
-}
-
-physics_body_ui <- function(ns, tracers, n_box, n_layer) {
-  layout_sidebar(
-    sidebar = sidebar(
-      width = 280, open = "open",
-      selectInput(ns("tracer"), "Tracer", choices = tracers),
-      selectInput(ns("box"), "Box", choices = seq(0, max(0, n_box - 1))),
-      checkboxInput(ns("all_boxes"), "Mean across boxes", FALSE),
-      hr(),
-      h6("Layer thickness"),
-      p(class = "ra-muted", "nominal_dz compared with the number of water layers in this box.")
-    ),
-    plotOutput(ns("tracer_plot"), height = "480px"),
-    plotOutput(ns("dz_plot"), height = "260px")
+  tagList(
+    uiOutput(ns("banner")),
+    layout_sidebar(
+      sidebar = sidebar(
+        width = 280, open = "open",
+        selectInput(ns("tracer"), "Tracer", choices = character()),
+        selectInput(ns("box"), "Box", choices = 0),
+        checkboxInput(ns("all_boxes"), "Mean across boxes", FALSE),
+        hr(),
+        h6("Layer thickness"),
+        p(class = "ra-muted", "nominal_dz compared with the number of water layers in this box.")
+      ),
+      plotOutput(ns("tracer_plot"), height = "480px"),
+      plotOutput(ns("dz_plot"), height = "260px")
+    )
   )
 }
 
@@ -35,26 +34,19 @@ physics_server <- function(id, project = NULL) {
       found[!is.na(found)]
     })
 
-    output$body <- renderUI({
-      if (is.null(project) || !isTRUE(project$ready)) {
-        return(tool_missing_card(FILE_LABELS[TOOL_REQUIREMENTS$physics], "Physics"))
-      }
-      miss <- tool_missing(project$paths, "physics")
-      if (length(miss)) return(tool_missing_card(miss, "Physics"))
+    output$banner <- renderUI(tool_banner(project, "physics"))
+
+    observe({
+      req(isTRUE(project$ready), project$data$nc_out)
       tr <- available()
-      if (length(tr) == 0) {
-        return(bslib::card(
-          bslib::card_header("No physics tracers"),
-          bslib::card_body("The output NetCDF has no Temp, salt, NO3, NH3, Chl_a or denitrification variables.")
-        ))
-      }
-      dat <- project$data
-      n_box <- if (!is.null(dat$nc_out$dim$b)) dat$nc_out$dim$b$len else 1
-      n_z <- if (!is.null(dat$nc_out$dim$z)) dat$nc_out$dim$z$len else 1
-      physics_body_ui(session$ns, tr, n_box, n_z)
+      if (length(tr) == 0) return()
+      n_box <- if (!is.null(project$data$nc_out$dim$b)) project$data$nc_out$dim$b$len else 1
+      update_select_keep(session, "tracer", tr, input$tracer)
+      update_select_keep(session, "box", as.character(seq(0, max(0, n_box - 1))), input$box)
     })
 
     output$tracer_plot <- renderPlot({
+      plot_or_message("Load output.nc to plot temperature, salt and nutrients", {
       dat <- project$data
       req(dat$nc_out, input$tracer)
       box <- if (isTRUE(input$all_boxes)) NULL else as.integer(input$box)
@@ -80,9 +72,11 @@ physics_server <- function(id, project = NULL) {
         x = "Year", y = input$tracer
       )
       p + theme_reactiveatlantis() + ggplot2::theme(legend.position = "none")
+      })
     })
 
     output$dz_plot <- renderPlot({
+      plot_or_message("Load output.nc to plot layer thickness", {
       dat <- project$data
       req(dat$nc_out)
       dz <- layer_thickness(dat$nc_out)
@@ -127,6 +121,9 @@ physics_server <- function(id, project = NULL) {
         plot.new()
         title("Unexpected nominal_dz shape")
       }
+      })
     })
+
+    keep_outputs_alive(output, c("banner", "tracer_plot", "dz_plot"))
   })
 }

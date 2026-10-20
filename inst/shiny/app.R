@@ -28,6 +28,7 @@ options(shiny.maxRequestSize = max(c(requested_upload, current_upload), na.rm = 
 
 app_dir <- getwd()
 source(file.path(app_dir, "modules", "theme.R"))
+source(file.path(app_dir, "modules", "ui_helpers.R"))
 source(file.path(app_dir, "modules", "colors.R"))
 source(file.path(app_dir, "modules", "utils.R"))
 source(file.path(app_dir, "modules", "catch_module.R"))

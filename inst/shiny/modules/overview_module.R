@@ -6,7 +6,19 @@ overview_ui <- function(id) {
   ns <- shiny::NS(id)
   shiny::tagList(
     shiny::uiOutput(ns("cards")),
-    shiny::uiOutput(ns("health_panel"))
+    shiny::uiOutput(ns("run_window")),
+    bslib::card(
+      bslib::card_header("Group health (final / initial biomass)"),
+      bslib::card_body(DT::dataTableOutput(ns("health_table")))
+    ),
+    bslib::card(
+      bslib::card_header("Problem cohorts (StructN / ResN relative to t0)"),
+      bslib::card_body(
+        shiny::p(class = "ra-muted",
+                 "Age classes outside the 0.5–1.5 band at the last time step. The same band is drawn on Compare relative views."),
+        DT::dataTableOutput(ns("cohort_table"))
+      )
+    )
   )
 }
 
@@ -15,13 +27,13 @@ overview_server <- function(id, project) {
 
     health <- shiny::reactive({
       dat <- project$data
-      shiny::req(dat, dat$grp, dat$biomindx)
+      if (is.null(dat) || is.null(dat$grp) || is.null(dat$biomindx)) return(NULL)
       biomass_health(dat$biomindx, dat$grp)
     })
 
     cohorts <- shiny::reactive({
       dat <- project$data
-      shiny::req(dat, dat$grp, dat$nc_out)
+      if (is.null(dat) || is.null(dat$grp) || is.null(dat$nc_out)) return(NULL)
       problem_cohorts(dat$nc_out, dat$grp, ACCEPT_BAND)
     })
 
@@ -83,73 +95,44 @@ overview_server <- function(id, project) {
       )
     })
 
-    output$health_panel <- shiny::renderUI({
+    output$run_window <- shiny::renderUI({
       if (!isTRUE(project$ready)) return(NULL)
       dat <- project$data
       sm <- summarise_run(dat$grp, dat$nc_out, dat$biomindx, dat$time_dates)
       start_lab <- if (!is.na(sm$origin)) format(sm$origin, "%Y-%m-%d") else "not in NetCDF"
-      ns <- session$ns
-      shiny::tagList(
-        bslib::card(
-          bslib::card_header("Run window"),
-          bslib::card_body(
-            shiny::p(shiny::strong("Start date (from NetCDF time units): "), start_lab),
-            shiny::p(shiny::strong("Time span: "), sm$time_span)
-          )
-        ),
-        if (is.null(dat$biomindx)) {
-          bslib::card(
-            bslib::card_header("Group health"),
-            bslib::card_body("Load BiomIndx.txt to flag groups that collapse below 1% of initial biomass or grow more than tenfold.")
-          )
-        } else {
-          bslib::card(
-            bslib::card_header("Group health (final / initial biomass)"),
-            bslib::card_body(DT::dataTableOutput(ns("health_table")))
-          )
-        },
-        if (is.null(dat$nc_out)) {
-          bslib::card(
-            bslib::card_header("Problem cohorts"),
-            bslib::card_body("Load the biology output NetCDF to flag age classes whose mean StructN or ResN at the end of the run sits outside 0.5–1.5 of the initial value.")
-          )
-        } else {
-          bslib::card(
-            bslib::card_header("Problem cohorts (StructN / ResN relative to t0)"),
-            bslib::card_body(
-              shiny::p(class = "ra-muted",
-                       "Age classes outside the 0.5–1.5 band at the last time step. The same band is drawn on Compare relative views."),
-              DT::dataTableOutput(ns("cohort_table"))
-            )
-          )
-        }
+      bslib::card(
+        bslib::card_header("Run window"),
+        bslib::card_body(
+          shiny::p(shiny::strong("Start date (from NetCDF time units): "), start_lab),
+          shiny::p(shiny::strong("Time span: "), sm$time_span)
+        )
       )
     })
 
     output$health_table <- DT::renderDataTable({
       tbl <- health()
+      if (is.null(tbl) || nrow(tbl) == 0) {
+        return(ra_datatable(data.frame(Note = "Load BiomIndx.txt to flag groups that collapse or explode.")))
+      }
       tbl$Ratio <- round(tbl$Ratio, 3)
       tbl$Initial <- signif(tbl$Initial, 4)
       tbl$Final <- signif(tbl$Final, 4)
-      DT::datatable(
-        tbl,
-        rownames = FALSE,
-        filter = "top",
-        options = list(pageLength = 20, order = list(list(5, "desc")))
-      )
+      ra_datatable(tbl, filter = "top",
+                   options = list(pageLength = 20, order = list(list(5, "desc"))))
     })
 
     output$cohort_table <- DT::renderDataTable({
       tbl <- cohorts()
+      if (is.null(tbl) || nrow(tbl) == 0) {
+        return(ra_datatable(data.frame(Note = "Load the biology output NetCDF to flag StructN / ResN cohorts.")))
+      }
       tbl$Relative <- round(tbl$Relative, 3)
       tbl$Initial <- signif(tbl$Initial, 4)
       tbl$Final <- signif(tbl$Final, 4)
-      DT::datatable(
-        tbl,
-        rownames = FALSE,
-        filter = "top",
-        options = list(pageLength = 15, order = list(list(7, "desc")))
-      )
+      ra_datatable(tbl, filter = "top",
+                   options = list(pageLength = 15, order = list(list(7, "desc"))))
     })
+
+    keep_outputs_alive(output, c("cards", "run_window", "health_table", "cohort_table"))
   })
 }

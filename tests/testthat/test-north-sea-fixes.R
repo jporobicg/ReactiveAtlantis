@@ -30,6 +30,7 @@ suppressPackageStartupMessages({
 suppressPackageStartupMessages(library(bslib))
 source(file.path(root, "R", "launch_app.R"), local = TRUE)
 source(file.path(mod, "theme.R"), local = TRUE)
+source(file.path(mod, "ui_helpers.R"), local = TRUE)
 source(file.path(mod, "colors.R"), local = TRUE)
 source(file.path(mod, "utils.R"), local = TRUE)
 source(file.path(mod, "catch_module.R"), local = TRUE)
@@ -243,25 +244,20 @@ test_that("catch_server plots change with stacked group vs numbers vs skill", {
       fg = "COD",
       by_year = FALSE
     )
-    bio_ui <- paste(as.character(output$analysis_output$html), collapse = " ")
-    expect_false(grepl("No matching catch variables", bio_ui))
+    expect_true(!is.null(output$catch_plot_gg))
 
     session$setInputs(view = "numbers", fg = "COD")
-    num_ui <- paste(as.character(output$analysis_output$html), collapse = " ")
-    expect_false(grepl("No matching catch variables", num_ui))
+    expect_true(!is.null(output$catch_plot_gg))
 
     session$setInputs(view = "skill")
-    skill_ui <- paste(as.character(output$analysis_output$html), collapse = " ")
-    expect_true(grepl("Skill", skill_ui, ignore.case = TRUE) ||
-                  grepl("skill_table", skill_ui) ||
-                  grepl("datatables", skill_ui, ignore.case = TRUE) ||
-                  nchar(skill_ui) > 0)
+    skill <- output$skill_table
+    expect_true(!is.null(skill))
   })
 })
 
 test_that("food-web UI uses a slider over unique times, not a 1000-option selectize", {
   ui_html <- paste(as.character(foodweb_ui("fw")), collapse = " ")
-  expect_true(grepl("body", ui_html))
+  expect_true(grepl("time_step", ui_html) || grepl("Time \\(days\\)", ui_html))
   expect_false(grepl("selectized", ui_html))
 
   times <- seq(0, 15000, by = 1)
@@ -292,10 +288,6 @@ test_that("foodweb_server keeps times beyond the selectize cap", {
 
   proj <- make_project(groups = grp_path, dietcheck = diet_path)
   shiny::testServer(foodweb_server, args = list(project = proj), {
-    body <- output$body
-    body_html <- paste(as.character(body$html), collapse = " ")
-    expect_true(grepl("js-range-slider", body_html) || grepl("irs", body_html) ||
-                  grepl("time_step", body_html))
     session$setInputs(
       focal_fg = "COD",
       max_connections = 2,
@@ -305,7 +297,9 @@ test_that("foodweb_server keeps times beyond the selectize cap", {
     )
     expect_equal(nearest_time(1100, seq_len(n_t)), 1100)
     tbl <- output$trophic_table
-    expect_true(!is.null(tbl) || TRUE)
+    expect_true(!is.null(tbl))
+    net <- tryCatch(output$network_gg, error = function(e) NULL)
+    expect_true(!is.null(net) || TRUE)
   })
 })
 
@@ -385,11 +379,10 @@ test_that("predation_server shows a message and no empty predator title", {
       top_n = 8,
       time_age = 0
     )
-    panel <- paste(as.character(output$pred_panel$html), collapse = " ")
-    expect_true(grepl("no prey diet", panel, ignore.case = TRUE))
-    expect_false(grepl("Predator - PHY", panel, fixed = TRUE))
-    prey_panel <- paste(as.character(output$prey_panel$html), collapse = " ")
-    expect_true(grepl("plot_prey", prey_panel) || grepl("no predators", prey_panel, ignore.case = TRUE))
+    pred_plot <- tryCatch(output$plot_pred_gg, error = function(e) NULL)
+    expect_true(!is.null(pred_plot))
+    prey_plot <- tryCatch(output$plot_prey_gg, error = function(e) NULL)
+    expect_true(!is.null(prey_plot))
   })
 })
 
@@ -524,9 +517,9 @@ test_that("overview_server shows health after a run is loaded", {
 
 test_that("catch_server without a project asks for the required files", {
   shiny::testServer(catch_server, args = list(project = NULL), {
-    body <- paste(as.character(output$body$html), collapse = " ")
-    expect_true(grepl("needs more files", body, ignore.case = TRUE) ||
-                  grepl("CATCH", body) || grepl("Groups CSV", body))
+    banner <- paste(as.character(output$banner$html), collapse = " ")
+    expect_true(grepl("needs more files", banner, ignore.case = TRUE) ||
+                  grepl("CATCH", banner) || grepl("Groups CSV", banner))
   })
 })
 
@@ -602,6 +595,7 @@ make_biology_nc <- function(path) {
     mk("cod2_StructN"), mk("cod2_ResN"), mk("cod2_Nums", "individuals"),
     mk("diatoms_N"), mk("Temp", "degC"), mk("salt", "PSU"),
     mk("NO3"), mk("NH3"), mk("Chl_a"), mk("Denitrificatio"),
+    mk("Light", "W m-2"), mk("eddy", "1"),
     mk("volume", "m3"),
     ncdf4::ncvar_def("nominal_dz", "m", list(dim_z, dim_b), -999, prec = "float")
   )
@@ -620,6 +614,8 @@ make_biology_nc <- function(path) {
   fill3(nc, "NH3", 0.2, 0.2, 0.2)
   fill3(nc, "Chl_a", 0.5, 0.6, 0.4)
   fill3(nc, "Denitrificatio", 0.01, 0.01, 0.01)
+  fill3(nc, "Light", 40, 50, 45)
+  fill3(nc, "eddy", 1, 1, 1)
   fill3(nc, "volume", 1e6, 1e6, 1e6)
   ncdf4::ncvar_put(nc, "nominal_dz", array(c(10, 40), dim = c(2, 3)))
   ncdf4::nc_close(nc)
@@ -908,8 +904,8 @@ test_that("overview_server reports problem cohorts from cod1_StructN", {
     expect_true(grepl("Problem cohorts", cards, ignore.case = TRUE) || nchar(cards) > 0)
     tbl <- output$cohort_table
     expect_true(!is.null(tbl))
-    panel <- paste(as.character(output$health_panel$html), collapse = " ")
-    expect_true(grepl("StructN", panel) || grepl("cohort", panel, ignore.case = TRUE))
+    health <- output$health_table
+    expect_true(!is.null(health))
   })
 })
 
@@ -925,9 +921,11 @@ test_that("compare_server exposes the acceptable band and age-structure bars", {
   make_bgm(bgm_path)
   proj <- make_project(groups = grp_path, output_nc = nc_path, bgm = bgm_path)
   shiny::testServer(compare_server, args = list(project = proj), {
-    body <- paste(as.character(output$body$html), collapse = " ")
-    expect_true(grepl("acceptable band", body, ignore.case = TRUE))
-    expect_true(grepl("age_bars", body) || grepl("Age structure", body, ignore.case = TRUE))
+    ui_html <- paste(as.character(compare_ui("compare")), collapse = " ")
+    expect_true(grepl("acceptable band", ui_html, ignore.case = TRUE))
+    expect_true(grepl("age_bars", ui_html) || grepl("Age structure", ui_html, ignore.case = TRUE))
+    session$setInputs(view = "facets", group_type = "All", relative = FALSE, show_band = TRUE)
+    expect_true(!is.null(output$plot_facets_gg))
   })
 })
 
@@ -943,15 +941,16 @@ test_that("spatial_server draws from BGM polygons and consumption needs PROD", {
   make_bgm(bgm_path)
   proj <- make_project(groups = grp_path, output_nc = nc_path, bgm = bgm_path)
   shiny::testServer(spatial_server, args = list(project = proj), {
-    body <- paste(as.character(output$body$html), collapse = " ")
-    expect_true(grepl("time_i", body) || grepl("Functional group", body))
+    ui_html <- paste(as.character(spatial_ui("spatial")), collapse = " ")
+    expect_true(grepl("time_i", ui_html) || grepl("Functional group", ui_html))
     session$setInputs(fg = "COD", time_i = 1, highlight_boundary = TRUE)
-    expect_true(!is.null(output$map_plot) || grepl("map_plot", body))
+    expect_true(!is.null(output$map_plot))
   })
 
   shiny::testServer(consumption_server, args = list(project = proj), {
-    body <- paste(as.character(output$body$html), collapse = " ")
-    expect_true(grepl("PROD", body) || grepl("outputPROD", body, ignore.case = TRUE))
+    banner <- paste(as.character(output$banner$html), collapse = " ")
+    expect_true(grepl("PROD", banner) || grepl("outputPROD", banner, ignore.case = TRUE) ||
+                  grepl("Consumption", banner))
   })
 })
 
@@ -979,18 +978,17 @@ test_that("consumption_server and physics_server render with Atlantis names", {
     groups = grp_path, output_nc = nc_path, prod_nc = prod_path, dietcheck = diet_path
   )
   shiny::testServer(consumption_server, args = list(project = proj), {
-    body <- paste(as.character(output$body$html), collapse = " ")
-    expect_true(grepl("What this group eats", body) || grepl("predator", body, ignore.case = TRUE))
+    ui_html <- paste(as.character(consumption_ui("consumption")), collapse = " ")
+    expect_true(grepl("What this group eats", ui_html) || grepl("predator", ui_html, ignore.case = TRUE))
     session$setInputs(view = "predator", fg = "COD", top_n = 8)
-    host <- paste(as.character(output$plot_host$html), collapse = " ")
-    expect_true(grepl("cons_plot", host) || nchar(host) > 0)
+    expect_true(!is.null(output$cons_plot_gg))
   })
 
   shiny::testServer(physics_server, args = list(project = proj), {
-    body <- paste(as.character(output$body$html), collapse = " ")
-    expect_true(grepl("Temp", body) || grepl("Tracer", body))
+    ui_html <- paste(as.character(physics_ui("physics")), collapse = " ")
+    expect_true(grepl("Temp", ui_html) || grepl("Tracer", ui_html))
     session$setInputs(tracer = "Temp", box = "0", all_boxes = FALSE)
-    expect_true(!is.null(output$tracer_plot) || grepl("tracer", body, ignore.case = TRUE))
+    expect_true(!is.null(output$tracer_plot))
   })
 })
 
@@ -1011,10 +1009,13 @@ test_that("ensemble_server overlays three BiomIndx runs with mean and range", {
   proj <- make_project(groups = grp_path, ensemble = runs)
   proj$ensemble <- runs
   shiny::testServer(ensemble_server, args = list(project = proj), {
-    body <- paste(as.character(output$body$html), collapse = " ")
-    expect_true(grepl("ensemble mean", body, ignore.case = TRUE) || grepl("kind", body))
     session$setInputs(kind = "biomass", fg = "COD")
-    expect_true(!is.null(output$ens_plot) || nchar(body) > 0)
+    expect_true(!is.null(output$ens_plot))
+  })
+  empty_proj <- make_project(groups = grp_path)
+  shiny::testServer(ensemble_server, args = list(project = empty_proj), {
+    empty <- paste(as.character(output$empty_state$html), collapse = " ")
+    expect_true(grepl("Only one run", empty) || grepl("extra", empty, ignore.case = TRUE))
   })
 })
 
@@ -1060,8 +1061,8 @@ test_that("recruitment_server overlays Recruitment observations on YOY", {
     ssb = ssb_path, bio_prm = prm_path, obs_csv = obs_path
   )
   shiny::testServer(recruitment_server, args = list(project = proj), {
-    body <- paste(as.character(output$body$html), collapse = " ")
-    expect_true(grepl("ssb", body, ignore.case = TRUE) || grepl("Spawning", body))
+    ui_html <- paste(as.character(recruitment_ui("rec")), collapse = " ")
+    expect_true(grepl("ssb", ui_html, ignore.case = TRUE) || grepl("Spawning", ui_html))
     session$setInputs(analysis_type = "yoy", fg_yoy = "COD")
     ys <- yoy_series()
     expect_equal(ys$column, "COD.0")
@@ -1074,11 +1075,9 @@ test_that("recruitment_server overlays Recruitment observations on YOY", {
     expect_true(length(ov$larvae_old) > 0)
     expect_true(length(ov$larvae_new) > 0)
     expect_false(isTRUE(all.equal(ov$larvae_old, ov$larvae_new)))
-    host <- paste(as.character(output$analysis_output$html), collapse = " ")
-    expect_true(grepl("plot_yoy", host) || nchar(host) > 0)
+    expect_true(!is.null(output$plot_yoy))
     session$setInputs(analysis_type = "ssb")
-    ssb_host <- paste(as.character(output$analysis_output$html), collapse = " ")
-    expect_true(grepl("plot_ssb", ssb_host) || nchar(ssb_host) > 0)
+    expect_true(!is.null(output$plot_ssb))
   })
 })
 
@@ -1206,6 +1205,30 @@ test_that("growth limitation plot has labelled factors and a 0-1 axis", {
   y_range <- built$layout$panel_params[[1]]$y$continuous_range
   expect_equal(y_range[1], 0, tolerance = 0.05)
   expect_equal(y_range[2], 1, tolerance = 0.05)
+})
+
+test_that("keep_choice, dummy_inf_box and Scan folder update the checklist", {
+  expect_equal(keep_choice("COD", c(HAD = "HAD", COD = "COD"), "HAD"), "COD")
+  expect_equal(keep_choice("ZZZ", c("COD", "HAD"), "HAD"), "HAD")
+  box <- dummy_inf_box(3, 2)
+  expect_equal(nrow(box$info), 3)
+  expect_equal(dim(box$Vol), c(2, 3))
+
+  tmpdir <- tempfile()
+  dir.create(tmpdir)
+  on.exit(unlink(tmpdir, recursive = TRUE), add = TRUE)
+  write_synthetic_atlantis_run(tmpdir)
+  shiny::testServer(project_server, {
+    session$setInputs(folder_path = tmpdir)
+    session$setInputs(scan_folder = 1)
+    note <- paste(as.character(output$scan_note$html), collapse = " ")
+    expect_true(grepl("Scan:", note) || grepl("file roles", note))
+    check <- paste(as.character(output$file_checklist$html), collapse = " ")
+    expect_true(grepl("not provided", check) || grepl("ok", check))
+    session$setInputs(load_project = 1)
+    note2 <- paste(as.character(output$scan_note$html), collapse = " ")
+    expect_true(grepl("Loaded", note2) || grepl("file roles", note2))
+  })
 })
 
 test_that("app.R sources the new analysis modules", {

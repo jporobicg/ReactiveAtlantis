@@ -4,31 +4,28 @@
 
 feeding_ui <- function(id) {
   ns <- NS(id)
-  tagList(uiOutput(ns("body")))
-}
-
-feeding_body_ui <- function(ns, ava_mat) {
-  preds <- rownames(ava_mat)
-  preys <- colnames(ava_mat)
-  layout_sidebar(
-    sidebar = sidebar(
-      width = 280, open = "open",
-      selectInput(ns("view_type"), "View",
-                  choices = c("Availability (pPREY)" = "availability",
-                              "Gape overlap" = "overlap",
-                              "Gape mismatch (pPREY>0, overlap=0)" = "mismatch",
-                              "Effective predation" = "effective",
-                              "Predation pressure" = "pressure")),
-      textInput(ns("pred_search"), "Predator search", placeholder = "pPREY1COD…"),
-      textInput(ns("prey_search"), "Prey search", placeholder = "HAD, COD…"),
-      selectInput(ns("predator"), "Predator row", choices = c("(all)", preds)),
-      selectInput(ns("prey"), "Prey column", choices = c("(all)", preys)),
-      p(class = "ra-muted",
-        "Choose a predator row to filter the matrix and to open a bar chart of availability, gape overlap and effective predation. Cells outlined in navy have pPREY > 0 with zero gape overlap.")
-    ),
-    uiOutput(ns("plot_host")),
-    plotOutput(ns("detail_plot"), height = "280px"),
-    DT::dataTableOutput(ns("bug_table"))
+  tagList(
+    uiOutput(ns("banner")),
+    layout_sidebar(
+      sidebar = sidebar(
+        width = 280, open = "open",
+        selectInput(ns("view_type"), "View",
+                    choices = c("Availability (pPREY)" = "availability",
+                                "Gape overlap" = "overlap",
+                                "Gape mismatch (pPREY>0, overlap=0)" = "mismatch",
+                                "Effective predation" = "effective",
+                                "Predation pressure" = "pressure")),
+        textInput(ns("pred_search"), "Predator search", placeholder = "pPREY1COD…"),
+        textInput(ns("prey_search"), "Prey search", placeholder = "HAD, COD…"),
+        selectInput(ns("predator"), "Predator row", choices = "(all)"),
+        selectInput(ns("prey"), "Prey column", choices = "(all)"),
+        p(class = "ra-muted",
+          "Choose a predator row to filter the matrix and to open a bar chart of availability, gape overlap and effective predation. Cells outlined in navy have pPREY > 0 with zero gape overlap.")
+      ),
+      plotOutput(ns("feeding_plot_gg"), height = "640px"),
+      plotOutput(ns("detail_plot"), height = "280px"),
+      DT::dataTableOutput(ns("bug_table"))
+    )
   )
 }
 
@@ -39,17 +36,14 @@ feeding_server <- function(id, project = NULL) {
       pressure = NULL, bugs = NULL, built = FALSE, token = NULL
     )
 
-    output$body <- renderUI({
-      if (is.null(project) || !isTRUE(project$ready)) {
-        return(tool_missing_card(FILE_LABELS[TOOL_REQUIREMENTS$feeding], "Feeding"))
-      }
-      miss <- tool_missing(project$paths, "feeding")
-      if (length(miss)) return(tool_missing_card(miss, "Feeding"))
-      if (is.null(rv$ava_mat)) {
-        return(bslib::card(bslib::card_header("Feeding matrix"),
-                           bslib::card_body("Building pPREY and gape overlap…")))
-      }
-      feeding_body_ui(session$ns, rv$ava_mat)
+    output$banner <- renderUI(tool_banner(project, "feeding"))
+
+    observe({
+      req(rv$ava_mat)
+      update_select_keep(session, "predator", c("(all)", rownames(rv$ava_mat)),
+                         input$predator)
+      update_select_keep(session, "prey", c("(all)", colnames(rv$ava_mat)),
+                         input$prey)
     })
 
     observe({
@@ -156,13 +150,6 @@ feeding_server <- function(id, project = NULL) {
       )
     })
 
-    output$plot_host <- renderUI({
-      ns <- session$ns
-      n_pred <- if (is.null(rv$ava_mat)) 40 else nrow(filtered_mats()$ava)
-      h <- max(420, min(16 * n_pred + 140, 900))
-      plotOutput(ns("feeding_plot_gg"), height = paste0(h, "px"))
-    })
-
     make_feed_plot <- function() {
       mats <- filtered_mats()
       req(mats$ava, input$view_type)
@@ -206,9 +193,13 @@ feeding_server <- function(id, project = NULL) {
       }
     }
 
-    output$feeding_plot_gg <- renderPlot({ make_feed_plot() })
+    output$feeding_plot_gg <- renderPlot({
+      plot_or_message("Load biology.prm (and initial.nc) to plot the feeding matrix",
+                      make_feed_plot())
+    })
 
     output$detail_plot <- renderPlot({
+      plot_or_message("Select a predator row for the detail chart", {
       req(rv$ava_mat)
       pred <- input$predator
       if (is.null(pred) || pred %in% c("", "(all)")) {
@@ -237,15 +228,18 @@ feeding_server <- function(id, project = NULL) {
       p <- p + ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90, hjust = 1, size = 10),
                               legend.position = "none")
       p
+      })
     })
 
     output$bug_table <- DT::renderDataTable({
       bugs <- rv$bugs
       if (is.null(bugs) || nrow(bugs) == 0) {
-        return(data.frame(Note = "No pPREY > 0 cells with zero gape overlap."))
+        return(ra_datatable(data.frame(Note = "No pPREY > 0 cells with zero gape overlap.")))
       }
-      DT::datatable(bugs, rownames = FALSE, options = list(pageLength = 8, dom = "tip"))
+      ra_datatable(bugs, options = list(pageLength = 8, dom = "tip"))
     })
+
+    keep_outputs_alive(output, c("banner", "feeding_plot_gg", "detail_plot", "bug_table"))
   })
 }
 

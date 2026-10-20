@@ -4,47 +4,50 @@
 
 catch_ui <- function(id) {
   ns <- NS(id)
-  tagList(uiOutput(ns("body")))
-}
-
-catch_body_ui <- function(ns, grp, fish) {
-  fish_labels <- if ("name" %in% names(fish)) {
-    setNames(as.character(fish$code), paste(fish$code, fish$name, sep = " — "))
-  } else {
-    as.character(fish$code)
-  }
-  impacted <- grp
-  if ("isimpacted" %in% names(grp)) {
-    on <- grp[grp$isimpacted == 1, , drop = FALSE]
-    if (nrow(on) > 0) impacted <- on
-  }
-  fg_choices <- c("All", as.character(impacted$code))
-  layout_sidebar(
-    sidebar = sidebar(
-      width = 280, open = "open",
-      selectInput(ns("view"), "View",
-                  choices = c("Stacked by group" = "by_group",
-                              "Stacked by fleet" = "by_fleet",
-                              "Numbers by age" = "numbers",
-                              "Skill vs observed" = "skill")),
-      selectInput(ns("fishery"), "Fishery", choices = fish_labels),
-      selectInput(ns("fg"), "Functional group", choices = fg_choices),
-      checkboxInput(ns("by_year"), "Aggregate by year", TRUE)
-    ),
-    uiOutput(ns("analysis_output"))
+  tagList(
+    uiOutput(ns("banner")),
+    layout_sidebar(
+      sidebar = sidebar(
+        width = 280, open = "open",
+        selectInput(ns("view"), "View",
+                    choices = c("Stacked by group" = "by_group",
+                                "Stacked by fleet" = "by_fleet",
+                                "Numbers by age" = "numbers",
+                                "Skill vs observed" = "skill")),
+        selectInput(ns("fishery"), "Fishery", choices = character()),
+        selectInput(ns("fg"), "Functional group", choices = "All"),
+        checkboxInput(ns("by_year"), "Aggregate by year", TRUE)
+      ),
+      conditionalPanel("input.view != 'skill'", ns = ns,
+                       plotOutput(ns("catch_plot_gg"), height = "640px")),
+      conditionalPanel("input.view == 'skill'", ns = ns,
+                       h4("Model skill assessment"),
+                       DT::dataTableOutput(ns("skill_table")))
+    )
   )
 }
 
 catch_server <- function(id, project = NULL) {
   moduleServer(id, function(input, output, session) {
 
-    output$body <- renderUI({
-      if (is.null(project) || !isTRUE(project$ready)) {
-        return(tool_missing_card(FILE_LABELS[TOOL_REQUIREMENTS$catch], "Catch"))
+    output$banner <- renderUI(tool_banner(project, "catch"))
+
+    observe({
+      req(isTRUE(project$ready), project$data$grp, project$data$fish)
+      fish <- project$data$fish
+      grp <- project$data$grp
+      fish_labels <- if ("name" %in% names(fish)) {
+        stats::setNames(as.character(fish$code), paste(fish$code, fish$name, sep = " — "))
+      } else {
+        as.character(fish$code)
       }
-      miss <- tool_missing(project$paths, "catch")
-      if (length(miss)) return(tool_missing_card(miss, "Catch"))
-      catch_body_ui(session$ns, project$data$grp, project$data$fish)
+      impacted <- grp
+      if ("isimpacted" %in% names(grp)) {
+        on <- grp[grp$isimpacted == 1, , drop = FALSE]
+        if (nrow(on) > 0) impacted <- on
+      }
+      update_select_keep(session, "fishery", fish_labels, input$fishery)
+      update_select_keep(session, "fg", c("All", as.character(impacted$code)), input$fg)
     })
 
     catch_time <- reactive({
@@ -134,34 +137,6 @@ catch_server <- function(id, project = NULL) {
       )
     }
 
-    output$analysis_output <- renderUI({
-      ns <- session$ns
-      view <- input$view
-      if (is.null(view)) return(NULL)
-      if (identical(view, "skill")) {
-        return(tagList(
-          h4("Model skill assessment"),
-          DT::dataTableOutput(ns("skill_table"))
-        ))
-      }
-      res <- if (identical(view, "by_fleet")) {
-        df <- fleet_stack()
-        if (is.null(df) || nrow(df) == 0) {
-          return(div(class = "alert alert-warning",
-                     "No catch variables for this group across fleets."))
-        }
-        TRUE
-      } else {
-        catch_result()
-      }
-      if (!isTRUE(res) && !isTRUE(res$ok)) return(catch_empty_message(res))
-      if (requireNamespace("plotly", quietly = TRUE)) {
-        plotly::plotlyOutput(ns("catch_plot"), height = "640px")
-      } else {
-        plotOutput(ns("catch_plot_gg"), height = "640px")
-      }
-    })
-
     make_catch_plot <- function() {
       view <- input$view
       pal <- project$data$fg_palette
@@ -225,7 +200,9 @@ catch_server <- function(id, project = NULL) {
       p + theme_reactiveatlantis()
     }
 
-    output$catch_plot_gg <- renderPlot({ make_catch_plot() })
+    output$catch_plot_gg <- renderPlot({
+      plot_or_message("Load CATCH.nc to plot catch", make_catch_plot())
+    })
     if (requireNamespace("plotly", quietly = TRUE)) {
       output$catch_plot <- plotly::renderPlotly({
         p <- make_catch_plot()
@@ -236,13 +213,13 @@ catch_server <- function(id, project = NULL) {
 
     output$skill_table <- DT::renderDataTable({
       dat <- project$data
-      res <- catch_result()
+      res <- tryCatch(catch_result(), error = function(e) NULL)
       if (!isTRUE(res$ok) || is.null(dat$ext_catch)) {
-        return(data.frame(Note = "Load an external catch CSV to score skill."))
+        return(ra_datatable(data.frame(Note = "Load an external catch CSV to score skill.")))
       }
       fg <- input$fg
       if (is.null(fg) || identical(fg, "All") || !(fg %in% names(dat$ext_catch))) {
-        return(data.frame(Note = paste("No observed series for", fg)))
+        return(ra_datatable(data.frame(Note = paste("No observed series for", fg))))
       }
       catch_df <- res$data
       catch_agg <- stats::aggregate(catch ~ format(years, "%Y"), data = catch_df, sum)
@@ -255,11 +232,13 @@ catch_server <- function(id, project = NULL) {
       merged <- merge(catch_agg, ext_df, by = "year")
       merged <- merged[stats::complete.cases(merged), ]
       if (nrow(merged) < 3) {
-        return(data.frame(Note = "Not enough overlapping years for skill assessment"))
+        return(ra_datatable(data.frame(Note = "Not enough overlapping years for skill assessment")))
       }
       skill <- skill_assessment(merged$observed, merged$modeled, fg)
-      DT::datatable(skill, options = list(pageLength = 10, dom = "t"), rownames = FALSE)
+      ra_datatable(skill, options = list(pageLength = 10, dom = "t"))
     })
+
+    keep_outputs_alive(output, c("banner", "catch_plot_gg", "skill_table"))
   })
 }
 

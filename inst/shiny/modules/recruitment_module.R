@@ -4,49 +4,48 @@
 
 recruitment_ui <- function(id) {
   ns <- NS(id)
-  tagList(uiOutput(ns("body")))
-}
-
-recruitment_body_ui <- function(ns, grp, rec, n_box) {
-  age_groups <- grp[grp$numcohorts > 1, ]
-  pp.pos <- with(grp, which(grouptype %in% c("MED_ZOO", "LG_ZOO", "LG_PHY", "SM_PHY",
-                                             "PHYTOBEN", "DINOFLAG", "TURF") &
-                            isturnedon == 1))
-  pp.cod <- as.character(grp$code[pp.pos])
-  layout_sidebar(
-    sidebar = sidebar(
-      width = 280, open = "open",
-      selectInput(ns("analysis_type"), "View",
-                  choices = c("Recruits and YOY" = "yoy",
-                              "Spawning stock biomass" = "ssb",
-                              "Zooplankton and primary producers" = "growth")),
-      conditionalPanel(
-        "input.analysis_type == 'yoy' || input.analysis_type == 'ssb'", ns = ns,
-        selectInput(ns("fg_yoy"), "Functional group",
-                    choices = as.character(age_groups$code))
+  tagList(
+    uiOutput(ns("banner")),
+    layout_sidebar(
+      sidebar = sidebar(
+        width = 280, open = "open",
+        selectInput(ns("analysis_type"), "View",
+                    choices = c("Recruits and YOY" = "yoy",
+                                "Spawning stock biomass" = "ssb",
+                                "Zooplankton and primary producers" = "growth")),
+        conditionalPanel(
+          "input.analysis_type == 'yoy' || input.analysis_type == 'ssb'", ns = ns,
+          selectInput(ns("fg_yoy"), "Functional group", choices = character())
+        ),
+        conditionalPanel(
+          "input.analysis_type == 'yoy'", ns = ns,
+          textInput(ns("new_alpha"), "New alpha", value = "", placeholder = "7.3e9"),
+          textInput(ns("new_beta"), "New beta", value = "", placeholder = "4.5e11"),
+          actionButton(ns("recalc"), "Recalculate", class = "btn btn-primary btn-sm"),
+          p(class = "ra-muted",
+            "Atlantis YOY (CODE.0 in YOY.txt) plus larvae from the Beverton–Holt curve. Recalculate redraws new larvae and new YOY from the alpha and beta you type (scientific notation is fine).")
+        ),
+        conditionalPanel(
+          "input.analysis_type == 'ssb'", ns = ns,
+          p(class = "ra-muted", "SSB.txt from the run, with observed SSB ribbons when an observations CSV is loaded.")
+        ),
+        conditionalPanel(
+          "input.analysis_type == 'growth'", ns = ns,
+          selectInput(ns("fg_growth"), "Functional group", choices = character()),
+          selectInput(ns("box"), "Box", choices = 0),
+          checkboxInput(ns("layer_prop"), "Layer proportion", TRUE),
+          checkboxInput(ns("box_prop"), "Box proportion", FALSE),
+          checkboxInput(ns("log_scale"), "Logarithmic", FALSE)
+        )
       ),
-      conditionalPanel(
-        "input.analysis_type == 'yoy'", ns = ns,
-        textInput(ns("new_alpha"), "New alpha", value = "", placeholder = "7.3e9"),
-        textInput(ns("new_beta"), "New beta", value = "", placeholder = "4.5e11"),
-        actionButton(ns("recalc"), "Recalculate", class = "btn btn-primary btn-sm"),
-        p(class = "ra-muted",
-          "Atlantis YOY (CODE.0 in YOY.txt) plus larvae from the Beverton–Holt curve. Recalculate redraws new larvae and new YOY from the alpha and beta you type (scientific notation is fine).")
-      ),
-      conditionalPanel(
-        "input.analysis_type == 'ssb'", ns = ns,
-        p(class = "ra-muted", "SSB.txt from the run, with observed SSB ribbons when an observations CSV is loaded.")
-      ),
-      conditionalPanel(
-        "input.analysis_type == 'growth'", ns = ns,
-        selectInput(ns("fg_growth"), "Functional group", choices = pp.cod),
-        selectInput(ns("box"), "Box", choices = seq(0, max(0, n_box - 1))),
-        checkboxInput(ns("layer_prop"), "Layer proportion", TRUE),
-        checkboxInput(ns("box_prop"), "Box proportion", FALSE),
-        checkboxInput(ns("log_scale"), "Logarithmic", FALSE)
-      )
-    ),
-    uiOutput(ns("analysis_output"))
+      conditionalPanel("input.analysis_type == 'yoy'", ns = ns,
+                       plotOutput(ns("plot_yoy"), height = "340px"),
+                       plotOutput(ns("plot_relative_yoy"), height = "340px")),
+      conditionalPanel("input.analysis_type == 'ssb'", ns = ns,
+                       plotOutput(ns("plot_ssb"), height = "480px")),
+      conditionalPanel("input.analysis_type == 'growth'", ns = ns,
+                       plotOutput(ns("plot_pp_growth"), height = "640px"))
+    )
   )
 }
 
@@ -56,13 +55,18 @@ recruitment_server <- function(id, project = NULL) {
                          token = NULL, alpha_use = NA_real_, beta_use = NA_real_,
                          fspb = NULL)
 
-    output$body <- renderUI({
-      if (is.null(project) || !isTRUE(project$ready)) {
-        return(tool_missing_card(FILE_LABELS[TOOL_REQUIREMENTS$recruitment], "Recruitment"))
-      }
-      miss <- tool_missing(project$paths, "recruitment")
-      if (length(miss)) return(tool_missing_card(miss, "Recruitment"))
-      recruitment_body_ui(session$ns, project$data$grp, rv$rec_params, rv$n_box)
+    output$banner <- renderUI(tool_banner(project, "recruitment"))
+
+    observe({
+      req(isTRUE(project$ready), project$data$grp)
+      grp <- project$data$grp
+      age_groups <- grp[grp$numcohorts > 1, ]
+      pp.pos <- with(grp, which(grouptype %in% c("MED_ZOO", "LG_ZOO", "LG_PHY", "SM_PHY",
+                                                 "PHYTOBEN", "DINOFLAG", "TURF") &
+                                isturnedon == 1))
+      update_select_keep(session, "fg_yoy", as.character(age_groups$code), input$fg_yoy)
+      update_select_keep(session, "fg_growth", as.character(grp$code[pp.pos]), input$fg_growth)
+      update_select_keep(session, "box", as.character(seq(0, max(0, rv$n_box - 1))), input$box)
     })
 
     observe({
@@ -164,21 +168,6 @@ recruitment_server <- function(id, project = NULL) {
       rv$beta_use <- parse_sci(input$new_beta)
     }, ignoreInit = TRUE)
 
-    output$analysis_output <- renderUI({
-      ns <- session$ns
-      req(input$analysis_type)
-      if (input$analysis_type == "yoy") {
-        tagList(
-          plotOutput(ns("plot_yoy"), height = "340px"),
-          plotOutput(ns("plot_relative_yoy"), height = "340px")
-        )
-      } else if (input$analysis_type == "ssb") {
-        plotOutput(ns("plot_ssb"), height = "480px")
-      } else {
-        plotOutput(ns("plot_pp_growth"), height = "640px")
-      }
-    })
-
     yoy_series <- reactive({
       dat <- project$data
       req(dat$yoy, input$fg_yoy)
@@ -212,6 +201,7 @@ recruitment_server <- function(id, project = NULL) {
     }
 
     output$plot_yoy <- renderPlot({
+      plot_or_message("Load YOY.txt to plot recruits", {
       yoy <- yoy_series()
       if (is.null(yoy)) {
         plot.new()
@@ -255,9 +245,11 @@ recruitment_server <- function(id, project = NULL) {
       )
       p <- p + theme_reactiveatlantis()
       add_obs_overlay(p, project$data$observations, input$fg_yoy, "Recruitment")
+      })
     })
 
     output$plot_relative_yoy <- renderPlot({
+      plot_or_message("Load YOY.txt to plot relative recruits", {
       yoy <- yoy_series()
       if (is.null(yoy)) {
         plot.new()
@@ -280,9 +272,11 @@ recruitment_server <- function(id, project = NULL) {
       p <- p + ggplot2::scale_color_manual(values = pal)
       p <- p + ggplot2::labs(title = "Relative YOY (YOY/YOY0)", x = "Year", y = "Relative YOY")
       p + theme_reactiveatlantis()
+      })
     })
 
     output$plot_ssb <- renderPlot({
+      plot_or_message("Load SSB.txt to plot spawning stock biomass", {
       dat <- project$data
       if (is.null(dat$ssb)) {
         plot.new()
@@ -306,9 +300,11 @@ recruitment_server <- function(id, project = NULL) {
       p <- p + ggplot2::labs(title = paste("SSB —", input$fg_yoy), x = "Year", y = "SSB")
       p <- p + theme_reactiveatlantis()
       add_obs_overlay(p, dat$observations, input$fg_yoy, "SSB")
+      })
     })
 
     output$plot_pp_growth <- renderPlot({
+      plot_or_message("Load output.nc to plot zooplankton and primary producers", {
       req(rv$pp_list, input$fg_growth, input$box)
       fg_data <- rv$pp_list[[input$fg_growth]]
       if (is.null(fg_data)) return()
@@ -347,7 +343,11 @@ recruitment_server <- function(id, project = NULL) {
         x = "Year", y = ylab
       )
       p + theme_reactiveatlantis() + ggplot2::theme(legend.position = "none")
+      })
     })
+
+    keep_outputs_alive(output, c("banner", "plot_yoy", "plot_relative_yoy",
+                                 "plot_ssb", "plot_pp_growth"))
   })
 }
 

@@ -4,47 +4,48 @@
 
 compare_ui <- function(id) {
   ns <- NS(id)
-  tagList(uiOutput(ns("body")))
-}
-
-compare_body_ui <- function(ns, grp) {
-  types <- c("All", sort(unique(as.character(grp$grouptype))))
-  codes <- as.character(grp$code[grp$numcohorts > 1 &
-                                 !grp$grouptype %in% c("PWN", "PRAWNS", "PRAWN", "CEP",
-                                                       "MOB_EP_OTHER", "SEAGRASS", "CORAL",
-                                                       "MANGROVE", "MANGROVES", "SPONGE")])
-  layout_sidebar(
-    sidebar = sidebar(
-      open = "open",
-      width = 280,
-      selectInput(ns("group_type"), "Group type", choices = types, selected = "All"),
-      textInput(ns("search"), "Search code or name", placeholder = "COD, haddock…"),
-      checkboxInput(ns("relative"), "Relative to initial (Bt/B0)", FALSE),
-      checkboxInput(ns("show_band"), "0.5–1.5 acceptable band", TRUE),
-      hr(),
-      selectInput(ns("view"), "View",
-                  choices = c("Small multiples" = "facets",
-                              "One group, totals" = "total",
-                              "By age class" = "age",
-                              "Age structure (bars)" = "age_bars")),
-      conditionalPanel(
-        "input.view == 'total'", ns = ns,
-        selectInput(ns("fg_total"), "Functional group", choices = as.character(grp$code)),
-        checkboxInput(ns("show_biomass"), "Biomass", TRUE),
-        checkboxInput(ns("show_numbers"), "Numbers", FALSE),
-        checkboxInput(ns("scaled"), "Scaled", TRUE),
-        checkboxInput(ns("limit_axis"), "Limit axis", TRUE)
+  tagList(
+    uiOutput(ns("banner")),
+    layout_sidebar(
+      sidebar = sidebar(
+        open = "open",
+        width = 280,
+        selectInput(ns("group_type"), "Group type", choices = "All"),
+        textInput(ns("search"), "Search code or name", placeholder = "COD, haddock…"),
+        checkboxInput(ns("relative"), "Relative to initial (Bt/B0)", FALSE),
+        checkboxInput(ns("show_band"), "0.5–1.5 acceptable band", TRUE),
+        hr(),
+        selectInput(ns("view"), "View",
+                    choices = c("Small multiples" = "facets",
+                                "One group, totals" = "total",
+                                "By age class" = "age",
+                                "Age structure (bars)" = "age_bars")),
+        conditionalPanel(
+          "input.view == 'total'", ns = ns,
+          selectInput(ns("fg_total"), "Functional group", choices = character()),
+          checkboxInput(ns("show_biomass"), "Biomass", TRUE),
+          checkboxInput(ns("show_numbers"), "Numbers", FALSE),
+          checkboxInput(ns("scaled"), "Scaled", TRUE),
+          checkboxInput(ns("limit_axis"), "Limit axis", TRUE)
+        ),
+        conditionalPanel(
+          "input.view == 'age' || input.view == 'age_bars'", ns = ns,
+          selectInput(ns("fg_age"), "Functional group", choices = character()),
+          checkboxInput(ns("show_biomass_age"), "Biomass", TRUE),
+          checkboxInput(ns("show_numbers_age"), "Numbers", FALSE),
+          checkboxInput(ns("scaled_age"), "Scaled", TRUE),
+          checkboxInput(ns("limit_axis_age"), "Limit axis", TRUE)
+        )
       ),
-      conditionalPanel(
-        "input.view == 'age' || input.view == 'age_bars'", ns = ns,
-        selectInput(ns("fg_age"), "Functional group", choices = codes),
-        checkboxInput(ns("show_biomass_age"), "Biomass", TRUE),
-        checkboxInput(ns("show_numbers_age"), "Numbers", FALSE),
-        checkboxInput(ns("scaled_age"), "Scaled", TRUE),
-        checkboxInput(ns("limit_axis_age"), "Limit axis", TRUE)
-      )
-    ),
-    uiOutput(ns("plot_host"))
+      conditionalPanel("input.view == 'facets'", ns = ns,
+                       plotOutput(ns("plot_facets_gg"), height = "760px")),
+      conditionalPanel("input.view == 'total'", ns = ns,
+                       plotOutput(ns("plot_total"), height = "560px")),
+      conditionalPanel("input.view == 'age'", ns = ns,
+                       plotOutput(ns("plot_age"), height = "640px")),
+      conditionalPanel("input.view == 'age_bars'", ns = ns,
+                       plotOutput(ns("plot_age_bars"), height = "640px"))
+    )
   )
 }
 
@@ -52,13 +53,15 @@ compare_server <- function(id, project = NULL) {
   moduleServer(id, function(input, output, session) {
     rv <- reactiveValues(t_biomass = NULL, rel_bio = NULL, built = FALSE, token = NULL)
 
-    output$body <- renderUI({
-      if (is.null(project) || !isTRUE(project$ready)) {
-        return(tool_missing_card(FILE_LABELS[TOOL_REQUIREMENTS$compare], "Compare"))
-      }
-      miss <- tool_missing(project$paths, "compare")
-      if (length(miss)) return(tool_missing_card(miss, "Compare"))
-      compare_body_ui(session$ns, project$data$grp)
+    output$banner <- renderUI(tool_banner(project, "compare"))
+
+    observe({
+      req(isTRUE(project$ready), project$data$grp)
+      grp <- project$data$grp
+      types <- c("All", sort(unique(as.character(grp$grouptype))))
+      update_select_keep(session, "group_type", types, input$group_type)
+      update_select_keep(session, "fg_total", fg_select_choices(grp), input$fg_total)
+      update_select_keep(session, "fg_age", age_select_choices(grp), input$fg_age)
     })
 
     observe({
@@ -87,7 +90,10 @@ compare_server <- function(id, project = NULL) {
                                           "SEAGRASS", "CORAL", "MANGROVE", "MANGROVES", "SPONGE"), ]
 
       age.cur.bio <- if (nrow(age.grp) > 0) bio.age(age.grp, nc_cur, "Current", mg2t, x.cn, inf_box, Time) else NULL
-      pool.cur.bio <- bio.pool(pol.grp, nc_cur, "Current", mg2t, x.cn, inf_box, Time)
+      pool.cur.bio <- if (nrow(pol.grp) > 0) {
+        tryCatch(bio.pool(pol.grp, nc_cur, "Current", mg2t, xcn, inf_box, Time),
+                 error = function(e) NULL)
+      } else NULL
       old.bio <- NULL
       Time_old <- NULL
       if (!is.null(dat$nc_old)) {
@@ -127,19 +133,12 @@ compare_server <- function(id, project = NULL) {
       df
     })
 
-    output$plot_host <- renderUI({
-      ns <- session$ns
-      view <- input$view
-      if (is.null(view) || view == "facets") {
-        if (requireNamespace("plotly", quietly = TRUE)) plotly::plotlyOutput(ns("plot_facets"), height = "760px")
-        else plotOutput(ns("plot_facets_gg"), height = "760px")
-      } else if (view == "total") {
-        plotOutput(ns("plot_total"), height = "560px")
-      } else if (view == "age_bars") {
-        plotOutput(ns("plot_age_bars"), height = "640px")
-      } else {
-        plotOutput(ns("plot_age"), height = "640px")
+    output$plot_facets_gg <- renderPlot({
+      if (!isTRUE(project$ready) || is.null(rv$t_biomass)) {
+        plot_message("Load a run to compare biomass")
+        return(invisible(NULL))
       }
+      make_facet_plot()
     })
 
     make_facet_plot <- function() {
@@ -185,15 +184,8 @@ compare_server <- function(id, project = NULL) {
       p
     }
 
-    output$plot_facets_gg <- renderPlot({ make_facet_plot() })
-    if (requireNamespace("plotly", quietly = TRUE)) {
-      output$plot_facets <- plotly::renderPlotly({
-        p <- make_facet_plot()
-        ra_ggplotly(p, n_series = length(unique(filtered()$FG)))
-      })
-    }
-
     output$plot_total <- renderPlot({
+      plot_or_message("Load a run and pick a functional group", {
       dat <- project$data
       req(dat$nc_out, input$fg_total, dat$inf_box, dat$time_dates)
       mg2t <- 0.00000002
@@ -220,9 +212,11 @@ compare_server <- function(id, project = NULL) {
         }
         p
       } else p
+      })
     })
 
     output$plot_age <- renderPlot({
+      plot_or_message("Load a run and pick an age-structured group", {
       dat <- project$data
       req(dat$nc_out, input$fg_age, dat$inf_box, dat$time_dates)
       mg2t <- 0.00000002
@@ -247,9 +241,11 @@ compare_server <- function(id, project = NULL) {
         }
         p
       } else p
+      })
     })
 
     output$plot_age_bars <- renderPlot({
+      plot_or_message("Load a run and pick an age-structured group", {
       dat <- project$data
       req(dat$nc_out, input$fg_age, dat$inf_box, dat$time_dates)
       mg2t <- 0.00000002
@@ -284,7 +280,11 @@ compare_server <- function(id, project = NULL) {
       p <- p + ggplot2::labs(title = paste("Age structure —", input$fg_age),
                              x = "Year", y = ylab)
       p + theme_reactiveatlantis()
+      })
     })
+
+    keep_outputs_alive(output, c("banner", "plot_facets_gg", "plot_total",
+                                 "plot_age", "plot_age_bars"))
   })
 }
 

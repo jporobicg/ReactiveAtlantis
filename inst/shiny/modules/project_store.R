@@ -339,6 +339,11 @@ load_project <- function(paths) {
   } else if (path_ok(paths$bgm)) {
     out$bgm_path <- paths$bgm
   }
+  if (is.null(out$inf_box) && !is.null(out$nc_out)) {
+    n_box <- if (!is.null(out$nc_out$dim$b)) out$nc_out$dim$b$len else 1
+    n_z <- if (!is.null(out$nc_out$dim$z)) out$nc_out$dim$z$len else 2
+    out$inf_box <- dummy_inf_box(n_box, n_z)
+  }
 
   out
 }
@@ -358,6 +363,7 @@ project_sidebar_ui <- function(id) {
              "Prefer a local folder. Uploads are optional and some browsers stop around 500 MB; a North Sea output.nc is larger than that."),
     shiny::textAreaInput(ns("extra_folders"), "Other run folders (one per line)",
                          rows = 3, placeholder = "/path/to/run2\n/path/to/run3"),
+    shiny::uiOutput(ns("scan_note")),
     shiny::h6("Loaded files"),
     shiny::uiOutput(ns("file_checklist")),
     shiny::h6("Tools"),
@@ -397,7 +403,8 @@ project_server <- function(id) {
       ready = FALSE,
       paths = empty_paths(),
       data = NULL,
-      ensemble = NULL
+      ensemble = NULL,
+      scan_note = NULL
     )
 
     collect_uploads <- function() {
@@ -453,6 +460,8 @@ project_server <- function(id) {
       rv$data <- loaded
       rv$ensemble <- build_ensemble(loaded, folder)
       rv$ready <- TRUE
+      n_found <- sum(vapply(paths, path_ok, logical(1)))
+      rv$scan_note <- paste0("Loaded ", n_found, " of ", length(FILE_ROLES), " file roles.")
     }
 
     auto_done <- FALSE
@@ -474,6 +483,8 @@ project_server <- function(id) {
       detected <- detect_project_files(folder)
       n_found <- sum(vapply(detected, path_ok, logical(1)))
       rv$paths <- merge_paths(detected, collect_uploads())
+      rv$scan_note <- paste0("Scan: ", n_found, " of ", length(FILE_ROLES),
+                             " file roles found. Click Load run to open them.")
       shiny::showNotification(paste("Found", n_found, "Atlantis files in the folder."),
                               type = "message", duration = 5)
     }, ignoreInit = TRUE)
@@ -497,6 +508,8 @@ project_server <- function(id) {
       rv$data <- loaded
       rv$ensemble <- build_ensemble(loaded, folder)
       rv$ready <- !is.null(loaded$grp)
+      n_found <- sum(vapply(paths, path_ok, logical(1)))
+      rv$scan_note <- paste0("Loaded ", n_found, " of ", length(FILE_ROLES), " file roles.")
       msg <- if (length(loaded$errors)) {
         paste("Loaded with notes:", paste(loaded$errors, collapse = "; "))
       } else {
@@ -504,6 +517,12 @@ project_server <- function(id) {
       }
       shiny::showNotification(msg, type = if (length(loaded$errors)) "warning" else "message", duration = 6)
     }, ignoreInit = TRUE)
+
+    output$scan_note <- shiny::renderUI({
+      note <- rv$scan_note
+      if (is.null(note) || !nzchar(note)) return(NULL)
+      shiny::tags$p(class = "ra-scan-note", note)
+    })
 
     output$file_checklist <- shiny::renderUI({
       paths <- rv$paths
@@ -513,9 +532,13 @@ project_server <- function(id) {
           ok <- path_ok(paths[[role]])
           shiny::tags$li(
             class = if (ok) "ok" else "missing",
-            title = if (ok) paths[[role]] else paste("Not loaded:", FILE_LABELS[[role]]),
-            shiny::span(class = "ra-dot"),
-            FILE_LABELS[[role]]
+            title = if (ok) paths[[role]] else paste("Not provided:", FILE_LABELS[[role]]),
+            shiny::span(
+              class = "ra-dot",
+              `aria-label` = if (ok) "loaded" else "not provided"
+            ),
+            FILE_LABELS[[role]],
+            if (!ok) shiny::span(class = "ra-need", "not provided")
           )
         })
       )
@@ -540,6 +563,8 @@ project_server <- function(id) {
         })
       )
     })
+
+    keep_outputs_alive(output, c("scan_note", "file_checklist", "tool_checklist"))
 
     rv
   })

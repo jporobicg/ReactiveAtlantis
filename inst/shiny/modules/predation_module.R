@@ -4,41 +4,45 @@
 
 predation_ui <- function(id) {
   ns <- NS(id)
-  tagList(uiOutput(ns("body")))
+  tagList(
+    uiOutput(ns("banner")),
+    layout_sidebar(
+      sidebar = sidebar(
+        width = 280, open = "open",
+        selectInput(ns("fg"), "Functional group", choices = character()),
+        selectInput(ns("stock"), "Stock", choices = 0),
+        numericInput(ns("threshold"), "Diet threshold", 0.001, min = 0, max = 1, step = 0.001),
+        numericInput(ns("top_n"), "Top N prey (rest = Other)", 8, min = 3, max = 20, step = 1),
+        checkboxInput(ns("scaled"), "Scale to 1", TRUE),
+        sliderInput(ns("time_age"), "Age-diet time (days)", min = 0, max = 1, value = 0, step = 1)
+      ),
+      plotOutput(ns("plot_pred_gg"), height = "360px"),
+      plotOutput(ns("plot_prey_gg"), height = "360px"),
+      plotOutput(ns("plot_age"), height = "280px")
+    )
+  )
 }
 
 predation_server <- function(id, project = NULL) {
   moduleServer(id, function(input, output, session) {
 
-    output$body <- renderUI({
-      if (is.null(project) || !isTRUE(project$ready)) {
-        return(tool_missing_card(FILE_LABELS[TOOL_REQUIREMENTS$predation], "Predation"))
-      }
-      miss <- tool_missing(project$paths, "predation")
-      if (length(miss)) return(tool_missing_card(miss, "Predation"))
+    output$banner <- renderUI(tool_banner(project, "predation"))
+
+    observe({
+      req(isTRUE(project$ready), project$data$grp)
       dat <- project$data
-      codes <- as.character(dat$grp$code)
+      update_select_keep(session, "fg", fg_select_choices(dat$grp, on_only = FALSE), input$fg)
       stocks <- if (!is.null(dat$diet_time) && "Stock" %in% names(dat$diet_time)) {
         unique(dat$diet_time$Stock)
       } else 0
+      update_select_keep(session, "stock", as.character(stocks), input$stock)
       times <- if (!is.null(dat$diet_full)) sort(unique(dat$diet_full$Time)) else 0
-      ns <- session$ns
-      layout_sidebar(
-        sidebar = sidebar(
-          width = 280, open = "open",
-          selectInput(ns("fg"), "Functional group", choices = codes),
-          selectInput(ns("stock"), "Stock", choices = stocks),
-          numericInput(ns("threshold"), "Diet threshold", 0.001, min = 0, max = 1, step = 0.001),
-          numericInput(ns("top_n"), "Top N prey (rest = Other)", 8, min = 3, max = 20, step = 1),
-          checkboxInput(ns("scaled"), "Scale to 1", TRUE),
-          sliderInput(ns("time_age"), "Age-diet time (days)",
-                      min = min(times), max = max(times), value = min(times),
-                      step = if (length(times) > 1) min(diff(times)) else 1)
-        ),
-        uiOutput(ns("pred_panel")),
-        uiOutput(ns("prey_panel")),
-        uiOutput(ns("age_panel"))
-      )
+      step <- if (length(times) > 1) min(diff(times)) else 1
+      shiny::updateSliderInput(session, "time_age",
+                               min = min(times), max = max(times),
+                               value = keep_numeric(input$time_age, min(times), max(times),
+                                                    min(times)),
+                               step = step)
     })
 
     new_bio <- reactive({
@@ -75,26 +79,6 @@ predation_server <- function(id, project = NULL) {
       df
     }
 
-    output$pred_panel <- renderUI({
-      ns <- session$ns
-      df <- predator_df()
-      if (is.null(df) || nrow(df) == 0) {
-        return(div(class = "alert alert-warning", "This functional group has no prey diet recorded."))
-      }
-      if (requireNamespace("plotly", quietly = TRUE)) plotly::plotlyOutput(ns("plot_pred"), height = "360px")
-      else plotOutput(ns("plot_pred_gg"), height = "360px")
-    })
-
-    output$prey_panel <- renderUI({
-      ns <- session$ns
-      df <- prey_df()
-      if (is.null(df) || nrow(df) == 0) {
-        return(div(class = "alert alert-warning", "This functional group has no predators."))
-      }
-      if (requireNamespace("plotly", quietly = TRUE)) plotly::plotlyOutput(ns("plot_prey"), height = "360px")
-      else plotOutput(ns("plot_prey_gg"), height = "360px")
-    })
-
     pred_plot <- reactive({
       df <- to_year(predator_df())
       req(nrow(df) > 0)
@@ -125,22 +109,25 @@ predation_server <- function(id, project = NULL) {
       p + theme_reactiveatlantis()
     })
 
-    output$plot_pred_gg <- renderPlot({ pred_plot() })
-    output$plot_prey_gg <- renderPlot({ prey_plot() })
-    if (requireNamespace("plotly", quietly = TRUE)) {
-      output$plot_pred <- plotly::renderPlotly({ ra_ggplotly(pred_plot(), n_series = 12) })
-      output$plot_prey <- plotly::renderPlotly({ ra_ggplotly(prey_plot(), n_series = 12) })
-    }
-
-    output$age_panel <- renderUI({
-      dat <- project$data
-      req(dat$diet_full, input$fg, input$time_age)
-      df <- age_diet_slice(dat$diet_full, input$fg, input$stock, input$time_age, input$threshold)
-      if (is.null(df) || nrow(df) == 0) return(NULL)
-      plotOutput(session$ns("plot_age"), height = "280px")
+    output$plot_pred_gg <- renderPlot({
+      df <- tryCatch(predator_df(), error = function(e) NULL)
+      if (is.null(df) || nrow(df) == 0) {
+        plot_message("This functional group has no prey diet recorded.")
+        return(invisible(NULL))
+      }
+      pred_plot()
+    })
+    output$plot_prey_gg <- renderPlot({
+      df <- tryCatch(prey_df(), error = function(e) NULL)
+      if (is.null(df) || nrow(df) == 0) {
+        plot_message("This functional group has no predators.")
+        return(invisible(NULL))
+      }
+      prey_plot()
     })
 
     output$plot_age <- renderPlot({
+      plot_or_message("Load DietCheck.txt to plot diet by age", {
       dat <- project$data
       req(dat$diet_full, input$fg, input$time_age)
       df <- age_diet_slice(dat$diet_full, input$fg, input$stock, input$time_age, input$threshold)
@@ -153,7 +140,10 @@ predation_server <- function(id, project = NULL) {
       p <- p + ggplot2::labs(title = "Diet by age at the selected time",
                              x = "Age class", y = "Diet proportion")
       p + theme_reactiveatlantis()
+      })
     })
+
+    keep_outputs_alive(output, c("banner", "plot_pred_gg", "plot_prey_gg", "plot_age"))
   })
 }
 

@@ -4,40 +4,45 @@
 
 foodweb_ui <- function(id) {
   ns <- NS(id)
-  tagList(uiOutput(ns("body")))
+  tagList(
+    uiOutput(ns("banner")),
+    layout_sidebar(
+      sidebar = sidebar(
+        width = 280, open = "open",
+        selectInput(ns("focal_fg"), "Focal group", choices = "All"),
+        numericInput(ns("max_connections"), "Max trophic connections", 4, min = 1, max = 10),
+        numericInput(ns("min_proportion"), "Min diet proportion", 0.01, min = 0.001, max = 1, step = 0.001),
+        sliderInput(ns("time_step"), "Time (days)", min = 0, max = 1, value = 0, step = 1),
+        textOutput(ns("time_step_label")),
+        selectInput(ns("stock"), "Stock", choices = 0)
+      ),
+      plotOutput(ns("network_gg"), height = "640px"),
+      h4("Trophic levels"),
+      DT::dataTableOutput(ns("trophic_table"))
+    )
+  )
 }
 
 foodweb_server <- function(id, project = NULL) {
   moduleServer(id, function(input, output, session) {
 
-    output$body <- renderUI({
-      if (is.null(project) || !isTRUE(project$ready)) {
-        return(tool_missing_card(FILE_LABELS[TOOL_REQUIREMENTS$foodweb], "Food web"))
-      }
-      miss <- tool_missing(project$paths, "foodweb")
-      if (length(miss)) return(tool_missing_card(miss, "Food web"))
+    output$banner <- renderUI(tool_banner(project, "foodweb"))
+
+    observe({
+      req(isTRUE(project$ready), project$data$grp, project$data$diet_time)
       dat <- project$data
       times <- sort(unique(dat$diet_time$Time))
       stocks <- if ("Stock" %in% names(dat$diet_time)) unique(dat$diet_time$Stock) else 0
       grp <- dat$grp
       code.fg <- grp$code[if ("ispredator" %in% names(grp)) grp$ispredator > 0 else TRUE]
-      ns <- session$ns
-      layout_sidebar(
-        sidebar = sidebar(
-          width = 280, open = "open",
-          selectInput(ns("focal_fg"), "Focal group", choices = c("All", as.character(code.fg))),
-          numericInput(ns("max_connections"), "Max trophic connections", 4, min = 1, max = 10),
-          numericInput(ns("min_proportion"), "Min diet proportion", 0.01, min = 0.001, max = 1, step = 0.001),
-          sliderInput(ns("time_step"), "Time (days)",
-                      min = min(times), max = max(times), value = times[1],
-                      step = if (length(times) > 1) min(diff(times)) else 1),
-          textOutput(ns("time_step_label")),
-          selectInput(ns("stock"), "Stock", choices = stocks)
-        ),
-        uiOutput(ns("net_host")),
-        h4("Trophic levels"),
-        DT::dataTableOutput(ns("trophic_table"))
-      )
+      update_select_keep(session, "focal_fg", c("All", as.character(code.fg)), input$focal_fg)
+      update_select_keep(session, "stock", as.character(stocks), input$stock)
+      step <- if (length(times) > 1) min(diff(times)) else 1
+      shiny::updateSliderInput(session, "time_step",
+                               min = min(times), max = max(times),
+                               value = keep_numeric(input$time_step, min(times), max(times),
+                                                    times[1]),
+                               step = step)
     })
 
     output$time_step_label <- renderText({
@@ -86,15 +91,6 @@ foodweb_server <- function(id, project = NULL) {
       trophic.lvl(prey_data(), grp)
     })
 
-    output$net_host <- renderUI({
-      ns <- session$ns
-      if (requireNamespace("visNetwork", quietly = TRUE)) {
-        visNetwork::visNetworkOutput(ns("network"), height = "640px")
-      } else {
-        plotOutput(ns("network_gg"), height = "640px")
-      }
-    })
-
     output$network <- if (requireNamespace("visNetwork", quietly = TRUE)) {
       visNetwork::renderVisNetwork({
         TL <- trophic_data()
@@ -129,18 +125,29 @@ foodweb_server <- function(id, project = NULL) {
     } else NULL
 
     output$network_gg <- renderPlot({
-      plot.tlvl(trophic_data(), prey_data(), input$focal_fg, NULL,
-                get_foodweb_colors(), project$data$fg_palette)
+      plot_or_message("Load DietCheck.txt to draw the food web", {
+        if (!isTRUE(project$ready) || is.null(project$data$diet_time)) {
+          plot_message("Load DietCheck.txt to draw the food web")
+          return(invisible(NULL))
+        }
+        plot.tlvl(trophic_data(), prey_data(), input$focal_fg, NULL,
+                  get_foodweb_colors(), project$data$fg_palette)
+      })
     })
 
     output$trophic_table <- DT::renderDataTable({
-      req(trophic_data())
-      table <- with(trophic_data(), data.frame(
+      td <- tryCatch(trophic_data(), error = function(e) NULL)
+      if (is.null(td) || nrow(td) == 0) {
+        return(ra_datatable(data.frame(Note = "Load DietCheck.txt to list trophic levels.")))
+      }
+      table <- with(td, data.frame(
         `Functional Group` = FG,
         `Trophic Level` = round(Tlevel, 2)
       ))
-      DT::datatable(table, options = list(pageLength = 15, dom = "tip"), rownames = FALSE)
+      ra_datatable(table, options = list(pageLength = 15, dom = "tip"))
     })
+
+    keep_outputs_alive(output, c("banner", "time_step_label", "network_gg", "trophic_table"))
   })
 }
 

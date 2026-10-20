@@ -4,34 +4,27 @@
 
 mortality_ui <- function(id) {
   ns <- NS(id)
-  tagList(uiOutput(ns("body")))
-}
-
-mortality_body_ui <- function(ns, grp) {
-  labels <- if ("longname" %in% names(grp)) {
-    setNames(as.character(grp$code), paste(grp$code, grp$longname, sep = " — "))
-  } else {
-    as.character(grp$code)
-  }
-  layout_sidebar(
-    sidebar = sidebar(
-      width = 280, open = "open",
-      selectInput(ns("fg"), "Functional group", choices = labels)
-    ),
-    uiOutput(ns("plot_host"))
+  tagList(
+    uiOutput(ns("banner")),
+    layout_sidebar(
+      sidebar = sidebar(
+        width = 280, open = "open",
+        selectInput(ns("fg"), "Functional group", choices = character())
+      ),
+      plotOutput(ns("mortality_plot_gg"), height = "720px")
+    )
   )
 }
 
 mortality_server <- function(id, project = NULL) {
   moduleServer(id, function(input, output, session) {
 
-    output$body <- renderUI({
-      if (is.null(project) || !isTRUE(project$ready)) {
-        return(tool_missing_card(FILE_LABELS[TOOL_REQUIREMENTS$mortality], "Mortality"))
-      }
-      miss <- tool_missing(project$paths, "mortality")
-      if (length(miss)) return(tool_missing_card(miss, "Mortality"))
-      mortality_body_ui(session$ns, project$data$grp)
+    output$banner <- renderUI(tool_banner(project, "mortality"))
+
+    observe({
+      req(isTRUE(project$ready), project$data$grp)
+      update_select_keep(session, "fg", fg_select_choices(project$data$grp, on_only = FALSE),
+                         input$fg)
     })
 
     mort_data <- reactive({
@@ -44,18 +37,22 @@ mortality_server <- function(id, project = NULL) {
       calc_mort(dat$spe_mort, dat$pred_mort, FG)
     })
 
-    output$plot_host <- renderUI({
-      ns <- session$ns
-      if (requireNamespace("plotly", quietly = TRUE)) {
-        plotly::plotlyOutput(ns("mortality_plot"), height = "720px")
-      } else {
-        plotOutput(ns("mortality_plot_gg"), height = "720px")
-      }
+    output$mortality_plot_gg <- renderPlot({
+      plot_or_message("Load SpecificMort.txt to plot mortality", {
+        if (!isTRUE(project$ready)) {
+          plot_message("Load SpecificMort.txt to plot mortality")
+          return(invisible(NULL))
+        }
+        make_plot()
+      })
     })
 
     make_plot <- function() {
       mort <- mort_data()
-      req(!is.null(mort), nrow(mort) > 0)
+      if (is.null(mort) || nrow(mort) == 0) {
+        plot_message("No mortality columns for this group in SpecificMort.txt")
+        return(invisible(NULL))
+      }
       origin <- project$data$origin
       mort$Time <- days_as_date(mort$Time, origin)
       long <- reshape2::melt(mort, id.var = c("Time", "Mtype"))
@@ -73,13 +70,7 @@ mortality_server <- function(id, project = NULL) {
       p + theme_reactiveatlantis()
     }
 
-    output$mortality_plot_gg <- renderPlot({ make_plot() })
-    if (requireNamespace("plotly", quietly = TRUE)) {
-      output$mortality_plot <- plotly::renderPlotly({
-        n_age <- length(unique(reshape2::melt(mort_data(), id.var = c("Time", "Mtype"))$variable))
-        ra_ggplotly(make_plot(), n_series = n_age)
-      })
-    }
+    keep_outputs_alive(output, c("banner", "mortality_plot_gg"))
   })
 }
 
