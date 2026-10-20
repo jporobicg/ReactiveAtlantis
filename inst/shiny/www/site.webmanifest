@@ -1,0 +1,14 @@
+{
+  "name": "ReactiveAtlantis",
+  "short_name": "ReactiveAtlantis",
+  "icons": [
+    {
+      "src": "app-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    }
+  ],
+  "theme_color": "#0B3C5D",
+  "background_color": "#F7F4EC",
+  "display": "standalone"
+}

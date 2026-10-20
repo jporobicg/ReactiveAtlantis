@@ -6,7 +6,6 @@ library(shiny)
 library(bslib)
 library(ggplot2)
 library(ncdf4)
-library(tidyverse)
 library(stringr)
 library(data.table)
 library(RColorBrewer)
@@ -14,143 +13,101 @@ library(reshape2)
 library(plotrix)
 library(DT)
 library(dplyr)
-library(plotly)
 library(scales)
 library(proj4)
 library(tidyr)
 library(stats)
 
+if (requireNamespace("plotly", quietly = TRUE)) library(plotly)
+if (requireNamespace("visNetwork", quietly = TRUE)) library(visNetwork)
+
+max_upload_mb <- getOption("reactiveatlantis.max_upload_mb", default = 8192)
+requested_upload <- as.numeric(max_upload_mb) * 1024^2
+current_upload <- suppressWarnings(as.numeric(getOption("shiny.maxRequestSize")))
+options(shiny.maxRequestSize = max(c(requested_upload, current_upload), na.rm = TRUE))
+
 app_dir <- getwd()
+source(file.path(app_dir, "modules", "theme.R"))
+source(file.path(app_dir, "modules", "ui_helpers.R"))
 source(file.path(app_dir, "modules", "colors.R"))
 source(file.path(app_dir, "modules", "utils.R"))
-source(file.path(app_dir, "modules", "compare_module.R"))
+source(file.path(app_dir, "modules", "catch_module.R"))
 source(file.path(app_dir, "modules", "predation_module.R"))
 source(file.path(app_dir, "modules", "foodweb_module.R"))
 source(file.path(app_dir, "modules", "recruitment_module.R"))
 source(file.path(app_dir, "modules", "growth_module.R"))
-source(file.path(app_dir, "modules", "catch_module.R"))
 source(file.path(app_dir, "modules", "feeding_module.R"))
 source(file.path(app_dir, "modules", "mortality_module.R"))
+source(file.path(app_dir, "modules", "compare_module.R"))
+source(file.path(app_dir, "modules", "project_store.R"))
+source(file.path(app_dir, "modules", "nc_cache.R"))
+source(file.path(app_dir, "modules", "analysis_helpers.R"))
+source(file.path(app_dir, "modules", "overview_module.R"))
+source(file.path(app_dir, "modules", "spatial_module.R"))
+source(file.path(app_dir, "modules", "consumption_module.R"))
+source(file.path(app_dir, "modules", "physics_module.R"))
+source(file.path(app_dir, "modules", "ensemble_module.R"))
 
-## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
-## ~          Application Theme Setup           ~ ##
-## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
-
-app_theme <- bs_theme(
-  version = 5,
-  bg = "#ffffff",
-  fg = "#2c3e50",
-  primary = "#3498db",
-  secondary = "#95a5a6",
-  success = "#27ae60",
-  info = "#3498db",
-  warning = "#f39c12",
-  danger = "#e74c3c",
-  base_font = font_google("Source Sans Pro"),
-  heading_font = font_google("Source Sans Pro"),
-  code_font = font_google("Fira Code"),
-  "navbar-bg" = "#2c3e50",
-  "navbar-fg" = "#ecf0f1"
+ra_navbar_title <- tags$span(
+  class = "ra-brand",
+  tags$img(
+    src = "logo-transparent-128.png",
+    alt = "ReactiveAtlantis",
+    class = "ra-brand-logo"
+  ),
+  tags$span("ReactiveAtlantis", class = "ra-brand-text")
 )
-
-## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
-## ~                  UI Layout                  ~ ##
-## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
 
 ui <- page_navbar(
-  title = "ReactiveAtlantis",
-  theme = app_theme,
+  title = ra_navbar_title,
+  window_title = "ReactiveAtlantis",
+  theme = ra_theme(),
   fillable = FALSE,
-  header = tags$head(tags$link(rel = "stylesheet", type = "text/css", href = "custom.css")),
-  
-  nav_panel(
-    title = "Compare Outputs",
-    compare_ui("compare")
+  header = tags$head(
+    tags$link(rel = "stylesheet", type = "text/css", href = "custom.css"),
+    tags$link(rel = "icon", type = "image/x-icon", href = "favicon.ico"),
+    tags$link(rel = "icon", type = "image/png", sizes = "32x32", href = "app-icon-32.png"),
+    tags$link(rel = "apple-touch-icon", sizes = "180x180", href = "app-icon-180.png"),
+    tags$link(rel = "manifest", href = "site.webmanifest")
   ),
-  
-  nav_panel(
-    title = "Predation",
-    predation_ui("predation")
+  sidebar = sidebar(
+    title = "Run",
+    width = 340,
+    open = "open",
+    project_sidebar_ui("project")
   ),
-  
-  nav_panel(
-    title = "Food Web",
-    foodweb_ui("foodweb")
-  ),
-  
-  nav_panel(
-    title = "Recruitment",
-    recruitment_ui("recruitment")
-  ),
-  
-  nav_panel(
-    title = "Growth",
-    growth_ui("growth")
-  ),
-  
-  nav_panel(
-    title = "Catch Analysis",
-    catch_ui("catch")
-  ),
-  
-  nav_panel(
-    title = "Feeding Matrix",
-    feeding_ui("feeding")
-  ),
-  
-  nav_panel(
-    title = "Mortality",
-    mortality_ui("mortality")
-  ),
-  
-  nav_panel(
-    title = "About",
-    card(
-      card_header("About ReactiveAtlantis"),
-      card_body(
-        h3("Calibration Tools for Atlantis Ecosystem Models"),
-        p("ReactiveAtlantis provides integrated tools for tuning, parameterization, 
-          and analysis of processes commonly modified during Atlantis model calibration."),
-        hr(),
-        h4("Available Tools"),
-        tags$ul(
-          tags$li(strong("Compare Outputs:"), " Visualize and compare biomass, abundance, 
-                  and nitrogen between simulation outputs."),
-          tags$li(strong("Predation:"), " Analyze predator-prey interactions and 
-                  predation pressure through time."),
-          tags$li(strong("Food Web:"), " Explore food web structure and calculate 
-                  trophic levels."),
-          tags$li(strong("Recruitment:"), " Estimate recruitment for age-structured 
-                  functional groups."),
-          tags$li(strong("Growth:"), " Analyze limitation factors for primary producer growth."),
-          tags$li(strong("Catch Analysis:"), " Visualize harvest outputs and perform 
-                  model skill assessment."),
-          tags$li(strong("Feeding Matrix:"), " Calibrate predator-prey availability 
-                  matrices."),
-          tags$li(strong("Mortality:"), " Explore natural, fishing, and predation mortality.")
-        ),
-        hr(),
-        p(class = "text-muted", "Version 0.0.2.0")
-      )
-    )
-  )
+  nav_spacer(),
+  nav_item(input_dark_mode(id = "color_mode", mode = "light")),
+  nav_panel("Overview", overview_ui("overview")),
+  nav_panel("Compare", compare_ui("compare")),
+  nav_panel("Spatial", spatial_ui("spatial")),
+  nav_panel("Consumption", consumption_ui("consumption")),
+  nav_panel("Physics", physics_ui("physics")),
+  nav_panel("Multi-run", ensemble_ui("ensemble")),
+  nav_panel("Predation", predation_ui("predation")),
+  nav_panel("Food web", foodweb_ui("foodweb")),
+  nav_panel("Recruitment", recruitment_ui("recruitment")),
+  nav_panel("Growth", growth_ui("growth")),
+  nav_panel("Catch", catch_ui("catch")),
+  nav_panel("Feeding", feeding_ui("feeding")),
+  nav_panel("Mortality", mortality_ui("mortality"))
 )
 
-## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
-## ~                Server Logic                 ~ ##
-## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
-
 server <- function(input, output, session) {
-  
-  compare_server("compare")
-  predation_server("predation")
-  foodweb_server("foodweb")
-  recruitment_server("recruitment")
-  growth_server("growth")
-  catch_server("catch")
-  feeding_server("feeding")
-  mortality_server("mortality")
-  
+  project <- project_server("project")
+  overview_server("overview", project)
+  compare_server("compare", project)
+  spatial_server("spatial", project)
+  consumption_server("consumption", project)
+  physics_server("physics", project)
+  ensemble_server("ensemble", project)
+  predation_server("predation", project)
+  foodweb_server("foodweb", project)
+  recruitment_server("recruitment", project)
+  growth_server("growth", project)
+  catch_server("catch", project)
+  feeding_server("feeding", project)
+  mortality_server("mortality", project)
 }
 
 shinyApp(ui, server)

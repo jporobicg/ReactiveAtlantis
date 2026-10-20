@@ -1,0 +1,16 @@
+Code,Index,Name,IsRec,NumSubFleets
+dtrawl     ,1,demersal trawls and seines,0,0
+btrawl     ,2,Beam trawls               ,0,0
+industrial ,3,industrial fishery        ,0,0
+ptrawl     ,4,pelagic trawls and seines ,0,0
+gdnets     ,5,Drift and fixed nets      ,0,0
+neptrawl   ,6,Nephrops                  ,0,0
+lines      ,7,Gears uing hooks          ,0,0
+btrawlcsh  ,8,Shrimp tralwers           ,0,0
+dredges    ,9,Dredges                   ,0,0
+shell      ,10,Shellfish fishery        ,0,0
+pots       ,11,Pots                     ,0,0
+ptrawlpand ,12,Pandalus fishery         ,0,0
+other      ,13,Other                    ,0,0
+dummyone   ,14,Dummy 1                  ,0,0
+dummytwo   ,15,Dummy 2                  ,0,0

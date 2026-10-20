@@ -11,9 +11,9 @@
 time_calc <- function(ncfile){
   orign <- unlist(strsplit(ncdf4::ncatt_get(ncfile, 't')$units, ' ', fixed = TRUE))
   if(orign[1] == 'seconds') {
-    Time <- ncdf4::ncvar_get(ncfile, 't') / 86400
+    Time <- nc_get(ncfile, 't') / 86400
   } else {
-    Time <- ncdf4::ncvar_get(ncfile, 't')
+    Time <- nc_get(ncfile, 't')
   }
   Time <- as.Date(Time, origin = orign[3])
   return(Time)
@@ -160,5 +160,128 @@ text2num <- function(text, pattern, FG = NULL, Vector = FALSE, pprey = FALSE, li
     if(all(is.na(pp.mat[, 1]))) pp.mat <- pp.mat[, -1]
     row.names(pp.mat) <- fg
     return(pp.mat)
+  }
+}
+
+##' Infer cumulative water-column depths from a NetCDF
+##' @param nc Open ncdf4 object
+##' @return Numeric vector starting with 0, or NULL if depths cannot be inferred
+infer_cum_depths <- function(nc){
+  if(!('nominal_dz' %in% names(nc$var))) return(NULL)
+  ndz <- nc_get(nc, 'nominal_dz')
+  if(is.null(dim(ndz)) || length(dim(ndz)) != 2) return(NULL)
+  z_len <- if(!is.null(nc$dim$z)) nc$dim$z$len else NA
+  if(is.finite(z_len)){
+    if(ncol(ndz) == z_len && nrow(ndz) != z_len) ndz <- t(ndz)
+  } else if(nrow(ndz) > ncol(ndz)){
+    ndz <- t(ndz)
+  }
+  n_z <- nrow(ndz)
+  if(n_z < 2) return(NULL)
+  water <- ndz[seq_len(n_z - 1), , drop = FALSE]
+  box_score <- apply(water, 2, function(x){
+    x[!is.finite(x)] <- 0
+    sum(x > 0) * sum(x, na.rm = TRUE)
+  })
+  deep <- which.max(box_score)
+  thick <- water[, deep]
+  thick <- thick[is.finite(thick) & thick > 0]
+  if(length(thick) == 0) return(NULL)
+  c(0, cumsum(rev(thick)))
+}
+
+##' Count water layers implied by a cumulative depth vector
+##' @param depths Numeric cumulative depths
+##' @return Integer count of water layers
+n_water_layers <- function(depths){
+  depths <- depths[is.finite(depths)]
+  if(length(depths) >= 2 && depths[1] == 0 && depths[2] == 0){
+    depths <- depths[-1]
+  } else if(any(depths == 0)){
+    depths <- depths[depths != 0]
+  }
+  length(depths)
+}
+
+##' Y-axis range for scaled relative time series
+##'
+##' Relative values are typically near 1. Use the data maximum (at least 1)
+##' instead of a fixed 0-3 window that leaves empty space.
+##' @param values Numeric series
+##' @return Length-2 numeric vector
+relative_axis_ylim <- function(values) {
+  ymax <- suppressWarnings(max(as.numeric(values), na.rm = TRUE))
+  if (!is.finite(ymax) || ymax <= 0) {
+    ymax <- 1
+  }
+  c(0, max(1, ymax) * 1.05)
+}
+
+##' Zero-padded age-class labels (Age01 ... Age10)
+##' @param n Number of age classes
+##' @return Character vector
+format_age_labels <- function(n) {
+  n <- as.integer(n)
+  if (!is.finite(n) || n < 1) {
+    return(character(0))
+  }
+  sprintf("Age%02d", seq_len(n))
+}
+
+##' Snap a requested time to the nearest observed value
+##' @param requested Numeric time
+##' @param times Unique observed times
+##' @return One value from \code{times}
+nearest_time <- function(requested, times) {
+  times <- times[is.finite(times)]
+  if (length(times) == 0) {
+    return(requested)
+  }
+  times[which.min(abs(times - requested))]
+}
+
+##' Axis label for DietCheck time
+##' @param melt_time Logical, TRUE when time was divided into steps
+##' @return Character axis label
+diet_time_axis_label <- function(melt_time = FALSE) {
+  if (isTRUE(melt_time)) "Time step" else "Year"
+}
+
+##' Origin date from a NetCDF time units attribute
+##' @param ncfile Open ncdf4 connection
+##' @return Date or NA
+nc_time_origin <- function(ncfile) {
+  att <- tryCatch(ncdf4::ncatt_get(ncfile, "t"), error = function(e) NULL)
+  if (is.null(att) || is.null(att$units)) return(as.Date(NA))
+  parts <- unlist(strsplit(att$units, " ", fixed = TRUE))
+  since <- which(tolower(parts) == "since")
+  if (length(since) == 0 || since[1] >= length(parts)) return(as.Date(NA))
+  as.Date(parts[since[1] + 1])
+}
+
+##' Convert model days to calendar dates using the NetCDF origin
+##' @param days Numeric days since model start
+##' @param origin Date origin
+##' @return Date vector, or numeric years if origin is missing
+days_as_date <- function(days, origin = NULL) {
+  days <- as.numeric(days)
+  if (!is.null(origin) && length(origin) == 1 && !is.na(origin)) {
+    return(as.Date(origin) + days)
+  }
+  days / 365.25
+}
+
+##' Human-readable time span from a Date vector
+time_span_label <- function(times) {
+  times <- times[!is.na(times)]
+  if (length(times) == 0) return("unknown")
+  tmin <- min(times)
+  tmax <- max(times)
+  if (inherits(times, "Date")) {
+    years <- as.numeric(tmax - tmin, units = "days") / 365.25
+    paste0(format(tmin, "%Y-%m-%d"), " to ", format(tmax, "%Y-%m-%d"),
+           " (", round(years, 1), " years)")
+  } else {
+    paste0(round(min(times), 1), " to ", round(max(times), 1), " years")
   }
 }

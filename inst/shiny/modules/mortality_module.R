@@ -4,115 +4,77 @@
 
 mortality_ui <- function(id) {
   ns <- NS(id)
-  
-  fluidPage(
-    titlePanel("Mortality Analysis"),
-    
-    sidebarLayout(
-      sidebarPanel(
-        width = 3,
-        fileInput(ns("grp_file"), "Groups CSV", accept = ".csv"),
-        fileInput(ns("spe_mort"), "Specific Mortality (SpecificMort.txt)", accept = ".txt"),
-        fileInput(ns("pred_mort"), "Predation Mortality (SpecificPredMort.txt)", accept = ".txt"),
-        actionButton(ns("load_data"), "Load Data", class = "btn-primary btn-block"),
-        hr(),
-        conditionalPanel(
-          condition = sprintf("output['%s']", ns("data_loaded")),
-          ns = ns,
-          h5("Analysis Options"),
-          selectInput(ns("fg"), "Functional Group:", choices = NULL)
-        )
+  tagList(
+    uiOutput(ns("banner")),
+    layout_sidebar(
+      sidebar = sidebar(
+        width = 280, open = "open",
+        selectInput(ns("fg"), "Functional group", choices = character())
       ),
-      
-      mainPanel(
-        width = 9,
-        conditionalPanel(
-          condition = sprintf("!output['%s']", ns("data_loaded")),
-          ns = ns,
-          div(
-            class = "alert alert-info",
-            style = "margin-top: 50px;",
-            icon("info-circle"),
-            " Please load your mortality data files to begin analysis."
-          )
-        ),
-        conditionalPanel(
-          condition = sprintf("output['%s']", ns("data_loaded")),
-          ns = ns,
-          plotOutput(ns("mortality_plot"), height = "600px")
-        )
-      )
+      plotOutput(ns("mortality_plot_gg"), height = "720px")
     )
   )
 }
 
-mortality_server <- function(id) {
+mortality_server <- function(id, project = NULL) {
   moduleServer(id, function(input, output, session) {
-    rv <- reactiveValues(
-      data_loaded = FALSE,
-      SpeMort = NULL,
-      PredMort = NULL,
-      grp = NULL
-    )
-    
-    output$data_loaded <- reactive({ rv$data_loaded })
-    outputOptions(output, "data_loaded", suspendWhenHidden = FALSE)
-    
-    observeEvent(input$load_data, {
-      req(input$grp_file, input$spe_mort, input$pred_mort)
-      
-      tryCatch({
-        showNotification("Loading mortality data...", type = "message", id = "load_mort", duration = NULL)
-        
-        SpeMort <- read.csv(input$spe_mort$datapath, sep = ' ')
-        PredMort <- read.csv(input$pred_mort$datapath, sep = ' ')
-        grp <- read.csv(input$grp_file$datapath)
-        names(grp) <- tolower(names(grp))
-        
-        rv$SpeMort <- SpeMort
-        rv$PredMort <- PredMort
-        rv$grp <- grp
-        rv$data_loaded <- TRUE
-        
-        updateSelectInput(session, "fg", choices = as.character(grp$longname))
-        
-        removeNotification("load_mort")
-        showNotification("Data loaded successfully!", type = "message", duration = 3)
-      }, error = function(e) {
-        removeNotification("load_mort")
-        showNotification(paste("Error:", e$message), type = "error", duration = 10)
+    ps <- shiny::reactive(project_snapshot(project))
+
+    output$banner <- renderUI(tool_banner(ps(), "mortality"))
+
+    observe({
+      req(isTRUE(ps()$ready), ps()$data$grp)
+      update_select_keep(session, "fg", fg_select_choices(ps()$data$grp, on_only = FALSE),
+                         input$fg)
+    })
+
+    fg_d <- ra_debounce(shiny::reactive(input$fg), 250)
+
+    mort_data <- reactive({
+      dat <- ps()$data
+      req(dat$spe_mort, dat$pred_mort, dat$grp, fg_d())
+      FG <- fg_d()
+      if (FG %in% dat$grp$longname) {
+        FG <- dat$grp$code[dat$grp$longname == FG][1]
+      }
+      calc_mort(dat$spe_mort, dat$pred_mort, FG)
+    })
+
+    output$mortality_plot_gg <- renderPlot({
+      plot_or_message("Load SpecificMort.txt to plot mortality", {
+        if (!isTRUE(ps()$ready)) {
+          plot_message("Load SpecificMort.txt to plot mortality")
+          return(invisible(NULL))
+        }
+        make_plot()
       })
     })
-    
-    mort_data <- reactive({
-      req(rv$data_loaded, input$fg)
-      FG <- rv$grp$code[which(rv$grp$longname %in% input$fg)]
-      calc_mort(rv$SpeMort, rv$PredMort, FG)
-    })
-    
-    output$mortality_plot <- renderPlot({
-      req(mort_data())
-      
-      mort <- reshape2::melt(mort_data(), id.var = c('Time', 'Mtype'))
-      colors <- get_mortality_colors(length(levels(mort$variable)))
-      
-      Title <- paste0('Mortalities for ', input$fg)
-      
-      p <- ggplot2::ggplot(mort, ggplot2::aes(Time, value, fill = variable))
-      p <- p + ggplot2::geom_bar(stat = "identity", position = ggplot2::position_dodge())
-      p <- p + ggplot2::facet_wrap(~Mtype, ncol = 1, scales = "free_y") 
-      p <- p + ggplot2::scale_fill_manual('Age', values = colors)
-      p <- p + ggplot2::theme_minimal() 
-      p <- p + ggplot2::labs(title = Title, x = 'Simulation Time', y = 'Mortality level')
-      p <- p + theme(
-        plot.title = element_text(size = 16, face = "bold"),
-        axis.title = element_text(size = 12),
-        strip.text = element_text(size = 11, face = "bold"),
-        legend.position = "right"
+
+    make_plot <- function() {
+      mort <- mort_data()
+      if (is.null(mort) || nrow(mort) == 0) {
+        plot_message("No mortality columns for this group in SpecificMort.txt")
+        return(invisible(NULL))
+      }
+      origin <- ps()$data$origin
+      mort$Time <- days_as_date(mort$Time, origin)
+      long <- reshape2::melt(mort, id.var = c("Time", "Mtype"))
+      names(long)[names(long) == "variable"] <- "Age"
+      long$Age <- as.character(long$Age)
+      type_pal <- mortality_type_colors()
+      p <- ggplot2::ggplot(long, ggplot2::aes(x = Time, y = value, fill = Mtype))
+      p <- p + ggplot2::geom_area(position = "stack", alpha = 0.92)
+      p <- p + ggplot2::facet_wrap(~ Age, ncol = 2, scales = "free_y")
+      p <- p + ggplot2::scale_fill_manual(values = type_pal, name = "Mortality")
+      p <- p + ggplot2::labs(
+        title = paste("Mortality by age —", fg_d()),
+        x = "Year", y = "Mortality"
       )
-      
-      p
-    })
+      p <- p + theme_reactiveatlantis()
+      ra_scale_x_year(p, mort$Time)
+    }
+
+    keep_outputs_alive(output, "banner")
   })
 }
 
@@ -121,22 +83,26 @@ mortality_server <- function(id) {
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
 
 calc_mort <- function(SpeMort, PredMort, FG){
-  F.mort <- paste(as.character(FG), c(0:9), 'S0', 'F', sep = '.')
-  N.mort <- paste(as.character(FG), c(0:9), 'S0', 'M1', sep = '.')
-  P.mort <- paste(as.character(FG), c(0:9), 'S0', 'M2', sep = '.')
-  
-  Fmort <- SpeMort[, c(1, which(colnames(SpeMort) %in% F.mort))]
-  colnames(Fmort) <- c('Time', paste0('Age0', 1:(ncol(Fmort) - 1)))
-  
-  Nmort <- SpeMort[, c(1, which(colnames(SpeMort) %in% N.mort))]
-  colnames(Nmort) <- c('Time', paste0('Age0', 1:(ncol(Nmort) - 1)))
-  
-  Pmort <- SpeMort[, c(1, which(colnames(SpeMort) %in% P.mort))]
-  colnames(Pmort) <- c('Time', paste0('Age0', 1:(ncol(Pmort) - 1)))
-  
-  Fmort$Mtype <- 'Fishing Mortality'
-  Nmort$Mtype <- 'Natural Mortality'
-  Pmort$Mtype <- 'Predation Mortality'
-  
-  return(rbind(Fmort, Nmort, Pmort))
+  if (is.null(SpeMort) || ncol(SpeMort) < 2) {
+    return(data.frame(Time = numeric(), Mtype = character(), stringsAsFactors = FALSE))
+  }
+  nms <- gsub("-", ".", as.character(colnames(SpeMort)))
+  colnames(SpeMort) <- nms
+  FG <- as.character(FG)[1]
+  ages <- 0:20
+  pick <- function(kind) {
+    want <- paste(FG, ages, "S0", kind, sep = ".")
+    have <- want[want %in% colnames(SpeMort)]
+    time_col <- if ("Time" %in% colnames(SpeMort)) "Time" else colnames(SpeMort)[1]
+    out <- SpeMort[, c(time_col, have), drop = FALSE]
+    colnames(out) <- c("Time", format_age_labels(max(0, ncol(out) - 1)))
+    out
+  }
+  Fmort <- pick("F")
+  Nmort <- pick("M1")
+  Pmort <- pick("M2")
+  Fmort$Mtype <- "Fishing Mortality"
+  Nmort$Mtype <- "Natural Mortality"
+  Pmort$Mtype <- "Predation Mortality"
+  rbind(Fmort, Nmort, Pmort)
 }

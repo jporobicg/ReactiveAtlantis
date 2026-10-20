@@ -1,0 +1,142 @@
+# PC Version (created by Beth Fulton and Adam Davidson)
+#
+# Hydrodynamic files - this is for 19 times 1991 then 1991 to 2006
+# input directories
+nhdfiles 2
+hd0.name inputs/hydro/NS_SpinUp_hydro.nc
+hd1.name inputs/hydro/NS_Hindcast_hydro.nc
+
+
+# Bottom stress
+# BottomStress inputs/stress/stress.nc
+# BottomStress inputs/stress/nxstress.nc
+
+#############################################
+# Point source\sink lists
+# Nutrients for the period 19 times 1991 then 1991-2006
+
+npointss 8
+
+pss0.name Box1
+pss0.location 3590945.3167365943 3109268.801391552 -1
+pss0.data inputs/source/riverdischarge_1991_polygon_01.dat
+pss0.rewind 1
+
+pss1.name Box3
+pss1.location 3600811.459664786 2998657.98904394 -1
+pss1.data inputs/source/riverdischarge_1991_polygon_03.dat
+pss1.rewind 1
+
+pss2.name Box4
+pss2.location 3764200	3283993 -1
+pss2.data inputs/source/riverdischarge_1991_polygon_04.dat
+pss2.rewind 1
+
+pss3.name Box5
+pss3.location 3781129.686416995 3430401.1854787758 -1
+pss3.data inputs/source/riverdischarge_1991_polygon_05.dat
+pss3.rewind 1
+
+pss4.name Box7
+pss4.location 3928741.7712613074 3248548.612200359 -1
+pss4.data inputs/source/riverdischarge_1991_polygon_07.dat
+pss4.rewind 1
+
+pss5.name Box8
+pss5.location 3555555	3745250 -1
+pss5.data inputs/source/riverdischarge_1991_polygon_08.dat
+pss5.rewind 1
+
+pss6.name Box9
+pss6.location 3734220.120770856 3712509.3536880505 -1
+pss6.data inputs/source/riverdischarge_1991_polygon_09.dat
+pss6.rewind 1
+
+pss7.name Box14
+pss7.location 4207696.588363401 3574529.959732947 -1
+pss7.data inputs/source/riverdischarge_1991_polygon_14.dat
+pss7.rewind 1
+
+pss8.name Box15
+pss8.location 3643365.1353982096 4201628.054725644 -1
+pss8.data inputs/source/riverdischarge_1991_polygon_15.dat
+pss8.rewind 1
+
+
+##########################################
+# Rain and evaporation
+#Precipitation inputs/meteor/times1.6.nc
+#Evaporation   inputs/meteor/84-95.nc
+
+# Solar time series data file
+Solar_radiation inputs/forcisets/NorthSea_solar91x20_9106.ts
+Solar_radiation_rewind 1
+
+# Temperature time series data file
+use_tempfiles 1
+# The number of temperature input files
+ntempfiles 2
+Temperature0.name inputs/hydro/NS_SpinUp_temp.nc
+Temperature1.name inputs/hydro/NS_Hindcast_temp.nc
+
+# Salinity time series data file
+use_saltfiles 1
+# The number of salinity files
+nsaltfiles 2
+Salinity0.name inputs/hydro/NS_SpinUp_salt.nc
+Salinity1.name inputs/hydro/NS_Hindcast_salt.nc
+
+# Recruitment_time_series
+
+# Recruitment_enviro_forcing
+
+#############################################
+# Historical catch lists - nCatchts is the number of time series to be loaded and
+# typeCatchts is whether or not the data is to be interpolated (0) by the model
+# or just use previous record (1)
+nCatchts 0
+typeCatchts 0
+
+#############################################
+# Historical discard lists
+nDiscardts 0
+typeDiscardts 0
+
+#############################################
+# Residual lists - on market fish prices
+nResidualsts 0
+typeResidualsts 0
+
+#############################################
+# Economic statistics - GDP and fuel costs
+nEconts 0
+typeEconts 0
+
+##############################################
+# MPA (spatial management) files for cases where change through time
+# Same format as Catchts above
+nMPAts 0
+typeMPAts 0
+
+ts_on_hydro_time 1
+
+# The trunk code had a bug that resulted in the temperature, salinity and pH files not rewinding to the start. New flags have been added (to the force.prm file)
+# that allows the modeller to set if these files are rewound when the end of the files is reached.
+
+temp_rewind 1
+salt_rewind 1
+
+# The following changes have been added to add support for reading in pH files as we do temperature and salinity.
+# If using pH files:
+# use_phFiles 1
+# Number of pH files
+# npHfiles 1
+# The names of the pH input files
+# pH0.name ../../../AMS/inputs/forcisets/AMSpH.nc
+# If not using pH files:
+use_phFiles 0
+use_VertMixFiles 0
+use_mix_deep_O2 0
+# Frequency of inputs.ts and exports.ts output - write out each dt.
+inputs_tout 365 days
+use_pollutantfiles 0
