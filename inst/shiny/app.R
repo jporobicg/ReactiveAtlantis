@@ -91,13 +91,19 @@ ra_header <- tags$head(
   "))
 )
 
-ra_nav_args <- list(
+ra_page_header <- if (isTRUE(ra_ai_on)) {
+  tagList(ra_header, assistant_ui("assistant"))
+} else {
+  ra_header
+}
+
+ui <- page_navbar(
   title = ra_navbar_title,
   id = "ra_page",
   window_title = "ReactiveAtlantis",
   theme = ra_theme(),
   fillable = FALSE,
-  header = ra_header,
+  header = ra_page_header,
   sidebar = sidebar(
     title = "Run",
     width = 340,
@@ -120,12 +126,6 @@ ra_nav_args <- list(
   nav_panel("Feeding", feeding_ui("feeding")),
   nav_panel("Mortality", mortality_ui("mortality"))
 )
-if (isTRUE(ra_ai_on)) {
-  ra_nav_args <- c(ra_nav_args, list(
-    nav_panel("Ask Atlantis", assistant_ui("assistant"))
-  ))
-}
-ui <- do.call(page_navbar, ra_nav_args)
 
 server <- function(input, output, session) {
   project <- project_server("project")

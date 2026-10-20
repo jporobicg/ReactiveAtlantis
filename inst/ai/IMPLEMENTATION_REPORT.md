@@ -8,9 +8,9 @@ replace any calibration tool.
 ## Files changed
 
 ### Application integration
-- `inst/shiny/app.R` — source helpers; append **Ask Atlantis** nav panel only when `RA_AI_ENABLED=true`; `id = "ra_page"` for the current tab.
-- `inst/shiny/modules/assistant_module.R` — chat UI/server (status badge, starters, sources, validated Open-tab buttons, `ExtendedTask` when available).
-- `inst/shiny/www/custom.css` — panel styling aligned with navy/teal/sand.
+- `inst/shiny/app.R` — source helpers; add a floating **Ask Atlantis** button and right-hand drawer only when `RA_AI_ENABLED=true`; `id = "ra_page"` for the current tab. No extra navbar item.
+- `inst/shiny/modules/assistant_module.R` — floating button, collapsible right drawer, chat UI/server (status badge, starters, sources, validated Open-tab buttons, `ExtendedTask` when available). Conversation is one session-scoped module so it survives tab changes.
+- `inst/shiny/www/custom.css` — floating button and right-drawer styling aligned with navy/teal/sand.
 
 ### Backend (sourced from `inst/ai/load.R`)
 - `inst/ai/R/ai_config.R` — environment variables and paths (`RA_AI_*`, `RA_OLLAMA_*`).
@@ -68,9 +68,9 @@ testthat::test_file("tests/testthat/test-e2e-app.R")
 
 | Suite | Result |
 | --- | --- |
-| `test-ai-assistant.R` | PASS 97 |
-| `test-ai-disabled.R` | PASS 3 |
-| `test-ai-e2e.R` | PASS 9 |
+| `test-ai-assistant.R` | PASS 101 |
+| `test-ai-disabled.R` | PASS 4 |
+| `test-ai-e2e.R` | PASS 22 |
 | `test-north-sea-fixes.R` | PASS 343 |
 | `test-e2e-app.R` | PASS 95 |
 | `Rscript inst/ai/evaluation/run_eval.R` | retrieval mapping ran on all 24 questions |
@@ -86,13 +86,13 @@ Covered relative to the brief:
 7. Out-of-scope, injection, and “rerun Atlantis for me” blocked in R (not only the system prompt).
 8. History is an argument / per-session `reactiveVal`; two histories do not leak.
 9. Incremental re-index skips unchanged files and picks up edits.
-10. Default `RA_AI_ENABLED=false`: navbar has no Ask Atlantis tab; existing e2e still passes.
+10. Default `RA_AI_ENABLED=false`: no button or drawer; existing e2e still passes.
 
 ## Live Ollama run
 
-**No.** `ollama` is not installed in this environment, and `http://127.0.0.1:11434` refused connections. Generation and embeddings were exercised through `options(reactiveatlantis.ollama_transport = ...)` in unit tests. The Shiny panel was checked live against a deliberately unreachable URL (`RA_OLLAMA_URL=http://127.0.0.1:1`): Offline badge, error message, and a validated **Open Predation** button.
+**No.** `ollama` is not installed in this environment, and `http://127.0.0.1:11434` refused connections. Generation and embeddings were exercised through `options(reactiveatlantis.ollama_transport = ...)` in unit tests. The Shiny drawer was checked live against a deliberately unreachable URL (`RA_OLLAMA_URL=http://127.0.0.1:1`): Offline badge, error message, and a validated **Open Predation** button.
 
-Screenshots: `man/figures/ask_atlantis.png` (empty offline panel) and the enabled-offline error state taken during `test-ai-e2e.R`.
+Screenshots: drawer closed with the floating button on Overview, and the drawer open on Predation (`ask_atlantis_drawer_closed.png`, `ask_atlantis_drawer_open.png`). `man/figures/ask_atlantis.png` is the open-drawer view.
 
 ## Corpus status
 
@@ -103,6 +103,5 @@ Atlantis manuals, Atlantis source, and real calibration notes were **not** suppl
 - Chat is not streamed (`stream: false`).
 - PDF extraction needs `pdftools`; unreadable pages are logged.
 - The assistant cannot see plot pixels or NetCDF values from the loaded run (by design).
-- Navbar is crowded when the extra tab is on; a drawer could come later.
 - Embedding quality was not measured on a real model here.
 - Default models (`qwen3.5:4b`, `nomic-embed-text`) are documented defaults only; any Ollama chat/embed pair works via env vars.

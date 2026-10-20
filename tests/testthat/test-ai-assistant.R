@@ -18,7 +18,7 @@ test_that("nav catalog matches page_navbar titles in app.R", {
   lines <- readLines(app, warn = FALSE)
   titles <- sub('.*nav_panel\\("([^"]+)".*', "\\1",
                 grep('nav_panel\\("', lines, value = TRUE))
-  titles <- titles[titles != "Ask Atlantis"]
+  expect_false("Ask Atlantis" %in% titles)
   catalog <- unname(vapply(ra_ai_nav_catalog(), function(x) x$title, character(1)))
   expect_identical(sort(catalog), sort(unique(titles)))
 })
@@ -294,4 +294,8 @@ test_that("assistant UI is a function and safe HTML escapes tags", {
   html <- ra_ai_safe_html("<script>alert(1)</script>\n\nHello")
   expect_false(grepl("<script>", html, fixed = TRUE))
   expect_true(grepl("&lt;script&gt;", html, fixed = TRUE))
+  ui <- as.character(assistant_ui("assistant"))
+  expect_true(grepl("ra-ai-fab", ui, fixed = TRUE))
+  expect_true(grepl("ra-ai-drawer", ui, fixed = TRUE))
+  expect_false(grepl('ra-ai-drawer is-open', ui, fixed = TRUE))
 })

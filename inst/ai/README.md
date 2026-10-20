@@ -1,12 +1,14 @@
 # Ask Atlantis (optional local guidance)
 
-A small, optional panel in the unified ReactiveAtlantis app. It answers
+A small, optional drawer in the unified ReactiveAtlantis app. It answers
 questions from a **local** index (manuals, code, calibration notes) using a
 **local** Ollama model, and it points you at existing tabs. It does not run
 Atlantis, edit parameters, or replace any plot or table in the app.
 
 Disabled by default (`RA_AI_ENABLED=false`). When it is off, or when Ollama
-is missing, the rest of the app behaves as before.
+is missing, the rest of the app behaves as before. When it is on, a
+speech-bubble button at the bottom-right opens a right-hand drawer from any
+tab; the drawer is closed by default and does not cover plots.
 
 ![Ask Atlantis offline](../../man/figures/ask_atlantis.png)
 
@@ -48,7 +50,7 @@ is missing, the rest of the app behaves as before.
    Rscript inst/ai/index.R --diagnose
    ```
 
-5. Enable the panel and launch:
+5. Enable the drawer and launch:
 
    ```r
    Sys.setenv(RA_AI_ENABLED = "true")
@@ -65,7 +67,7 @@ is missing, the rest of the app behaves as before.
 
 | Symptom | What to check |
 | --- | --- |
-| No Ask Atlantis tab | `RA_AI_ENABLED` is not `true` |
+| No speech-bubble button | `RA_AI_ENABLED` is not `true` |
 | Badge says Offline | Ollama is not running on `RA_OLLAMA_URL` |
 | Badge says Model missing | `ollama pull` the name in `RA_OLLAMA_MODEL` |
 | Empty or weak answers | Index missing or still on fixtures; run `diagnose_ask_atlantis_index()` |

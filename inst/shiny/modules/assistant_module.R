@@ -1,50 +1,84 @@
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
-## ~ Ask Atlantis guidance panel (optional)     ~ ##
+## ~ Ask Atlantis guidance drawer (optional)    ~ ##
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
 
 assistant_ui <- function(id) {
   ns <- shiny::NS(id)
-  shiny::tagList(
+  bubble <- shiny::HTML(paste0(
+    '<svg class="ra-ai-bubble-icon" viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">',
+    '<path fill="currentColor" d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/>',
+    '<circle fill="currentColor" cx="8" cy="10" r="1.2"/>',
+    '<circle fill="currentColor" cx="12" cy="10" r="1.2"/>',
+    '<circle fill="currentColor" cx="16" cy="10" r="1.2"/>',
+    "</svg>"
+  ))
+  shiny::div(
+    class = "ra-ai-shell",
+    id = ns("shell"),
+    shiny::tags$button(
+      id = ns("fab"),
+      class = "ra-ai-fab",
+      type = "button",
+      title = "Ask Atlantis",
+      `aria-label` = "Ask Atlantis",
+      `aria-expanded` = "false",
+      `aria-controls` = ns("drawer"),
+      bubble
+    ),
     shiny::div(
-      id = ns("root"),
-      class = "ra-assistant",
+      id = ns("drawer"),
+      class = "ra-ai-drawer",
+      role = "dialog",
+      `aria-label` = "Ask Atlantis",
+      `aria-hidden` = "true",
       shiny::div(
-        class = "ra-assistant-header",
-        shiny::h3("Ask Atlantis"),
-        shiny::uiOutput(ns("status_badge"), inline = TRUE)
-      ),
-      shiny::p(
-        class = "ra-assistant-disclaimer",
-        "Guidance only. Answers are not numerical diagnostics or verified diagnoses.",
-        "Use the existing tabs to inspect plots and tables."
-      ),
-      shiny::div(
-        class = "ra-assistant-starters",
-        shiny::actionLink(ns("starter_what"), "What can Reactive Atlantis do?"),
-        shiny::actionLink(ns("starter_pred"), "Where do I inspect predation?"),
-        shiny::actionLink(ns("starter_rec"), "What should I check when recruitment is low?")
-      ),
-      shiny::div(
-        class = "ra-assistant-log",
-        shiny::uiOutput(ns("messages"))
-      ),
-      shiny::div(
-        class = "ra-assistant-input",
-        shiny::textAreaInput(
-          ns("question"), NULL,
-          placeholder = "Ask about Atlantis processes, parameters, or where to look in this app…",
-          rows = 3, width = "100%", resize = "vertical"
+        class = "ra-assistant",
+        shiny::div(
+          class = "ra-assistant-header",
+          shiny::h3("Ask Atlantis"),
+          shiny::uiOutput(ns("status_badge"), inline = TRUE),
+          shiny::tags$button(
+            id = ns("close"),
+            class = "ra-ai-close btn-close",
+            type = "button",
+            title = "Close Ask Atlantis",
+            `aria-label` = "Close Ask Atlantis"
+          )
+        ),
+        shiny::p(
+          class = "ra-assistant-disclaimer",
+          "Guidance only. Answers are not numerical diagnostics or verified diagnoses.",
+          "Use the existing tabs to inspect plots and tables."
         ),
         shiny::div(
-          class = "ra-btn-row",
-          shiny::actionButton(ns("send"), "Send", class = "btn btn-primary"),
-          shiny::actionButton(ns("clear"), "Clear", class = "btn btn-outline-secondary")
+          class = "ra-assistant-starters",
+          shiny::actionLink(ns("starter_what"), "What can Reactive Atlantis do?"),
+          shiny::actionLink(ns("starter_pred"), "Where do I inspect predation?"),
+          shiny::actionLink(ns("starter_rec"), "What should I check when recruitment is low?")
+        ),
+        shiny::div(
+          class = "ra-assistant-log",
+          shiny::uiOutput(ns("messages"))
+        ),
+        shiny::div(
+          class = "ra-assistant-input",
+          shiny::textAreaInput(
+            ns("question"), NULL,
+            placeholder = "Ask about Atlantis processes, parameters, or where to look in this app…",
+            rows = 3, width = "100%", resize = "vertical"
+          ),
+          shiny::div(
+            class = "ra-btn-row",
+            shiny::actionButton(ns("send"), "Send", class = "btn btn-primary"),
+            shiny::actionButton(ns("clear"), "Clear", class = "btn btn-outline-secondary")
+          )
         )
       )
     ),
     shiny::tags$script(shiny::HTML(sprintf(
-      "$(document).on('click', '#%s .ra-open-tool', function() {\n  Shiny.setInputValue('%s', $(this).attr('data-ra-nav'), {priority: 'event'});\n});\n$(document).on('keydown', '#%s textarea', function(e) {\n  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {\n    e.preventDefault();\n    $('#%s').click();\n  }\n});\n",
-      ns("root"), ns("go_nav"), ns("question"), ns("send")
+      "(function() {\n  var shellId = '%s', drawerId = '%s', fabId = '%s', closeId = '%s', openInput = '%s';\n  function setOpen(open) {\n    var shell = document.getElementById(shellId);\n    var drawer = document.getElementById(drawerId);\n    var fab = document.getElementById(fabId);\n    if (!drawer || !fab) return;\n    drawer.classList.toggle('is-open', !!open);\n    if (shell) shell.classList.toggle('is-open', !!open);\n    fab.setAttribute('aria-expanded', open ? 'true' : 'false');\n    drawer.setAttribute('aria-hidden', open ? 'false' : 'true');\n    if (window.Shiny && Shiny.setInputValue) {\n      Shiny.setInputValue(openInput, !!open, {priority: 'event'});\n    }\n  }\n  $(document).on('click', '#' + fabId, function(e) {\n    e.preventDefault();\n    var drawer = document.getElementById(drawerId);\n    setOpen(!(drawer && drawer.classList.contains('is-open')));\n  });\n  $(document).on('click', '#' + closeId, function(e) {\n    e.preventDefault();\n    setOpen(false);\n  });\n  $(document).on('keydown', function(e) {\n    if (e.key === 'Escape') setOpen(false);\n  });\n  $(document).on('click', '#' + drawerId + ' .ra-open-tool', function() {\n    Shiny.setInputValue('%s', $(this).attr('data-ra-nav'), {priority: 'event'});\n  });\n  $(document).on('keydown', '#%s textarea', function(e) {\n    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {\n      e.preventDefault();\n      $('#%s').click();\n    }\n  });\n})();\n",
+      ns("shell"), ns("drawer"), ns("fab"), ns("close"), ns("drawer_open"),
+      ns("go_nav"), ns("question"), ns("send")
     )))
   )
 }

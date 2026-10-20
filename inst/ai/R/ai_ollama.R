@@ -204,7 +204,7 @@ ra_ollama_error_message <- function(res, kind) {
 ra_ai_panel_state <- function(config = ra_ai_config()) {
   if (!isTRUE(config$enabled)) {
     return(list(code = "disabled", label = "Disabled",
-                detail = "Set RA_AI_ENABLED=true to show Ask Atlantis."))
+                detail = "Set RA_AI_ENABLED=true to show the Ask Atlantis drawer."))
   }
   st <- tryCatch(ra_ollama_status(config), error = function(e) {
     list(reachable = FALSE, has_chat_model = FALSE,

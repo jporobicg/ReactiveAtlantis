@@ -26,13 +26,19 @@ diagnostics.
 
 - Core R lives under `inst/ai/R/` and is sourced from `inst/ai/load.R`.
 - `inst/shiny/app.R` sources that loader and `modules/assistant_module.R`.
-- The **Ask Atlantis** nav panel is appended only when `RA_AI_ENABLED` is
-  true. Default is false, so the navbar is unchanged.
+- When `RA_AI_ENABLED` is true, a floating speech-bubble button and a
+  right-hand drawer are added to the page header (fixed overlay). Default is
+  false, so neither the button nor the drawer is in the DOM, and the navbar
+  is unchanged.
+- The drawer is closed by default (`translateX(100%)`, `pointer-events: none`)
+  so plots and controls stay fully usable. One module instance holds the
+  conversation for the session, so switching tabs does not clear chat.
 - `page_navbar(..., id = "ra_page")` exposes the current tab to the assistant
   as safe metadata. Group codes are read from known module input ids only.
 - Navigation suggestions are validated against `ra_ai_nav_catalog()`, which
   is tested against `nav_panel()` titles in `app.R`. The UI may click a real
-  tab via a custom message; invented targets are dropped in R before render.
+  tab via a custom message from the drawer; invented targets are dropped in R
+  before render.
 - LLM calls run in `shiny::ExtendedTask` when available so a slow Ollama
   request does not freeze other tabs. Timeouts still apply.
 
