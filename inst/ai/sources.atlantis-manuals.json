@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "description": "CSIRO Atlantis user-guide PDFs downloaded to the local corpus directory, plus this package's own source. Fixture manuals are not included. PDFs are CSIRO copyright and are not shipped in the package; run inst/ai/download_atlantis_manuals.R first. Set RA_AI_SOURCES_CONFIG to this file after the download.",
+  "exclude_globs": [
+    "**/.git/**",
+    "**/node_modules/**",
+    "**/vendor/**",
+    "**/*.nc",
+    "**/*.png",
+    "**/*.ico",
+    "**/*.jpg",
+    "**/*.jpeg",
+    "**/*.webp",
+    "**/*.rda",
+    "**/*.rdb",
+    "**/*.rds",
+    "**/*.so",
+    "**/*.o",
+    "**/www/**",
+    "**/NOTICE.txt"
+  ],
+  "max_file_bytes": 25000000,
+  "sources": [
+    {
+      "id": "atlantis-user-guide-part-i",
+      "type": "manual",
+      "path": "${RA_AI_CORPUS_DIR}/AtlantisUserGuide_PartI.pdf",
+      "version": "CSIRO-living-document-PartI",
+      "include": ["**/*.pdf"]
+    },
+    {
+      "id": "atlantis-user-guide-part-ii",
+      "type": "manual",
+      "path": "${RA_AI_CORPUS_DIR}/AtlantisUserGuide_PartII.pdf",
+      "version": "CSIRO-living-document-PartII",
+      "include": ["**/*.pdf"]
+    },
+    {
+      "id": "ra-readme",
+      "type": "reactive_code",
+      "path": "${RA_PKG_ROOT}/README.md",
+      "version": "package",
+      "include": ["README.md"]
+    },
+    {
+      "id": "ra-shiny-modules",
+      "type": "reactive_code",
+      "path": "${RA_SHINY_DIR}/modules",
+      "version": "package",
+      "include": ["*.R"]
+    },
+    {
+      "id": "ra-r-source",
+      "type": "reactive_code",
+      "path": "${RA_R_DIR}",
+      "version": "package",
+      "include": ["*.R"]
+    }
+  ]
+}

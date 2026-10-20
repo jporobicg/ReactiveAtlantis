@@ -99,9 +99,10 @@ button at the bottom-right opens a right-hand drawer from any tab. It is off
 unless you set `RA_AI_ENABLED=true`, install [Ollama](https://ollama.com) on
 the same machine, and build the index. It never calls a cloud LLM. Setup, the
 sources manifest, and troubleshooting are in
-[`inst/ai/README.md`](inst/ai/README.md). Until the real Atlantis manuals and
-source tree are configured, the packaged index uses a clearly marked fixture
-corpus plus this package’s own help.
+[`inst/ai/README.md`](inst/ai/README.md). Tests use a clearly marked fixture
+corpus plus this package’s own help. CSIRO user-guide PDFs can be downloaded
+locally (they are not shipped in the package) and indexed with
+`inst/ai/sources.atlantis-manuals.json`.
 
 ## Legacy functions
 

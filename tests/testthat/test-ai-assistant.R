@@ -299,3 +299,92 @@ test_that("assistant UI is a function and safe HTML escapes tags", {
   expect_true(grepl("ra-ai-drawer", ui, fixed = TRUE))
   expect_false(grepl('ra-ai-drawer is-open', ui, fixed = TRUE))
 })
+
+test_that("CSIRO manuals catalog lists Part I and Part II and PDFs are not in git", {
+  skip_if_not_installed("jsonlite")
+  cat_path <- file.path(root, "inst", "ai", "atlantis-manuals.json")
+  catg <- jsonlite::fromJSON(cat_path, simplifyVector = FALSE)
+  ids <- vapply(catg$manuals, function(m) m$id, character(1))
+  expect_true("atlantis-user-guide-part-i" %in% ids)
+  expect_true("atlantis-user-guide-part-ii" %in% ids)
+  expect_true(any(grepl("csiro.au/atlantis/home/links", catg$listed_from)))
+  expect_false(file.exists(file.path(root, "inst", "ai", "corpus",
+                                     "AtlantisUserGuide_PartI.pdf")))
+  expect_false(file.exists(file.path(root, "inst", "ai", "corpus",
+                                     "AtlantisUserGuide_PartII.pdf")))
+  default_src <- jsonlite::fromJSON(
+    file.path(root, "inst", "ai", "sources.json"), simplifyVector = FALSE
+  )
+  default_ids <- vapply(default_src$sources, function(s) s$id, character(1))
+  expect_true("fixture-manuals" %in% default_ids)
+  expect_false("atlantis-user-guide-part-i" %in% default_ids)
+})
+
+test_that("download helper writes PDFs to dest and tries fallback URLs", {
+  dest <- tempfile("ra-ai-corpus-")
+  dir.create(dest)
+  catalog <- list(
+    listed_from = "https://research.csiro.au/atlantis/home/links/",
+    copyright = "CSIRO (test fixture)",
+    manuals = list(list(
+      id = "atlantis-user-guide-part-ii",
+      filename = "AtlantisUserGuide_PartII.pdf",
+      listed_url = "https://example.invalid/missing.pdf",
+      urls = c(
+        "https://example.invalid/missing.pdf",
+        "https://example.invalid/ok.pdf"
+      )
+    ))
+  )
+  old <- getOption("reactiveatlantis.download_file")
+  on.exit(options(reactiveatlantis.download_file = old), add = TRUE)
+  options(reactiveatlantis.download_file = function(url, destfile) {
+    if (grepl("ok.pdf", url, fixed = TRUE)) {
+      writeBin(charToRaw("%PDF-1.4 mock"), destfile)
+      return(list(ok = TRUE, status = 200L, url = url,
+                  error = NULL, bytes = 14))
+    }
+    list(ok = FALSE, status = 404L, url = url,
+         error = "HTTP 404 or not a PDF", bytes = NA_real_)
+  })
+  res <- ra_ai_download_atlantis_manuals(dest_dir = dest, catalog = catalog)
+  expect_true(isTRUE(res$ok))
+  expect_true(file.exists(file.path(dest, "AtlantisUserGuide_PartII.pdf")))
+  expect_equal(res$files$status[1], "downloaded")
+  expect_true(grepl("ok.pdf", res$files$url[1], fixed = TRUE))
+  expect_true(file.exists(file.path(dest, "NOTICE.txt")))
+})
+
+test_that("RA_AI_CORPUS_DIR expands in the Atlantis manuals manifest", {
+  skip_if_not_installed("jsonlite")
+  old <- Sys.getenv("RA_AI_CORPUS_DIR", unset = NA)
+  on.exit({
+    if (is.na(old)) Sys.unsetenv("RA_AI_CORPUS_DIR") else {
+      Sys.setenv(RA_AI_CORPUS_DIR = old)
+    }
+  }, add = TRUE)
+  dest <- tempfile("ra-ai-corpus-exp-")
+  dir.create(dest)
+  Sys.setenv(RA_AI_CORPUS_DIR = dest)
+  man <- ra_ai_load_manifest(
+    file.path(root, "inst", "ai", "sources.atlantis-manuals.json")
+  )
+  paths <- vapply(man$sources, function(s) s$path, character(1))
+  expect_true(any(grepl("AtlantisUserGuide_PartI.pdf", paths, fixed = TRUE)))
+  expect_true(any(startsWith(paths, dest)))
+  expect_false(any(grepl("${RA_AI_CORPUS_DIR}", paths, fixed = TRUE)))
+  expect_gte(man$max_file_bytes, 11e6)
+})
+
+test_that("csiro manual chunk detector ignores fixture manuals", {
+  expect_true(ra_ai_is_csiro_manual_chunk(
+    "/tmp/AtlantisUserGuide_PartI.pdf",
+    "atlantis-user-guide-part-i:abc",
+    "CSIRO-living-document-PartI"
+  ))
+  expect_false(ra_ai_is_csiro_manual_chunk(
+    file.path(root, "inst", "ai", "fixtures", "manuals", "parameters.md"),
+    "fixture-manuals:abc",
+    "FIXTURE-NOT-OFFICIAL"
+  ))
+})

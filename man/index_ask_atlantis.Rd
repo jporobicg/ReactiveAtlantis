@@ -25,8 +25,9 @@ Unchanged files (matching hash and mtime) are skipped.
 }
 \details{
 The default manifest indexes a clearly marked fixture corpus plus this
-package's own source. Point \code{RA_AI_SOURCES_CONFIG} at another
-manifest to use the real Atlantis manuals and source tree.
+package's own source. Download the CSIRO user-guide PDFs with
+\code{download_atlantis_manuals()} and point \code{RA_AI_SOURCES_CONFIG}
+at \code{inst/ai/sources.atlantis-manuals.json}.
 }
 \examples{
 \dontrun{

@@ -31,9 +31,18 @@ tab; the drawer is closed by default and does not cover plots.
 
 3. Point the sources manifest at your corpus. The packaged
    `inst/ai/sources.json` indexes a **fixture** corpus plus this package’s
-   own source. Copy `inst/ai/sources.example.json` and set
-   `RA_AI_SOURCES_CONFIG` when real Atlantis manuals/source/calibration notes
-   are available.
+   own source (used by tests). For the CSIRO user-guide PDFs listed on
+   [Accessing Atlantis](https://research.csiro.au/atlantis/home/links/):
+
+   ```bash
+   Rscript inst/ai/download_atlantis_manuals.R
+   ```
+
+   The PDFs are CSIRO copyright and are **not** committed to git. They land
+   in `RA_AI_CORPUS_DIR` (default: the ReactiveAtlantis user data directory).
+   Then set `RA_AI_SOURCES_CONFIG` to `inst/ai/sources.atlantis-manuals.json`.
+   Copy `inst/ai/sources.example.json` when you also have Atlantis source or
+   calibration notes.
 
 4. Build the index (does not run on every app start):
 
@@ -48,6 +57,13 @@ tab; the drawer is closed by default and does not cover plots.
    ```bash
    Rscript inst/ai/index.R --no-embed
    Rscript inst/ai/index.R --diagnose
+   ```
+
+   For CSIRO manuals, set `RA_AI_SOURCES_CONFIG` first:
+
+   ```bash
+   export RA_AI_SOURCES_CONFIG="$(pwd)/inst/ai/sources.atlantis-manuals.json"
+   Rscript inst/ai/index.R --no-embed
    ```
 
 5. Enable the drawer and launch:
@@ -85,9 +101,12 @@ rubric. Retrieval-only scoring:
 
 ```bash
 Rscript inst/ai/evaluation/run_eval.R
+Rscript inst/ai/evaluation/run_eval.R --sources inst/ai/sources.atlantis-manuals.json
 ```
 
-Add `--model` only when a live Ollama chat model is installed.
+Add `--model` only when a live Ollama chat model is installed. The second
+command reports which questions retrieve passages from the downloaded CSIRO
+PDFs (`real_manual`).
 
 ## Security / scientific limits
 

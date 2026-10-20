@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Example manifest after the real corpus is available. Copy this file, fill in local paths, and set RA_AI_SOURCES_CONFIG to the copy. Keep fixture entries only until the corresponding real materials exist.",
+  "description": "Example manifest after the real corpus is available. For the CSIRO user-guide PDFs, run inst/ai/download_atlantis_manuals.R and prefer inst/ai/sources.atlantis-manuals.json. Copy this file for Atlantis source/calibration notes, fill in local paths, and set RA_AI_SOURCES_CONFIG. Keep fixture entries only until the corresponding real materials exist. Do not commit CSIRO PDF files.",
   "exclude_globs": [
     "**/.git/**",
     "**/node_modules/**",
@@ -10,16 +10,24 @@
     "**/*.o",
     "**/*.so",
     "**/CMakeFiles/**",
-    "**/build/**"
+    "**/build/**",
+    "**/NOTICE.txt"
   ],
-  "max_file_bytes": 800000,
+  "max_file_bytes": 25000000,
   "sources": [
     {
-      "id": "atlantis-user-guide",
+      "id": "atlantis-user-guide-part-i",
       "type": "manual",
-      "path": "/path/to/Atlantis/docs",
-      "version": "replace-with-manual-version",
-      "include": ["**/*.pdf", "**/*.md", "**/*.txt"]
+      "path": "${RA_AI_CORPUS_DIR}/AtlantisUserGuide_PartI.pdf",
+      "version": "CSIRO-living-document-PartI",
+      "include": ["**/*.pdf"]
+    },
+    {
+      "id": "atlantis-user-guide-part-ii",
+      "type": "manual",
+      "path": "${RA_AI_CORPUS_DIR}/AtlantisUserGuide_PartII.pdf",
+      "version": "CSIRO-living-document-PartII",
+      "include": ["**/*.pdf"]
     },
     {
       "id": "atlantis-source",

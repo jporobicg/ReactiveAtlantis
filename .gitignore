@@ -1,3 +1,6 @@
 .Rproj.user
 .Rhistory
 .RData
+
+# CSIRO Atlantis user-guide PDFs (copyright CSIRO; download locally, never commit)
+inst/ai/corpus/

@@ -75,7 +75,21 @@ ra_ai_default_sources_config <- function() {
   file.path(paths$ai, "sources.json")
 }
 
-##' Expand ${RA_PKG_ROOT}, ${RA_SHINY_DIR}, ${RA_AI_DIR}, ${RA_R_DIR} in a path.
+##' Local directory for downloaded CSIRO Atlantis manuals (not in git).
+ra_ai_default_corpus_dir <- function() {
+  env <- Sys.getenv("RA_AI_CORPUS_DIR", unset = "")
+  if (nzchar(env)) {
+    return(normalizePath(env, winslash = "/", mustWork = FALSE))
+  }
+  data <- tryCatch(
+    tools::R_user_dir("ReactiveAtlantis", which = "data"),
+    error = function(e) file.path(tempdir(), "ReactiveAtlantis-data")
+  )
+  file.path(data, "atlantis-manuals")
+}
+
+##' Expand ${RA_PKG_ROOT}, ${RA_SHINY_DIR}, ${RA_AI_DIR}, ${RA_R_DIR},
+##' ${RA_AI_CORPUS_DIR} in a path.
 ra_ai_expand_path <- function(path, paths = ra_ai_paths()) {
   path <- as.character(path)[1]
   if (is.na(path) || !nzchar(path)) return(path)
@@ -83,6 +97,8 @@ ra_ai_expand_path <- function(path, paths = ra_ai_paths()) {
   path <- gsub("${RA_SHINY_DIR}", paths$shiny, path, fixed = TRUE)
   path <- gsub("${RA_AI_DIR}", paths$ai, path, fixed = TRUE)
   path <- gsub("${RA_R_DIR}", paths$r_src, path, fixed = TRUE)
+  path <- gsub("${RA_AI_CORPUS_DIR}", ra_ai_default_corpus_dir(),
+               path, fixed = TRUE)
   path
 }
 

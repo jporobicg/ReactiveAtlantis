@@ -256,7 +256,8 @@ ra_ai_chunk_pdf <- function(path, source_id, source_type, version,
   unreadable <- integer()
   for (i in seq_along(extracted$pages)) {
     txt <- extracted$pages[[i]]
-    if (!nzchar(trimws(txt))) {
+    ## Page-number-only or scanned pages with no extractable text.
+    if (nchar(trimws(txt)) < 20) {
       unreadable <- c(unreadable, i)
       next
     }
@@ -570,6 +571,17 @@ ra_ai_print_diagnose <- function(diag = ra_ai_diagnose()) {
   }
   if (!is.null(diag$ignored) && nrow(diag$ignored) > 0) {
     message("Ignored paths: ", nrow(diag$ignored))
+  }
+  if (!is.null(diag$recent_log) && nrow(diag$recent_log) > 0) {
+    notes <- diag$recent_log
+    notes <- notes[notes$level %in% c("warn", "error"), , drop = FALSE]
+    if (nrow(notes) > 0) {
+      message("Recent ingest notes:")
+      nshow <- min(nrow(notes), 20L)
+      for (i in seq_len(nshow)) {
+        message("  [", notes$level[i], "] ", notes$message[i])
+      }
+    }
   }
   invisible(diag)
 }

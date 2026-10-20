@@ -19,7 +19,8 @@
   "ai_ingest.R",
   "ai_retrieve.R",
   "ai_prompt.R",
-  "ai_answer.R"
+  "ai_answer.R",
+  "ai_download.R"
 ))
 for (.ra_ai_f in .ra_ai_files) {
   if (file.exists(.ra_ai_f)) source(.ra_ai_f, local = TRUE)

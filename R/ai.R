@@ -37,8 +37,10 @@
 ##' Unchanged files (matching hash and mtime) are skipped.
 ##'
 ##' The default manifest indexes a clearly marked fixture corpus plus this
-##' package's own source. Point \code{RA_AI_SOURCES_CONFIG} at another
-##' manifest to use the real Atlantis manuals and source tree.
+##' package's own source. Download the CSIRO user-guide PDFs with
+##' \code{download_atlantis_manuals()} and point
+##' \code{RA_AI_SOURCES_CONFIG} at
+##' \code{inst/ai/sources.atlantis-manuals.json}.
 ##'
 ##' @param sources_config Path to the JSON manifest. Default
 ##'   \code{RA_AI_SOURCES_CONFIG} or \code{inst/ai/sources.json}.
@@ -75,4 +77,32 @@ diagnose_ask_atlantis_index <- function(index_dir = NULL) {
   .ra_ai_ensure_loaded()
   diag <- ra_ai_diagnose(index_dir = index_dir)
   ra_ai_print_diagnose(diag)
+}
+
+##' Download CSIRO Atlantis user-guide PDFs into a local corpus directory
+##'
+##' Fetches the user-guide PDFs listed on the public Accessing Atlantis
+##' page into \code{dest_dir}. The files are CSIRO copyright and are
+##' \strong{not} redistributed with this package. Index them afterwards
+##' with \code{index_ask_atlantis()} pointed at
+##' \code{inst/ai/sources.atlantis-manuals.json}.
+##'
+##' @param dest_dir Local corpus directory. Default \code{RA_AI_CORPUS_DIR}
+##'   or the ReactiveAtlantis user data directory.
+##' @param overwrite Re-download files that already exist.
+##' @return Invisibly, a list with \code{dest_dir} and a file-status table.
+##' @export
+##' @examples
+##' \dontrun{
+##' download_atlantis_manuals()
+##' Sys.setenv(RA_AI_SOURCES_CONFIG =
+##'              system.file("ai", "sources.atlantis-manuals.json",
+##'                          package = "ReactiveAtlantis"))
+##' index_ask_atlantis(embed = FALSE)
+##' }
+download_atlantis_manuals <- function(dest_dir = NULL, overwrite = FALSE) {
+  .ra_ai_ensure_loaded()
+  ra_ai_download_atlantis_manuals(dest_dir = dest_dir,
+                                  overwrite = overwrite,
+                                  verbose = TRUE)
 }

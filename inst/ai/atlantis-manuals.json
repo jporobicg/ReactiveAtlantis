@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "description": "CSIRO Atlantis user-guide PDFs linked from the public Accessing Atlantis page. The files themselves are CSIRO copyright and are not shipped in this package; download them locally with inst/ai/download_atlantis_manuals.R.",
+  "listed_from": "https://research.csiro.au/atlantis/home/links/",
+  "also_listed_from": [
+    "https://research.csiro.au/atlantis/home/useful-references/"
+  ],
+  "copyright": "Commonwealth Scientific and Industrial Research Organisation (CSIRO). Public PDF links may be downloaded for personal information, research or study. Do not change the files, do not strip copyright notices, and do not redistribute the PDFs with this package. See https://www.csiro.au/en/about/Policies/Legal/Copyright",
+  "not_downloaded": [
+    {
+      "title": "Lessons in modelling and management of marine ecosystems: The Atlantis experience (Fulton et al. 2011)",
+      "url": "https://onlinelibrary.wiley.com/doi/abs/10.1111/j.1467-2979.2011.00412.x",
+      "reason": "Wiley journal paywall; overview paper, not a user-guide PDF"
+    }
+  ],
+  "manuals": [
+    {
+      "id": "atlantis-user-guide-part-i",
+      "title": "Atlantis User's Guide Part I: General Overview, Physics & Ecology",
+      "filename": "AtlantisUserGuide_PartI.pdf",
+      "listed_url": "https://research.csiro.au/atlantis/wp-content/uploads/sites/52/2025/05/AtlantisUserGuide_PartI.pdf",
+      "urls": [
+        "https://research.csiro.au/atlantis/wp-content/uploads/sites/52/2025/05/AtlantisUserGuide_PartI.pdf"
+      ],
+      "listed_on": [
+        "https://research.csiro.au/atlantis/home/links/",
+        "https://research.csiro.au/atlantis/home/useful-references/"
+      ],
+      "covers": "ecological system"
+    },
+    {
+      "id": "atlantis-user-guide-part-ii",
+      "title": "Atlantis User's Guide Part II: Socio-Economics",
+      "filename": "AtlantisUserGuide_PartII.pdf",
+      "listed_url": "https://research.csiro.au/atlantis/wp-content/uploads/sites/52/2024/03/AtlantisUserGuide_PartII.pdf",
+      "urls": [
+        "https://research.csiro.au/atlantis/wp-content/uploads/sites/52/2025/06/AtlantisUserGuide_PartII.pdf",
+        "https://research.csiro.au/atlantis/wp-content/uploads/sites/52/2024/03/AtlantisUserGuide_PartII.pdf"
+      ],
+      "listed_on": [
+        "https://research.csiro.au/atlantis/home/links/",
+        "https://research.csiro.au/atlantis/home/useful-references/"
+      ],
+      "covers": "human components",
+      "note": "The Accessing Atlantis page still links the 2024/03 path, which currently 404s. The working file is the 2025/06 upload listed under Useful References."
+    }
+  ]
+}

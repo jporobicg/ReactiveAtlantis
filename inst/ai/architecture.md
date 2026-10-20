@@ -58,16 +58,23 @@ diagnostics.
 
 ## Corpus
 
-Real Atlantis manuals, Atlantis C source, and calibration notes were **not**
-supplied in this repository. The default manifest
-(`inst/ai/sources.json`) indexes:
+The default manifest (`inst/ai/sources.json`) indexes a fixture tree under
+`inst/ai/fixtures/` marked `FIXTURE-NOT-OFFICIAL`, plus this package’s own
+README, `R/`, Shiny modules, and a navigation catalog from the live tab list.
+Tests keep using that fixture corpus.
 
-1. A fixture tree under `inst/ai/fixtures/` marked `FIXTURE-NOT-OFFICIAL`.
-2. ReactiveAtlantis’s own README, `R/`, and `inst/shiny/modules`.
-3. A navigation catalog generated from the live tab list.
+CSIRO Atlantis user-guide PDFs are linked from
+https://research.csiro.au/atlantis/home/links/ (Part I ecology, Part II human
+components). They are CSIRO copyright: download a local copy for research or
+study, but do **not** commit the PDF files. `inst/ai/atlantis-manuals.json`
+holds the URLs. `download_atlantis_manuals()` / `inst/ai/download_atlantis_manuals.R`
+writes them to `RA_AI_CORPUS_DIR`. Index with
+`inst/ai/sources.atlantis-manuals.json` (`max_file_bytes` is 25 MB because
+Part I is ~11 MB). The Wiley overview paper on that page is a paywall
+journal article and is not downloaded.
 
-Replace fixture paths by copying `inst/ai/sources.example.json` and setting
-`RA_AI_SOURCES_CONFIG`.
+Atlantis C source and calibration notes still need a local path; copy
+`inst/ai/sources.example.json` and set `RA_AI_SOURCES_CONFIG`.
 
 ## Assumptions
 

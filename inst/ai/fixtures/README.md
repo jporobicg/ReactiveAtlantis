@@ -8,9 +8,11 @@ It is **not** an Atlantis User Guide, **not** a copy of Atlantis C source, and
 **not** a set of reviewed calibration procedures. Do not treat numbers, process
 descriptions, or case studies here as authoritative.
 
-Swap in the real corpus by pointing `RA_AI_SOURCES_CONFIG` at a manifest whose
-`path` entries locate the actual manuals, source tree, and calibration notes.
-See `inst/ai/sources.json` and `inst/ai/sources.example.json`.
+Swap in the CSIRO user-guide PDFs by running
+`inst/ai/download_atlantis_manuals.R` and pointing `RA_AI_SOURCES_CONFIG` at
+`inst/ai/sources.atlantis-manuals.json`. The PDFs stay in a local corpus
+directory and are not committed. For Atlantis source or calibration notes,
+copy `inst/ai/sources.example.json`. Tests continue to use this fixture tree.
 
 ReactiveAtlantis's own R/Shiny source and help **are** real and are indexed
 from the package via the default manifest (`ra-shiny-modules`, `ra-r-source`,
