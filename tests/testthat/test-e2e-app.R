@@ -3,8 +3,10 @@
 Sys.setenv(NOT_CRAN = "true")
 
 has_plot_image <- function(html) {
-  grepl("<img", html, ignore.case = TRUE) &&
-    grepl("src\\s*=", html, ignore.case = TRUE)
+  (grepl("<img", html, ignore.case = TRUE) &&
+     grepl("src\\s*=", html, ignore.case = TRUE)) ||
+    grepl("plotly", html, ignore.case = TRUE) ||
+    grepl("js-plotly", html, ignore.case = TRUE)
 }
 
 has_table <- function(html) {

@@ -50,10 +50,11 @@ ra_ai_nav_catalog <- function() {
       title = "Spatial",
       module = "spatial",
       summary = paste(
-        "Biomass per box drawn from .bgm polygons, depth-layer selector",
-        "(water layers, sediment, integrated), time slider, group selector,",
-        "per-box series; boundary boxes outlined. By-age view plots ResN,",
-        "StructN, numbers and biomass for one box and layer."
+        "Box map for a group or tracer at one depth layer (per-box water",
+        "layers, sediment, or integrated) with a time slider and play control.",
+        "Time series for the selected box, all boxes, or the whole system.",
+        "Click a box to select it. By-age view plots ResN, StructN, numbers",
+        "and biomass for one box and layer."
       ),
       keywords = c("spatial", "map", "box", "polygon", "bgm", "distribution",
                    "layer", "depth", "sediment", "collapse", "crash", "age class")

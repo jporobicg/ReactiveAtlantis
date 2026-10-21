@@ -302,6 +302,43 @@ write_nesp_style_pair <- function(dir) {
   write_synthetic_atlantis_pair(dir)
 }
 
+##' BGM that stores vertices globally and boxes as vertex indices (NESP-style).
+write_index_bgm <- function(path) {
+  writeLines(c(
+    "nbox 3",
+    "vert 0 0 0",
+    "vert 1 1 0",
+    "vert 2 1 1",
+    "vert 3 0 1",
+    "vert 4 2 0",
+    "vert 5 2 1",
+    "vert 6 3 0",
+    "vert 7 3 1",
+    "box0.vert 0",
+    "box0.vert 1",
+    "box0.vert 2",
+    "box0.vert 3",
+    "box0.ibox 1 2 -1",
+    "box0.botz -50",
+    "box0.area 1",
+    "box1.vert 1",
+    "box1.vert 4",
+    "box1.vert 5",
+    "box1.vert 2",
+    "box1.ibox 0 2",
+    "box1.botz -20",
+    "box1.area 1",
+    "box2.vert 4",
+    "box2.vert 6",
+    "box2.vert 7",
+    "box2.vert 5",
+    "box2.ibox 0 1",
+    "box2.botz 0",
+    "box2.area 1"
+  ), path)
+  invisible(path)
+}
+
 ##' Biology NetCDF with 3 water layers + sediment and padded shallow boxes
 write_layered_biology_nc <- function(path, count_var = "numlayers") {
   dim_z <- ncdf4::ncdim_def("z", "layer", 1:4)

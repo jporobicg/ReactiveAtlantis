@@ -76,7 +76,11 @@ plot_message <- function(msg) {
 ##' Catch req() / errors so a plotOutput always has an image
 plot_or_message <- function(msg, expr) {
   tryCatch(force(expr), error = function(e) {
-    plot_message(msg)
+    if (inherits(e, "shiny.silent.error")) {
+      plot_message(msg)
+    } else {
+      plot_message(e$message)
+    }
     invisible(NULL)
   })
 }

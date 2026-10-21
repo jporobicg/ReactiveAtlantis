@@ -8,6 +8,8 @@ RA_SAND <- "#F7F4EC"
 RA_INK <- "#1B2833"
 RA_GRID <- "#E6E2D6"
 RA_MUTED <- "#5C6B73"
+## Darker than the fill and the sand theme so Spatial box edges stay visible.
+RA_BOX_OUTLINE <- "#0A1218"
 
 ra_theme <- function() {
   bslib::bs_theme(

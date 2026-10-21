@@ -343,6 +343,15 @@ detect_project_files <- function(folder) {
   paths$specific_pred_mort <- pick_first(files, "SpecificPredMort\\.txt$")
   paths$specific_mort <- pick_first(files, "SpecificMort\\.txt$", exclude = "Pred")
   paths$bgm <- pick_first(files, "\\.bgm$")
+  if (!path_ok(paths$bgm)) {
+    deep <- list.files(folder, pattern = "\\.bgm$", full.names = TRUE,
+                       recursive = TRUE, ignore.case = TRUE)
+    if (length(deep)) {
+      deep <- deep[!grepl("(^|/)(\\.|output|OUT|restart)(/|$)",
+                          dirname(deep), ignore.case = TRUE)]
+      paths$bgm <- pick_first(deep, "\\.bgm$")
+    }
+  }
   paths$catch_nc <- pick_first(files, "CATCH.*\\.nc$|Catch.*\\.nc$")
   paths$prod_nc <- pick_first(files, "PROD.*\\.nc$|Prod.*\\.nc$")
   paths$init_nc <- pick_first(files, "init.*\\.nc$|_ini.*\\.nc$")

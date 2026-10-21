@@ -1676,9 +1676,14 @@ test_that("Atlantis layer helper masks padded water and names surface/sediment",
 
   src <- paste(readLines(file.path(root, "inst", "shiny", "modules", "spatial_module.R")),
                collapse = "\n")
-  expect_true(grepl("RA_BOX_OUTLINE", src, fixed = TRUE))
+  helper_src <- paste(readLines(file.path(root, "inst", "shiny", "modules",
+                                          "analysis_helpers.R")), collapse = "\n")
+  expect_true(grepl("RA_BOX_OUTLINE", helper_src, fixed = TRUE) ||
+                grepl("RA_BOX_OUTLINE",
+                      paste(readLines(file.path(mod, "theme.R")), collapse = "\n"),
+                      fixed = TRUE))
   expect_identical(RA_BOX_OUTLINE, "#0A1218")
-  expect_true(grepl("linewidth = 0.25", src, fixed = TRUE))
+  expect_true(grepl("linewidth = 0.25", helper_src, fixed = TRUE))
   expect_false(grepl("RA_BOX_OUTLINE_HALO", src, fixed = TRUE))
   expect_false(grepl("outline/label|Show box labels|Show outlines", src, ignore.case = TRUE))
   ui_html <- paste(as.character(spatial_ui("spatial")), collapse = " ")
@@ -1857,6 +1862,66 @@ test_that("shared palette spreads adjacent series colours", {
   lv <- spread_series_levels(c("COD", "HAD", "WHG", "Other"), pal)
   expect_identical(tail(lv, 1), "Other")
   expect_true(all(c("COD", "HAD", "WHG") %in% lv))
+})
+
+test_that("Spatial map draws NESP-style pairs and index BGM polygons", {
+  nesp <- tempfile("nesp_map_")
+  pair <- write_nesp_style_pair(nesp)
+  on.exit(unlink(nesp, recursive = TRUE), add = TRUE)
+  nested <- file.path(pair$config_dir, "geometry")
+  dir.create(nested, recursive = TRUE, showWarnings = FALSE)
+  idx_bgm <- file.path(nested, "model.bgm")
+  write_index_bgm(idx_bgm)
+  file.remove(file.path(pair$config_dir, "geo.bgm"))
+  det <- detect_run_pair(pair$config_dir, pair$output_dir)
+  expect_true(path_ok(det$paths$bgm))
+  expect_equal(basename(det$paths$bgm), "model.bgm")
+
+  poly <- read_bgm_polygons(det$paths$bgm)
+  expect_gt(nrow(poly), 0)
+  expect_equal(sort(unique(poly$boxid)), 0:2)
+  expect_true(all(is.finite(poly$x) & is.finite(poly$y)))
+
+  nc <- ncdf4::nc_open(det$paths$output_nc)
+  on.exit(ncdf4::nc_close(nc), add = TRUE)
+  grp <- utils::read.csv(det$paths$groups, stringsAsFactors = FALSE)
+  names(grp) <- tolower(names(grp))
+  info <- atlantis_layer_info(nc)
+  vals <- spatial_box_values(nc, grp, kind = "biomass", fg_code = "COD",
+                             layer_key = "integrated", info = info)
+  expect_gt(nrow(vals), 0)
+  expect_true(any(is.finite(vals$Value)))
+  joined <- spatial_join_polygons(poly, vals, time_i = 1L)
+  expect_true(any(is.finite(joined$Value)))
+  p <- plot_spatial_map(joined, selected_box = 1L, title = "NESP map")
+  expect_s3_class(p, "ggplot")
+  expect_true(any(vapply(p$layers, function(ly) inherits(ly$geom, "GeomPolygon"),
+                         logical(1))))
+
+  empty_poly <- read_bgm_polygons(tempfile())
+  expect_equal(nrow(empty_poly), 0)
+  expect_error(plot_spatial_map(empty_poly), "No box polygons")
+
+  fx <- northsea_fixture_dir()
+  skip_if_not(dir.exists(fx) && file.exists(file.path(fx, "NorthSea.bgm")),
+              "North Sea fixture not packaged")
+  ns_poly <- read_bgm_polygons(file.path(fx, "NorthSea.bgm"))
+  expect_gte(length(unique(ns_poly$boxid)), 3)
+  nc_ns <- ncdf4::nc_open(file.path(fx, "outputNorthSea.nc"))
+  on.exit(ncdf4::nc_close(nc_ns), add = TRUE)
+  grp_ns <- utils::read.csv(file.path(fx, "functionalGroups.csv"),
+                            stringsAsFactors = FALSE)
+  names(grp_ns) <- tolower(names(grp_ns))
+  ns_vals <- spatial_box_values(nc_ns, grp_ns, kind = "biomass", fg_code = "COD",
+                                layer_key = "integrated",
+                                info = atlantis_layer_info(nc_ns))
+  ns_join <- spatial_join_polygons(ns_poly, ns_vals, time_i = 1L)
+  expect_true(any(is.finite(ns_join$Value)))
+  p_ns <- plot_spatial_map(ns_join, title = "North Sea")
+  expect_s3_class(p_ns, "ggplot")
+  ts <- spatial_ts_values(ns_vals, scope = "system")
+  expect_equal(unique(ts$Box), -1L)
+  expect_gt(nrow(ts), 0)
 })
 
 test_that("Ages tab and Spatial by-age use shared layer helper", {
