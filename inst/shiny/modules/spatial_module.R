@@ -54,7 +54,8 @@ spatial_ui <- function(id) {
       ),
       conditionalPanel(
         "input.view == 'map'", ns = ns,
-        plotly::plotlyOutput(ns("map_plot"), height = "520px"),
+        uiOutput(ns("map_status")),
+        plotly::plotlyOutput(ns("map_plot"), height = "560px"),
         plotOutput(ns("box_ts"), height = "280px")
       ),
       conditionalPanel(
@@ -121,23 +122,35 @@ spatial_server <- function(id, project = NULL) {
     fg_d <- ra_debounce(shiny::reactive(input$fg), 250)
     layer_d <- ra_debounce(shiny::reactive(input$layer), 250)
 
+    bgm_lookup <- reactive({
+      snap <- ps()
+      dat <- tryCatch(ensure_project_data(snap, c("nc_out", "inf_box")),
+                      error = function(e) snap$data)
+      searched <- unique(c(
+        ra_nz(snap$config_dir), ra_nz(snap$output_dir),
+        ra_nz(dat$bgm_path), ra_nz(snap$paths$bgm)
+      ))
+      searched <- searched[nzchar(searched)]
+      path <- find_bgm_path(
+        explicit = c(dat$bgm_path, snap$paths$bgm),
+        config_dir = snap$config_dir,
+        output_dir = snap$output_dir,
+        prm_paths = c(snap$paths$run_prm, snap$paths$bio_prm, snap$paths$force_prm)
+      )
+      list(path = path, searched = searched)
+    })
+
     polys <- reactive({
-      dat <- ensure_project_data(ps(), c("nc_out", "inf_box"))
-      path <- dat$bgm_path
-      if (is.null(path) || !file.exists(as.character(path)[1])) {
-        path <- ps()$paths$bgm
-      }
-      req(path_ok(path))
-      poly <- read_bgm_polygons(path)
-      if (nrow(poly) == 0) {
-        stop("No box polygons were found in the BGM file.")
-      }
-      poly
+      hit <- bgm_lookup()
+      read_bgm_polygons(hit$path)
     })
 
     box_vals <- reactive({
-      dat <- ensure_project_data(ps(), c("nc_out", "inf_box"))
-      req(dat$nc_out, dat$grp)
+      dat <- tryCatch(ensure_project_data(ps(), c("nc_out", "inf_box")),
+                      error = function(e) NULL)
+      if (is.null(dat) || is.null(dat$nc_out) || is.null(dat$grp)) {
+        return(empty_spatial_values())
+      }
       info <- atlantis_layer_info(dat$nc_out, dat$inf_box)
       key <- layer_d()
       if (is.null(key) || !nzchar(as.character(key))) key <- "integrated"
@@ -206,16 +219,45 @@ spatial_server <- function(id, project = NULL) {
       paste(what, "—", lay_lab)
     }
 
-    map_gg <- reactive({
+    map_diag <- reactive({
+      hit <- tryCatch(bgm_lookup(), error = function(e) list(path = NA, searched = NULL))
+      poly <- tryCatch(polys(), error = function(e) bgm_empty_poly(e$message))
+      vals <- tryCatch(box_vals(), error = function(e) empty_spatial_values())
+      dat <- tryCatch(ps()$data, error = function(e) NULL)
+      diagnose_spatial_map(
+        bgm_path = hit$path, poly = poly, values = vals,
+        nc = if (!is.null(dat)) dat$nc_out else NULL,
+        fg = fg_d(), layer_key = layer_d(),
+        searched = hit$searched
+      )
+    })
+
+    output$map_status <- renderUI({
+      d <- tryCatch(map_diag(), error = function(e) {
+        list(ok = FALSE, notes = e$message)
+      })
+      cls <- if (isTRUE(d$ok)) "ra-map-status is-ok" else "ra-map-status is-bad"
+      shiny::div(
+        class = cls,
+        shiny::tags$ul(lapply(as.character(d$notes), function(n) shiny::tags$li(n)))
+      )
+    })
+
+    map_joined <- reactive({
       poly <- polys()
-      vals <- box_vals()
-      req(nrow(poly) > 0)
+      vals <- tryCatch(box_vals(), error = function(e) empty_spatial_values())
+      if (is.null(poly) || nrow(poly) == 0) return(poly)
       time_i <- if (is.null(input$time_i)) 1L else as.integer(input$time_i)[1]
       if (!is.finite(time_i)) time_i <- 1L
       poly <- spatial_join_polygons(poly, vals, time_i)
       if (!isTRUE(input$highlight_boundary)) poly$boundary <- FALSE
+      poly
+    })
+
+    map_fill <- reactive({
+      vals <- tryCatch(box_vals(), error = function(e) empty_spatial_values())
       fill_lim <- NULL
-      if (isTRUE(input$stable_scale) && nrow(vals) > 0) {
+      if (isTRUE(input$stable_scale) && !is.null(vals) && nrow(vals) > 0) {
         rng <- range(vals$Value, na.rm = TRUE)
         if (all(is.finite(rng))) fill_lim <- rng
       }
@@ -226,7 +268,16 @@ spatial_server <- function(id, project = NULL) {
       } else {
         "#0B3C5D"
       }
-      plot_spatial_map(poly, fill_lim = fill_lim, fill_high = fill_high,
+      list(lim = fill_lim, high = fill_high)
+    })
+
+    map_gg <- reactive({
+      poly <- map_joined()
+      if (is.null(poly) || nrow(poly) == 0) {
+        stop(attr(poly, "reason") %||% "No box polygons were found in the BGM file.")
+      }
+      fl <- map_fill()
+      plot_spatial_map(poly, fill_lim = fl$lim, fill_high = fl$high,
                        selected_box = input$box, title = map_title(),
                        legend = if (identical(input$kind, "biomass")) "Biomass (t)"
                        else if (identical(input$kind, "numbers")) "Numbers"
@@ -234,17 +285,29 @@ spatial_server <- function(id, project = NULL) {
     })
 
     output$map_plot <- plotly::renderPlotly({
-      p <- tryCatch(map_gg(), error = function(e) {
-        msg <- if (inherits(e, "shiny.silent.error")) {
-          "Load a run with output.nc and a BGM to map biomass"
+      poly <- tryCatch(map_joined(), error = function(e) bgm_empty_poly(e$message))
+      if (is.null(poly) || nrow(poly) == 0) {
+        d <- tryCatch(map_diag(), error = function(e) NULL)
+        msg <- if (!is.null(d) && length(d$notes)) {
+          paste(d$notes, collapse = " ")
         } else {
-          e$message
+          attr(poly, "reason") %||% "Load a run with output.nc and a BGM to map biomass"
         }
-        ggplot2::ggplot() + ggplot2::labs(title = msg) + theme_reactiveatlantis()
-      })
-      plt <- ra_ggplotly(p, tooltip = "text")
+        plt <- spatial_empty_plotly(msg)
+      } else {
+        fl <- map_fill()
+        plt <- plot_spatial_map_plotly(
+          poly, fill_lim = fl$lim, fill_high = fl$high,
+          selected_box = input$box, title = map_title(),
+          legend = if (identical(input$kind, "biomass")) "Biomass (t)"
+          else if (identical(input$kind, "numbers")) "Numbers"
+          else as.character(input$tracer)
+        )
+      }
       if (ra_is_plotly(plt)) {
         plt$x$source <- ns("map")
+        plt <- plotly::config(plt, displaylogo = FALSE, scrollZoom = TRUE,
+                              modeBarButtonsToRemove = c("lasso2d", "select2d"))
         tryCatch(plotly::event_register(plt, "plotly_click"), error = function(e) plt)
       }
       plt
@@ -328,5 +391,7 @@ spatial_server <- function(id, project = NULL) {
     })
 
     keep_outputs_alive(output, "banner")
+    keep_outputs_alive(output, "map_status")
+    keep_outputs_alive(output, "map_plot")
   })
 }

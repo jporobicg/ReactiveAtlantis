@@ -339,6 +339,39 @@ write_index_bgm <- function(path) {
   invisible(path)
 }
 
+##' BGM using nbox=N (equals form) and uppercase .BGM extension.
+write_equals_nbox_bgm <- function(path) {
+  writeLines(c(
+    "#projection +proj=utm +zone=55 +south +ellps=WGS84",
+    "nbox=3",
+    "box0.vert 4", "0 0", "1 0", "1 1", "0 1",
+    "box0.ibox 1 2 -1", "box0.botz -50", "box0.area 1",
+    "box1.vert 4", "1 0", "2 0", "2 1", "1 1",
+    "box1.ibox 0 2", "box1.botz -20", "box1.area 1",
+    "box2.vert 4", "2 0", "3 0", "3 1", "2 1",
+    "box2.ibox 0 1", "box2.botz 0", "box2.area 1"
+  ), path)
+  invisible(path)
+}
+
+##' NESP-style pair with BGM only under output/geometry as .BGM (nbox=).
+write_hard_nesp_pair <- function(dir) {
+  pair <- write_nesp_style_pair(dir)
+  old <- list.files(pair$config_dir, pattern = "\\.bgm$", full.names = TRUE,
+                    ignore.case = TRUE)
+  unlink(old)
+  geo <- file.path(pair$output_dir, "geometry")
+  dir.create(geo, recursive = TRUE, showWarnings = FALSE)
+  bgm <- file.path(geo, "VMPA_SETAS.BGM")
+  write_equals_nbox_bgm(bgm)
+  run <- file.path(pair$config_dir, "run.prm")
+  if (file.exists(run)) {
+    writeLines(c(readLines(run), "geometry VMPA_SETAS.BGM"), run)
+  }
+  pair$bgm <- bgm
+  pair
+}
+
 ##' Biology NetCDF with 3 water layers + sediment and padded shallow boxes
 write_layered_biology_nc <- function(path, count_var = "numlayers") {
   dim_z <- ncdf4::ncdim_def("z", "layer", 1:4)

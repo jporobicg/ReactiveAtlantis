@@ -2169,3 +2169,147 @@ test_that("hidden-tab plots are not kept alive after load", {
   expect_true(grepl("ra_scale_x_year", src, fixed = TRUE))
 })
 
+test_that("pPREY matrix keeps every predator x prey cell including zeros", {
+  ava <- rbind(
+    pPREY1COD1 = c(COD = 0, HAD = 0.8, PHY = 0.2, DET = 0),
+    pPREY2COD1 = c(COD = 0.1, HAD = 0, PHY = 0, DET = 0),
+    pPREYPHY = c(COD = 0, HAD = 0, PHY = 0, DET = 0)
+  )
+  grp <- data.frame(code = c("COD", "HAD", "PHY", "DET"),
+                    name = c("Cod", "Haddock", "Phyto", "Detritus"),
+                    stringsAsFactors = FALSE)
+  expect_equal(sum(ava == 0), 9)
+  plt <- plotly::plotly_build(plot_feed_matrix_plotly(ava, grp = grp))
+  expect_true(inherits(plt, "plotly"))
+  z <- plt$x$data[[1]]$z
+  expect_equal(length(plt$x$data[[1]]$x), ncol(ava))
+  expect_equal(length(plt$x$data[[1]]$y), nrow(ava))
+  expect_true(any(unlist(z) == 0, na.rm = TRUE))
+  expect_equal(sum(is.na(unlist(z))), 0)
+  sz <- feed_matrix_plot_size(ava)
+  expect_gte(sz$height, 520)
+  big <- matrix(0, nrow = 80, ncol = 55)
+  rownames(big) <- paste0("pPREY1G", sprintf("%02d", seq_len(80)), "1")
+  colnames(big) <- paste0("G", sprintf("%02d", seq_len(55)))
+  expect_gt(feed_matrix_plot_size(big)$height, 1000)
+  expect_true(grepl("ra-scroll-plot",
+                    paste(as.character(feeding_ui("feeding")), collapse = " ")))
+})
+
+test_that("read_pprey_matrix pads uneven rows and same-line values", {
+  txt <- c(
+    "pPREY1COD1 4",
+    "0.1 0.8 0.0 0.0",
+    "pPREY2COD1 0.0 0.2 0.3",
+    "pPREY1HAD 0.4 0.1 0.0 0.05 0.01"
+  )
+  mat <- read_pprey_matrix(txt)
+  expect_equal(nrow(mat), 3)
+  expect_equal(ncol(mat), 5)
+  expect_equal(unname(mat["pPREY1COD1", 2]), 0.8)
+  expect_equal(unname(mat["pPREY2COD1", 4]), 0)
+  expect_equal(unname(mat["pPREY1HAD", 5]), 0.01)
+  expect_equal(rownames(mat), c("pPREY1COD1", "pPREY2COD1", "pPREY1HAD"))
+})
+
+test_that("Spatial diagnose and native plotly report why a map cannot draw", {
+  miss <- diagnose_spatial_map(bgm_path = tempfile())
+  expect_false(isTRUE(miss$ok))
+  expect_match(miss$message, "BGM not found at path")
+  empty <- diagnose_spatial_map(bgm_path = NULL, searched = c("/cfg", "/out"))
+  expect_match(empty$message, "Searched")
+
+  nesp <- tempfile("hard_nesp_")
+  pair <- write_hard_nesp_pair(nesp)
+  on.exit(unlink(nesp, recursive = TRUE), add = TRUE)
+  det <- detect_run_pair(pair$config_dir, pair$output_dir)
+  expect_true(path_ok(det$paths$bgm))
+  expect_equal(toupper(basename(det$paths$bgm)), "VMPA_SETAS.BGM")
+  poly <- read_bgm_polygons(det$paths$bgm)
+  expect_gt(nrow(poly), 0)
+  expect_equal(sort(unique(poly$boxid)), 0:2)
+  d <- diagnose_spatial_map(det$paths$bgm, poly)
+  expect_true(d$ok)
+  expect_match(d$message, "polygons: 3")
+
+  nc <- ncdf4::nc_open(det$paths$output_nc)
+  on.exit(ncdf4::nc_close(nc), add = TRUE)
+  grp <- utils::read.csv(det$paths$groups, stringsAsFactors = FALSE)
+  names(grp) <- tolower(names(grp))
+  vals <- spatial_box_values(nc, grp, kind = "biomass", fg_code = "COD",
+                             layer_key = "integrated",
+                             info = atlantis_layer_info(nc))
+  joined <- spatial_join_polygons(poly, vals, time_i = 1L)
+  plt <- plotly::plotly_build(plot_spatial_map_plotly(
+    joined, selected_box = 1L, title = "NESP"))
+  expect_true(inherits(plt, "plotly"))
+  expect_gte(length(plt$x$data), 3)
+
+  blank <- plotly::plotly_build(plot_spatial_map_plotly(read_bgm_polygons(tempfile())))
+  expect_true(inherits(blank, "plotly"))
+  ann <- tryCatch(blank$x$layout$annotations[[1]]$text, error = function(e) "")
+  expect_match(paste(ann, collapse = " "), "BGM not found|No box")
+})
+
+test_that("BGM discovery finds nbox= , .BGM, output/geometry and inferred nbox", {
+  tmp <- tempfile("bgm_disc_")
+  dir.create(tmp)
+  on.exit(unlink(tmp, recursive = TRUE), add = TRUE)
+  cfg <- file.path(tmp, "0000_NESP_bio")
+  out <- file.path(tmp, "outputFolder")
+  dir.create(cfg, recursive = TRUE)
+  dir.create(file.path(out, "geometry"), recursive = TRUE)
+  writeLines("tstop 365", file.path(cfg, "NESP_bio_run.prm"))
+  writeLines(c("KUP_COD 1", "pPREY1COD 2", "0.1 0.2"),
+             file.path(cfg, "NESP_bio.prm"))
+  writeLines(c("geometry VMPA_SETAS.BGM"), file.path(cfg, "run.prm"))
+  write_equals_nbox_bgm(file.path(out, "geometry", "VMPA_SETAS.BGM"))
+  found <- find_bgm_path(config_dir = cfg, output_dir = out,
+                         prm_paths = file.path(cfg, "run.prm"))
+  expect_true(path_ok(found))
+  expect_equal(toupper(basename(found)), "VMPA_SETAS.BGM")
+
+  no_nbox <- tempfile(fileext = ".bgm")
+  writeLines(c(
+    "box0.vert 4", "0 0", "1 0", "1 1", "0 1",
+    "box1.vert 4", "1 0", "2 0", "2 1", "1 1"
+  ), no_nbox)
+  on.exit(unlink(no_nbox), add = TRUE)
+  expect_equal(bgm_nbox(read_bgm_lines(no_nbox)), 2L)
+  poly <- read_bgm_polygons(no_nbox)
+  expect_equal(sort(unique(poly$boxid)), 0:1)
+
+  eq <- tempfile(fileext = ".bgm")
+  write_equals_nbox_bgm(eq)
+  on.exit(unlink(eq), add = TRUE)
+  expect_equal(bgm_nbox(read_bgm_lines(eq)), 3L)
+  expect_equal(length(unique(read_bgm_polygons(eq)$boxid)), 3)
+})
+
+test_that("North Sea pPREY keeps all rows and Spatial diagnose is on the map", {
+  fx <- northsea_fixture_dir()
+  skip_if_not(dir.exists(fx) && file.exists(file.path(fx, "059_C_PAD_T15_x10.prm")),
+              "North Sea fixture not packaged")
+  prm <- readLines(file.path(fx, "059_C_PAD_T15_x10.prm"), warn = FALSE)
+  mat <- read_pprey_matrix(prm)
+  expect_gt(nrow(mat), 100)
+  expect_gt(ncol(mat), 40)
+  expect_true(any(mat == 0, na.rm = TRUE))
+  plt <- plotly::plotly_build(plot_feed_matrix_plotly(mat))
+  expect_equal(length(plt$x$data[[1]]$y), nrow(mat))
+  expect_equal(length(plt$x$data[[1]]$x), ncol(mat))
+  expect_equal(dim(plt$x$data[[1]]$z), dim(mat))
+  expect_true(any(unlist(plt$x$data[[1]]$z) == 0, na.rm = TRUE))
+
+  ns_poly <- read_bgm_polygons(file.path(fx, "NorthSea.bgm"))
+  expect_gte(length(unique(ns_poly$boxid)), 20)
+  d <- diagnose_spatial_map(file.path(fx, "NorthSea.bgm"), ns_poly)
+  expect_true(d$ok)
+  expect_match(d$message, "polygons:")
+  plt_m <- plotly::plotly_build(plot_spatial_map_plotly(ns_poly, title = "North Sea"))
+  expect_true(inherits(plt_m, "plotly"))
+  expect_gte(length(plt_m$x$data), 20)
+  ui <- paste(as.character(spatial_ui("spatial")), collapse = " ")
+  expect_true(grepl("map_status", ui))
+})
+

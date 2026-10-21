@@ -325,6 +325,63 @@ tool_checklist_ui <- function(project) {
   shiny::div(class = "ra-check", rows)
 }
 
+##' List .bgm / .BGM files under a folder (case-insensitive).
+list_bgm_files <- function(folder, recursive = TRUE) {
+  if (is.null(folder) || !dir.exists(as.character(folder)[1])) return(character())
+  files <- list.files(folder, pattern = "\\.bgm$", full.names = TRUE,
+                      recursive = isTRUE(recursive), ignore.case = TRUE)
+  files <- files[!dir.exists(files)]
+  files <- files[!grepl("(^|/)\\.", basename(dirname(files)))]
+  files <- files[!vapply(basename(files), is_os_duplicate, logical(1))]
+  unique(files)
+}
+
+##' Geometry filenames mentioned in a run / biology .prm
+bgm_name_from_prm <- function(paths) {
+  names <- character()
+  for (p in paths) {
+    if (!path_ok(p)) next
+    lines <- tryCatch(readLines(p, warn = FALSE, n = 8000),
+                      error = function(e) character())
+    if (!length(lines)) next
+    hits <- grep("\\.bgm\\b", lines, ignore.case = TRUE, value = TRUE)
+    hits <- hits[!grepl("^[[:space:]]*#", hits)]
+    toks <- unlist(strsplit(hits, "[[:space:]=,'\"]+"), use.names = FALSE)
+    names <- c(names, toks[grepl("\\.bgm$", toks, ignore.case = TRUE)])
+  }
+  unique(basename(names))
+}
+
+##' Find a BGM on disk: explicit path, config/output (and parents / geometry).
+##'
+##' Does not drop a file just because a parent folder is named "output".
+find_bgm_path <- function(explicit = NULL, config_dir = NULL, output_dir = NULL,
+                          prm_paths = NULL) {
+  for (p in explicit) {
+    got <- as_path(p)
+    if (path_ok(got)) return(got)
+  }
+  roots <- unique(c(ra_nz(config_dir), ra_nz(output_dir)))
+  roots <- roots[nzchar(roots)]
+  parents <- unique(dirname(roots[dir.exists(roots)]))
+  extra <- character()
+  for (r in unique(c(roots[dir.exists(roots)], parents[dir.exists(parents)]))) {
+    extra <- c(extra, file.path(r, c("geometry", "bgm", "gis", "spatial",
+                                     "boxes", "input", "grid")))
+  }
+  search <- unique(c(roots, extra, parents))
+  found <- character()
+  for (s in search) found <- c(found, list_bgm_files(s, recursive = TRUE))
+  found <- unique(found[file.exists(found)])
+  wanted <- bgm_name_from_prm(prm_paths)
+  if (length(wanted) && length(found)) {
+    hit <- found[tolower(basename(found)) %in% tolower(wanted)]
+    if (length(hit)) return(as_path(hit))
+  }
+  if (length(found)) return(as_path(found))
+  NA_character_
+}
+
 ##' Detect Atlantis files in a folder by suffix and header
 ##' @param folder Directory path
 ##' @return Named list of file paths (NA if missing)
@@ -333,7 +390,6 @@ detect_project_files <- function(folder) {
   if (is.null(folder) || !dir.exists(folder)) return(paths)
   files <- list.files(folder, full.names = TRUE, recursive = FALSE)
   files <- files[!dir.exists(files)]
-  if (length(files) == 0) return(paths)
 
   paths$biomindx <- pick_first(files, "BiomIndx\\.txt$")
   paths$dietcheck <- pick_first(files, "DietCheck\\.txt$")
@@ -343,15 +399,6 @@ detect_project_files <- function(folder) {
   paths$specific_pred_mort <- pick_first(files, "SpecificPredMort\\.txt$")
   paths$specific_mort <- pick_first(files, "SpecificMort\\.txt$", exclude = "Pred")
   paths$bgm <- pick_first(files, "\\.bgm$")
-  if (!path_ok(paths$bgm)) {
-    deep <- list.files(folder, pattern = "\\.bgm$", full.names = TRUE,
-                       recursive = TRUE, ignore.case = TRUE)
-    if (length(deep)) {
-      deep <- deep[!grepl("(^|/)(\\.|output|OUT|restart)(/|$)",
-                          dirname(deep), ignore.case = TRUE)]
-      paths$bgm <- pick_first(deep, "\\.bgm$")
-    }
-  }
   paths$catch_nc <- pick_first(files, "CATCH.*\\.nc$|Catch.*\\.nc$")
   paths$prod_nc <- pick_first(files, "PROD.*\\.nc$|Prod.*\\.nc$")
   paths$init_nc <- pick_first(files, "init.*\\.nc$|_ini.*\\.nc$")
@@ -380,6 +427,15 @@ detect_project_files <- function(folder) {
   if (is.na(paths$run_prm)) paths$run_prm <- pick_first(files, "run.*\\.prm$")
   if (is.na(paths$force_prm)) {
     paths$force_prm <- pick_first(files, "force.*\\.prm$|forcing.*\\.prm$")
+  }
+
+  if (!path_ok(paths$bgm)) {
+    paths$bgm <- find_bgm_path(
+      explicit = paths$bgm,
+      config_dir = folder,
+      output_dir = folder,
+      prm_paths = c(paths$run_prm, paths$bio_prm, paths$force_prm)
+    )
   }
 
   normalize_paths(paths)
@@ -415,6 +471,18 @@ detect_run_pair <- function(config_dir = NULL, output_dir = NULL) {
   }
   for (role in CONFIG_ROLES) take(role, cfg, out)
   for (role in OUTPUT_ROLES) take(role, out, cfg)
+  if (!path_ok(paths$bgm)) {
+    found <- find_bgm_path(
+      config_dir = cfg_dir,
+      output_dir = out_dir,
+      prm_paths = c(paths$run_prm, paths$bio_prm, paths$force_prm,
+                    cfg$run_prm, cfg$bio_prm, out$run_prm, out$bio_prm)
+    )
+    if (path_ok(found)) {
+      paths$bgm <- found
+      if (!isTRUE(same) && !path_ok(cfg$bgm)) fallback <- c(fallback, "bgm")
+    }
+  }
   list(
     paths = normalize_paths(paths),
     fallback = unique(fallback),

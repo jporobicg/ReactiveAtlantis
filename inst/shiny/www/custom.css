@@ -620,3 +620,38 @@ h2, h3, h4, h5 {
 .ra-msg-followup {
   margin-top: 0.5rem;
 }
+
+.ra-scroll-plot {
+  overflow: auto;
+  max-height: 75vh;
+  max-width: 100%;
+  border: 1px solid rgba(11, 60, 93, 0.12);
+  background: #fff;
+  margin-bottom: 0.75rem;
+}
+
+.ra-map-status {
+  font-size: 0.92rem;
+  line-height: 1.35;
+  padding: 0.55rem 0.75rem;
+  margin-bottom: 0.6rem;
+  border: 1px solid rgba(11, 60, 93, 0.18);
+  background: #fffdf8;
+  color: #1b2833;
+}
+
+.ra-map-status.is-ok {
+  border-color: rgba(29, 120, 116, 0.35);
+}
+
+.ra-map-status.is-bad {
+  border-color: rgba(163, 59, 32, 0.45);
+  background: #f8ece8;
+  color: #5a2418;
+  font-weight: 600;
+}
+
+.ra-map-status ul {
+  margin: 0;
+  padding-left: 1.1rem;
+}

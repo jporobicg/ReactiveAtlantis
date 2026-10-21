@@ -118,6 +118,23 @@ ra_header <- tags$head(
       });
       if (el) el.click();
     });
+    function raResizePlotly() {
+      var plots = document.querySelectorAll('.js-plotly-plot');
+      plots.forEach(function(el) {
+        if (window.Plotly && el && el.offsetWidth > 0) {
+          try { window.Plotly.Plots.resize(el); } catch (e) {}
+        }
+      });
+    }
+    document.addEventListener('shown.bs.tab', function() {
+      setTimeout(raResizePlotly, 80);
+      setTimeout(raResizePlotly, 400);
+    });
+    if (window.jQuery) {
+      jQuery(document).on('shiny:value', function() {
+        setTimeout(raResizePlotly, 60);
+      });
+    }
   "))
 )
 

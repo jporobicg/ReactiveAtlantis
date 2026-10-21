@@ -414,9 +414,144 @@ add_obs_overlay <- function(p, obs, codes, type, facet_var = NULL) {
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
 
 bgm_nbox <- function(lines) {
-  hit <- grep("^nbox[[:space:]]+", lines)
-  if (length(hit) == 0) return(NA_integer_)
-  as.integer(sub("^nbox[[:space:]]+", "", lines[hit[1]]))
+  hit <- grep("^nbox\\b", lines, ignore.case = TRUE)
+  if (length(hit)) {
+    n <- suppressWarnings(as.integer(sub(".*?([0-9]+).*", "\\1", lines[hit[1]])))
+    if (is.finite(n) && n > 0) return(as.integer(n))
+  }
+  ids <- suppressWarnings(as.integer(sub(
+    "^box([0-9]+)\\..*", "\\1",
+    grep("^box[0-9]+\\.", lines, value = TRUE)
+  )))
+  ids <- ids[is.finite(ids)]
+  if (!length(ids)) return(NA_integer_)
+  as.integer(max(ids) + 1L)
+}
+
+bgm_empty_poly <- function(reason = "", path = NA_character_, nbox = NA_integer_) {
+  out <- data.frame(boxid = integer(), x = numeric(), y = numeric(),
+                    boundary = logical(), order = integer(),
+                    stringsAsFactors = FALSE)
+  attr(out, "reason") <- as.character(reason)[1]
+  attr(out, "path") <- as.character(path)[1]
+  attr(out, "nbox") <- as.integer(nbox)[1]
+  out
+}
+
+read_bgm_lines <- function(bgm_path) {
+  lines <- tryCatch(readLines(bgm_path, warn = FALSE, encoding = "UTF-8"),
+                    error = function(e) NULL)
+  if (is.null(lines)) {
+    lines <- tryCatch(readLines(bgm_path, warn = FALSE),
+                      error = function(e) character())
+  }
+  lines <- sub("^\ufeff", "", lines)
+  lines <- sub("#.*$", "", lines)
+  trimws(lines)
+}
+
+##' rbgm needs a projection line and chokes on commented "projection" text.
+normalize_bgm_for_rbgm <- function(bgm_path) {
+  raw <- tryCatch(readLines(bgm_path, warn = FALSE, encoding = "UTF-8"),
+                  error = function(e) readLines(bgm_path, warn = FALSE))
+  raw <- sub("^\ufeff", "", raw)
+  raw <- vapply(raw, function(ln) {
+    if (grepl("^#+\\s*projection\\b", ln, ignore.case = TRUE)) {
+      sub("^#+\\s*", "", ln)
+    } else {
+      ln
+    }
+  }, character(1), USE.NAMES = FALSE)
+  if (!any(grepl("^\\s*projection\\b", raw, ignore.case = TRUE))) {
+    raw <- c("projection +proj=longlat +datum=WGS84 +no_defs", raw)
+  }
+  tmp <- tempfile(fileext = ".bgm")
+  writeLines(raw, tmp)
+  tmp
+}
+
+bgm_polygons_from_rbgm <- function(bgm_path) {
+  empty <- bgm_empty_poly("rbgm did not return polygons", bgm_path)
+  if (!requireNamespace("rbgm", quietly = TRUE)) return(empty)
+  tmp <- tryCatch(normalize_bgm_for_rbgm(bgm_path), error = function(e) bgm_path)
+  on.exit({
+    if (!identical(tmp, bgm_path) && file.exists(tmp)) unlink(tmp)
+  }, add = TRUE)
+  bgm <- tryCatch(rbgm::bgmfile(tmp), error = function(e) NULL)
+  if (is.null(bgm)) return(empty)
+  if (requireNamespace("sf", quietly = TRUE)) {
+    boxes <- tryCatch(sf::st_as_sf(rbgm::box_sf(bgm)), error = function(e) NULL)
+    if (!is.null(boxes) && nrow(boxes) > 0) {
+      rows <- list()
+      for (i in seq_len(nrow(boxes))) {
+        crd <- tryCatch(sf::st_coordinates(boxes[i, ]), error = function(e) NULL)
+        if (is.null(crd) || nrow(crd) < 3) next
+        bid <- NA_integer_
+        for (nm in c(".bx0", "box", "box_id", "boxid")) {
+          if (nm %in% names(boxes)) {
+            bid <- suppressWarnings(as.integer(boxes[[nm]][i]))
+            if (is.finite(bid)) break
+          }
+        }
+        if (!is.finite(bid)) bid <- i - 1L
+        rows[[length(rows) + 1]] <- data.frame(
+          boxid = bid, x = crd[, 1], y = crd[, 2],
+          boundary = FALSE, order = seq_len(nrow(crd)),
+          stringsAsFactors = FALSE
+        )
+      }
+      if (length(rows)) {
+        out <- do.call(rbind, rows)
+        attr(out, "reason") <- ""
+        attr(out, "path") <- bgm_path
+        attr(out, "nbox") <- length(unique(out$boxid))
+        attr(out, "parser") <- "rbgm"
+        return(out)
+      }
+    }
+  }
+  verts <- tryCatch(as.data.frame(bgm$vertices), error = function(e) NULL)
+  if (is.null(verts) || !all(c("x", "y") %in% names(verts))) return(empty)
+  vid <- if (".vx0" %in% names(verts)) as.integer(verts$.vx0) else seq_len(nrow(verts)) - 1L
+  boxes <- tryCatch(as.data.frame(bgm$boxes), error = function(e) NULL)
+  nbox <- if (!is.null(boxes) && nrow(boxes) > 0) nrow(boxes) else NA_integer_
+  if (!is.finite(nbox)) return(empty)
+  rows <- list()
+  for (b in seq_len(nbox) - 1L) {
+    idx <- NULL
+    for (nm in names(bgm)) {
+      if (grepl(paste0("^box", b, "v$"), nm, ignore.case = TRUE)) {
+        idx <- suppressWarnings(as.integer(unlist(bgm[[nm]])))
+        break
+      }
+    }
+    if (is.null(idx) && !is.null(boxes)) {
+      for (nm in c("v", "vert", "verts")) {
+        if (nm %in% names(boxes)) {
+          idx <- suppressWarnings(as.integer(unlist(boxes[b + 1L, nm])))
+          break
+        }
+      }
+    }
+    if (is.null(idx) || !length(idx)) next
+    m <- match(idx, vid)
+    if (anyNA(m)) m <- idx + 1L
+    ok <- is.finite(m) & m >= 1 & m <= nrow(verts)
+    if (sum(ok) < 3) next
+    rows[[length(rows) + 1]] <- data.frame(
+      boxid = as.integer(b),
+      x = verts$x[m[ok]], y = verts$y[m[ok]],
+      boundary = FALSE, order = seq_len(sum(ok)),
+      stringsAsFactors = FALSE
+    )
+  }
+  if (!length(rows)) return(empty)
+  out <- do.call(rbind, rows)
+  attr(out, "reason") <- ""
+  attr(out, "path") <- bgm_path
+  attr(out, "nbox") <- nbox
+  attr(out, "parser") <- "rbgm-vertices"
+  out
 }
 
 bgm_parse_xy <- function(txt) {
@@ -549,16 +684,22 @@ bgm_box_flag <- function(lines, boxid) {
 
 ##' Polygon vertices for every box in a BGM file
 read_bgm_polygons <- function(bgm_path) {
-  empty <- data.frame(boxid = integer(), x = numeric(), y = numeric(),
-                      boundary = logical(), order = integer(),
-                      stringsAsFactors = FALSE)
-  if (is.null(bgm_path) || !file.exists(bgm_path)) return(empty)
-  lines <- readLines(bgm_path, warn = FALSE, encoding = "UTF-8")
-  lines <- sub("^\ufeff", "", lines)
-  lines <- sub("#.*$", "", lines)
-  lines <- trimws(lines)
+  path <- as.character(bgm_path)[1]
+  if (is.null(bgm_path) || !nzchar(path) || is.na(path)) {
+    return(bgm_empty_poly("BGM path is empty (no .bgm was detected)."))
+  }
+  if (!file.exists(path)) {
+    return(bgm_empty_poly(paste("BGM not found at path", path), path))
+  }
+  lines <- read_bgm_lines(path)
+  if (!length(lines) || !any(nzchar(lines))) {
+    return(bgm_empty_poly(paste("BGM is empty:", path), path))
+  }
   nbox <- bgm_nbox(lines)
-  if (!is.finite(nbox) || nbox < 1) return(empty)
+  if (!is.finite(nbox) || nbox < 1) {
+    return(bgm_empty_poly(
+      paste("No nbox line and no boxN.* tokens in", path), path))
+  }
   gverts <- bgm_global_verts(lines)
   rows <- list()
   for (b in seq_len(nbox) - 1L) {
@@ -573,8 +714,22 @@ read_bgm_polygons <- function(bgm_path) {
     verts$order <- seq_len(nrow(verts))
     rows[[length(rows) + 1]] <- verts
   }
-  if (length(rows) == 0) return(empty)
-  do.call(rbind, rows)
+  if (length(rows) == 0) {
+    alt <- bgm_polygons_from_rbgm(path)
+    if (nrow(alt) > 0) return(alt)
+    return(bgm_empty_poly(
+      paste0("nbox ", nbox, " in ", path,
+             " but no vertices parsed (tried box.vert, index verts, faces",
+             if (requireNamespace("rbgm", quietly = TRUE)) ", rbgm" else "",
+             ")."),
+      path, nbox))
+  }
+  out <- do.call(rbind, rows)
+  attr(out, "reason") <- ""
+  attr(out, "path") <- path
+  attr(out, "nbox") <- as.integer(nbox)
+  attr(out, "parser") <- "native"
+  out
 }
 
 ##' Join box values onto BGM polygons (0-based box ids on both sides).
@@ -759,6 +914,227 @@ plot_spatial_map <- function(poly, fill_lim = NULL, fill_high = "#0B3C5D",
   p + theme_reactiveatlantis() +
     ggplot2::theme(axis.text = ggplot2::element_blank(),
                    panel.grid = ggplot2::element_blank())
+}
+
+ra_html_escape <- function(x) {
+  x <- as.character(x)
+  x <- gsub("&", "&amp;", x, fixed = TRUE)
+  x <- gsub("<", "&lt;", x, fixed = TRUE)
+  x <- gsub(">", "&gt;", x, fixed = TRUE)
+  x
+}
+
+ra_hex_lerp <- function(a, b, t) {
+  t <- max(0, min(1, as.numeric(t)[1]))
+  aa <- grDevices::col2rgb(a)
+  bb <- grDevices::col2rgb(b)
+  rgb <- aa + (bb - aa) * t
+  grDevices::rgb(rgb[1], rgb[2], rgb[3], maxColorValue = 255)
+}
+
+##' Human-readable reason a Spatial map can or cannot draw.
+diagnose_spatial_map <- function(bgm_path = NULL, poly = NULL, values = NULL,
+                                 nc = NULL, fg = NULL, layer_key = NULL,
+                                 searched = NULL) {
+  notes <- character()
+  ok <- TRUE
+  path <- as.character(bgm_path)[1]
+  if (is.null(path) || !nzchar(path) || is.na(path)) {
+    ok <- FALSE
+    if (length(searched)) {
+      notes <- c(notes, paste("BGM not found. Searched:",
+                              paste(searched, collapse = "; ")))
+    } else {
+      notes <- c(notes, "BGM not found (no .bgm path was detected).")
+    }
+  } else if (!file.exists(path)) {
+    ok <- FALSE
+    notes <- c(notes, paste("BGM not found at path", path))
+  } else {
+    notes <- c(notes, paste("BGM:", path))
+    if (is.null(poly)) {
+      poly <- tryCatch(read_bgm_polygons(path), error = function(e) {
+        bgm_empty_poly(e$message, path)
+      })
+    }
+    nbox <- attr(poly, "nbox")
+    npoly <- if (is.null(poly) || nrow(poly) == 0) 0L else length(unique(poly$boxid))
+    nvert <- if (is.null(poly)) 0L else nrow(poly)
+    notes <- c(notes, paste0("nbox parsed: ",
+                             if (is.finite(nbox)) nbox else "unknown",
+                             "; polygons: ", npoly,
+                             "; vertices: ", nvert))
+    parser <- attr(poly, "parser")
+    if (!is.null(parser) && nzchar(parser)) {
+      notes <- c(notes, paste("parser:", parser))
+    }
+    if (npoly < 1) {
+      ok <- FALSE
+      why <- attr(poly, "reason")
+      notes <- c(notes, if (!is.null(why) && nzchar(why)) why
+                 else "No box polygons parsed from the BGM.")
+    } else {
+      xr <- range(poly$x, na.rm = TRUE)
+      yr <- range(poly$y, na.rm = TRUE)
+      notes <- c(notes, sprintf("coordinate range x=[%g, %g] y=[%g, %g]",
+                                xr[1], xr[2], yr[1], yr[2]))
+      span <- max(diff(xr), diff(yr), na.rm = TRUE)
+      if (is.finite(span) && span > 1e5) {
+        notes <- c(notes, "coordinates look projected (metres), not lon/lat.")
+      } else if (is.finite(span) && span <= 360) {
+        notes <- c(notes, "coordinates look geographic (lon/lat).")
+      }
+    }
+  }
+  if (is.null(nc) && (is.null(values) || nrow(values) == 0)) {
+    notes <- c(notes, "Output NetCDF not loaded or has no box values.")
+  }
+  if (!is.null(values) && nrow(values) > 0) {
+    nfin <- sum(is.finite(values$Value))
+    notes <- c(notes, paste(nfin, "finite values of", nrow(values)))
+    if (nfin == 0) {
+      notes <- c(notes, "Tracer or group has no finite values (boxes use unused fill).")
+    }
+  }
+  if (!is.null(fg) && nzchar(as.character(fg)[1])) {
+    notes <- c(notes, paste("Group:", as.character(fg)[1]))
+  }
+  if (!is.null(layer_key) && nzchar(as.character(layer_key)[1])) {
+    notes <- c(notes, paste("Layer:", as.character(layer_key)[1]))
+  }
+  list(
+    ok = isTRUE(ok) && !is.null(poly) && nrow(poly) > 0,
+    message = paste(notes, collapse = " "),
+    notes = notes,
+    n_polygons = if (is.null(poly) || nrow(poly) == 0) 0L else length(unique(poly$boxid)),
+    path = path
+  )
+}
+
+spatial_empty_plotly <- function(msg) {
+  if (!requireNamespace("plotly", quietly = TRUE)) {
+    p <- ggplot2::ggplot() + ggplot2::labs(title = msg) + theme_reactiveatlantis()
+    return(ra_ggplotly(p, tooltip = "text"))
+  }
+  bits <- unlist(strsplit(as.character(msg)[1], " (?=[A-Z])", perl = TRUE))
+  if (length(bits) < 2) bits <- strwrap(as.character(msg)[1], width = 70)
+  txt <- paste(ra_html_escape(bits), collapse = "<br>")
+  plt <- plotly::plot_ly(
+    x = 0, y = 0, type = "scatter", mode = "markers",
+    marker = list(opacity = 0, size = 1), hoverinfo = "skip",
+    showlegend = FALSE
+  )
+  plotly::layout(
+    plt,
+    title = list(text = "Spatial map cannot draw", font = list(size = 14)),
+    annotations = list(list(
+      x = 0.02, y = 0.98, xref = "paper", yref = "paper",
+      text = txt, showarrow = FALSE, align = "left",
+      font = list(size = 13, color = "#5A2418"),
+      bgcolor = "#F8ECE8", bordercolor = "#A33B20"
+    )),
+    xaxis = list(visible = FALSE),
+    yaxis = list(visible = FALSE),
+    margin = list(l = 20, r = 20, t = 50, b = 20)
+  )
+}
+
+##' Native plotly box map (ggplotly + geom_polygon + coord_equal is blank).
+plot_spatial_map_plotly <- function(poly, fill_lim = NULL, fill_high = "#0B3C5D",
+                                    selected_box = NULL, title = NULL,
+                                    legend = "Value") {
+  if (!requireNamespace("plotly", quietly = TRUE)) {
+    return(plot_spatial_map(poly, fill_lim, fill_high, selected_box, title, legend))
+  }
+  if (is.null(poly) || nrow(poly) == 0) {
+    why <- attr(poly, "reason")
+    return(spatial_empty_plotly(
+      if (!is.null(why) && nzchar(why)) why else "No box polygons were found in the BGM file."
+    ))
+  }
+  poly$boxid <- as.integer(poly$boxid)
+  ids <- sort(unique(poly$boxid))
+  vals <- if ("Value" %in% names(poly)) {
+    vapply(ids, function(id) {
+      x <- poly$Value[poly$boxid == id]
+      x <- x[is.finite(x)]
+      if (length(x)) x[1] else NA_real_
+    }, numeric(1))
+  } else {
+    rep(NA_real_, length(ids))
+  }
+  if (is.null(fill_lim) || !all(is.finite(fill_lim))) {
+    fill_lim <- suppressWarnings(range(vals, na.rm = TRUE))
+  }
+  if (!all(is.finite(fill_lim)) || !is.finite(diff(fill_lim)) ||
+      diff(fill_lim) == 0) {
+    fill_lim <- c(0, 1)
+  }
+  sel <- suppressWarnings(as.integer(selected_box)[1])
+  plt <- plotly::plot_ly()
+  for (i in seq_along(ids)) {
+    id <- ids[i]
+    sub <- poly[poly$boxid == id, , drop = FALSE]
+    if ("order" %in% names(sub)) sub <- sub[order(sub$order), , drop = FALSE]
+    if (nrow(sub) > 0 &&
+        (sub$x[1] != sub$x[nrow(sub)] || sub$y[1] != sub$y[nrow(sub)])) {
+      sub <- rbind(sub, sub[1, , drop = FALSE])
+    }
+    val <- vals[i]
+    t <- if (is.finite(val)) {
+      (val - fill_lim[1]) / max(diff(fill_lim), 1e-12)
+    } else {
+      NA_real_
+    }
+    col <- if (!is.finite(t)) "#C5C0B2" else ra_hex_lerp("#F7F4EC", fill_high, t)
+    lw <- if (is.finite(sel) && id == sel) 2.2 else 0.7
+    lc <- if (is.finite(sel) && id == sel) "#121311" else {
+      if (isTRUE(any(sub$boundary))) "#0B3C5D" else RA_BOX_OUTLINE
+    }
+    lab <- paste0(
+      "Box ", id, "<br>",
+      if (is.finite(val)) format(val, digits = 4, trim = TRUE) else "NA"
+    )
+    plt <- plotly::add_trace(
+      plt, type = "scatter", mode = "lines",
+      x = sub$x, y = sub$y,
+      fill = "toself",
+      fillcolor = col,
+      line = list(color = lc, width = lw),
+      hoverinfo = "text", text = lab,
+      customdata = rep(id, nrow(sub)),
+      name = paste("Box", id),
+      showlegend = FALSE,
+      hoveron = "fills"
+    )
+  }
+  fin <- vals[is.finite(vals)]
+  if (length(fin)) {
+    plt <- plotly::add_trace(
+      plt, type = "scatter", mode = "markers",
+      x = mean(range(poly$x, na.rm = TRUE)),
+      y = mean(range(poly$y, na.rm = TRUE)),
+      marker = list(
+        color = mean(fin),
+        colorscale = list(c(0, "#F7F4EC"), c(1, fill_high)),
+        cmin = fill_lim[1], cmax = fill_lim[2],
+        size = 1, opacity = 0,
+        colorbar = list(title = legend)
+      ),
+      hoverinfo = "skip", showlegend = FALSE
+    )
+  }
+  plotly::layout(
+    plt,
+    title = list(text = if (is.null(title)) "Spatial map" else title,
+                 font = list(size = 14)),
+    xaxis = list(title = "", scaleanchor = "y", scaleratio = 1,
+                 constrain = "domain", zeroline = FALSE, showgrid = FALSE),
+    yaxis = list(title = "", constrain = "domain", zeroline = FALSE,
+                 showgrid = FALSE),
+    margin = list(l = 40, r = 40, t = 50, b = 30),
+    hovermode = "closest"
+  )
 }
 
 plot_spatial_ts <- function(df, dates, time_i = NULL, title = NULL, ylab = "Value") {

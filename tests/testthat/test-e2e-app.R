@@ -508,6 +508,9 @@ test_that("Spatial map can show two depth layers", {
   expect_true(grepl("Depth layer", body, fixed = TRUE) ||
                 grepl("spatial-layer", body))
   expect_true(plot_is_real(app$get_html("#spatial-map_plot")))
+  status <- tryCatch(app$get_text("#spatial-map_status"), error = function(e) "")
+  expect_true(grepl("polygon|BGM", status, ignore.case = TRUE),
+              info = paste("map_status:", status))
 
   app$set_inputs(`spatial-fg` = "COD", `spatial-layer` = "water_1",
                  `spatial-stable_scale` = TRUE, wait_ = FALSE)
@@ -528,4 +531,86 @@ test_that("Spatial map can show two depth layers", {
                 nchar(app$get_html("#consumption-cons_plot_gg")) > 40)
   save_shot(app, shot_dir, "consumption_palette_after")
 })
+
+test_that("fresh install draws Spatial map and full pPREY for a NESP-style pair", {
+  skip_on_cran()
+  e2e_chrome()
+  lib <- ra_install_package()
+  app_dir <- file.path(lib, "ReactiveAtlantis", "shiny")
+  skip_if_not(dir.exists(app_dir), "installed shiny app missing")
+
+  nesp <- tempfile("hard_nesp_e2e_")
+  pair <- write_hard_nesp_pair(nesp)
+  on.exit(unlink(nesp, recursive = TRUE), add = TRUE)
+
+  fx <- northsea_fixture_dir()
+  skip_if_not(dir.exists(fx), "North Sea fixture not packaged")
+  ns_pair_dir <- tempfile("ns_pair_e2e_")
+  ns_pair <- split_atlantis_pair(fx, ns_pair_dir)
+  on.exit(unlink(ns_pair_dir, recursive = TRUE), add = TRUE)
+
+  shot_dir <- file.path(tempdir(), "ra_e2e_fresh_install")
+  dir.create(shot_dir, showWarnings = FALSE)
+
+  old_libs <- Sys.getenv("R_LIBS")
+  Sys.setenv(R_LIBS = paste(c(lib, .libPaths()), collapse = .Platform$path.sep))
+  on.exit(Sys.setenv(R_LIBS = old_libs), add = TRUE)
+
+  app <- shinytest2::AppDriver$new(
+    app_dir = app_dir,
+    name = "reactiveatlantis-fresh-install",
+    height = 1100,
+    width = 1600,
+    load_timeout = 60000,
+    timeout = 25000
+  )
+  on.exit(try(app$stop(), silent = TRUE), add = TRUE)
+
+  app$set_inputs(
+    `project-run1_config_dir` = pair$config_dir,
+    `project-run1_output_dir` = pair$output_dir,
+    wait_ = FALSE
+  )
+  app$wait_for_idle(timeout = 15000)
+  app$click("project-load_project")
+  app$wait_for_idle(timeout = 60000)
+  expect_true(click_nav(app, "Spatial"))
+  app$wait_for_idle(timeout = 40000)
+  status <- tryCatch(app$get_text("#spatial-map_status"), error = function(e) "")
+  expect_true(grepl("polygon|BGM", status, ignore.case = TRUE),
+              info = paste("hard NESP status:", status))
+  expect_false(grepl("BGM not found", status, ignore.case = TRUE),
+               info = paste("hard NESP status:", status))
+  expect_true(plot_is_real(app$get_html("#spatial-map_plot")))
+  save_shot(app, shot_dir, "fresh_install_spatial_hard_nesp")
+
+  expect_true(click_nav(app, "Feeding"))
+  app$wait_for_idle(timeout = 40000)
+  expect_true(plot_is_real(app$get_html("#feeding-feeding_plot_gg")) ||
+                nchar(app$get_html("#feeding-feeding_plot_gg")) > 40)
+  save_shot(app, shot_dir, "fresh_install_feeding_hard_nesp")
+
+  app$set_inputs(
+    `project-run1_config_dir` = ns_pair$config_dir,
+    `project-run1_output_dir` = ns_pair$output_dir,
+    wait_ = FALSE
+  )
+  app$wait_for_idle(timeout = 15000)
+  app$click("project-load_project")
+  app$wait_for_idle(timeout = 90000)
+  expect_true(click_nav(app, "Spatial"))
+  app$wait_for_idle(timeout = 60000)
+  ns_status <- tryCatch(app$get_text("#spatial-map_status"), error = function(e) "")
+  expect_true(grepl("polygon|BGM", ns_status, ignore.case = TRUE),
+              info = paste("North Sea status:", ns_status))
+  expect_true(plot_is_real(app$get_html("#spatial-map_plot")))
+  save_shot(app, shot_dir, "fresh_install_spatial_northsea")
+
+  expect_true(click_nav(app, "Feeding"))
+  app$wait_for_idle(timeout = 60000)
+  feed <- app$get_html("#feeding-feeding_plot_gg")
+  expect_true(plot_is_real(feed) || nchar(feed) > 40)
+  save_shot(app, shot_dir, "fresh_install_feeding_northsea")
+})
+
 

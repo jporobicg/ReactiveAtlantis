@@ -57,7 +57,10 @@ feeding_ui <- function(id) {
       ),
       conditionalPanel(
         "input.view_type == 'matrix'", ns = ns,
-        plotly::plotlyOutput(ns("feeding_plot_gg"), height = "520px"),
+        p(class = "ra-muted",
+          "Every predator x prey cell is drawn, including zeros. Scroll or zoom if the matrix is large."),
+        div(class = "ra-scroll-plot",
+            plotly::plotlyOutput(ns("feeding_plot_gg"), height = "720px")),
         fluidRow(
           column(6, plotOutput(ns("pred_bars"), height = "280px")),
           column(6, plotOutput(ns("prey_bars"), height = "280px"))
@@ -95,9 +98,15 @@ feeding_server <- function(id, project = NULL) {
       if (any(grepl("invertype", names(grp)))) {
         names(grp)[which(grepl("invertype", names(grp)))] <- "grouptype"
       }
-      options(warn = -1)
-      ava_mat <- text2num(dat$prm_bio, "pPREY", Vector = TRUE, pprey = TRUE)
-      options(warn = 0)
+      ava_mat <- tryCatch(read_pprey_matrix(dat$prm_bio), error = function(e) NULL)
+      if (is.null(ava_mat)) {
+        options(warn = -1)
+        ava_mat <- tryCatch(
+          text2num(dat$prm_bio, "pPREY", Vector = TRUE, pprey = TRUE),
+          error = function(e) NULL
+        )
+        options(warn = 0)
+      }
       if (is.null(ava_mat) || !is.matrix(ava_mat) || nrow(ava_mat) == 0) return(NULL)
       n_col <- ncol(ava_mat)
       expected <- c(as.character(grp$code), "DLsed", "DRsed", "DCsed")
@@ -348,6 +357,7 @@ feeding_server <- function(id, project = NULL) {
     })
 
     keep_outputs_alive(output, "banner")
+    keep_outputs_alive(output, "feeding_plot_gg")
   })
 }
 
@@ -955,6 +965,54 @@ pprey_cell_info_text <- function(mat, sel, grp = NULL) {
   paste(bits, collapse = " | ")
 }
 
+feed_matrix_plot_size <- function(mat) {
+  nr <- if (is.null(mat) || !is.matrix(mat)) 1L else nrow(mat)
+  nc <- if (is.null(mat) || !is.matrix(mat)) 1L else ncol(mat)
+  list(
+    height = max(520L, min(4200L, as.integer(nr * 18 + 160))),
+    width = max(720L, min(4200L, as.integer(nc * 22 + 200)))
+  )
+}
+
+##' Read every pPREY row; pad short rows with 0 instead of stopping.
+read_pprey_matrix <- function(text) {
+  if (is.null(text) || !length(text)) return(NULL)
+  lines <- as.character(text)
+  hits <- grep("^[[:space:]]*pPREY[A-Za-z0-9_]+", lines)
+  if (!length(hits)) return(NULL)
+  nms <- character()
+  rows <- list()
+  for (i in hits) {
+    raw <- lines[i]
+    if (grepl("^[[:space:]]*#", raw)) next
+    ln <- trimws(sub("#.*$", "", raw))
+    if (!nzchar(ln)) next
+    toks <- unlist(strsplit(ln, "[[:space:]]+"), use.names = FALSE)
+    nm <- toks[1]
+    if (!grepl("^pPREY", nm)) next
+    nums <- suppressWarnings(as.numeric(toks[-1]))
+    nums <- nums[is.finite(nums)]
+    if (length(nums) <= 1 && i < length(lines)) {
+      nxt <- trimws(sub("#.*$", "", lines[i + 1]))
+      more <- suppressWarnings(as.numeric(unlist(strsplit(nxt, "[[:space:]]+"))))
+      more <- more[is.finite(more)]
+      if (length(more) > length(nums)) nums <- more
+    }
+    nms <- c(nms, nm)
+    rows[[length(rows) + 1]] <- nums
+  }
+  if (!length(rows)) return(NULL)
+  nc <- max(vapply(rows, length, integer(1)))
+  if (!is.finite(nc) || nc < 1) return(NULL)
+  mat <- matrix(0, nrow = length(rows), ncol = nc)
+  for (i in seq_along(rows)) {
+    v <- rows[[i]]
+    if (length(v)) mat[i, seq_len(min(length(v), nc))] <- v[seq_len(min(length(v), nc))]
+  }
+  rownames(mat) <- nms
+  mat
+}
+
 plot_feed_matrix_plotly <- function(mat, sel = NULL, grp = NULL) {
   if (is.null(mat) || !is.matrix(mat) || !requireNamespace("plotly", quietly = TRUE)) {
     p <- ggplot2::ggplot() +
@@ -962,16 +1020,20 @@ plot_feed_matrix_plotly <- function(mat, sel = NULL, grp = NULL) {
       theme_reactiveatlantis()
     return(ra_ggplotly(p, tooltip = "text"))
   }
+  if (is.null(colnames(mat))) {
+    colnames(mat) <- paste0("Prey", seq_len(ncol(mat)))
+  }
   meta <- parse_pprey_rownames(rownames(mat))
   y_lab <- pprey_axis_labels(meta, grp)
   x_lab <- pprey_group_label(colnames(mat), grp)
   hover <- pprey_hover_text(mat, grp)
   z <- mat
-  z[!is.finite(z) | z == 0] <- NA
-  ## First predator row at the top (plotly heatmap otherwise starts at the bottom).
+  z[!is.finite(z)] <- NA
+  ## Keep zeros. First predator row at the top (heatmap otherwise starts at bottom).
   y_ord <- rev(y_lab)
   z_ord <- z[rev(seq_len(nrow(z))), , drop = FALSE]
   h_ord <- hover[rev(seq_len(nrow(hover))), , drop = FALSE]
+  sz <- feed_matrix_plot_size(mat)
   plt <- plotly::plot_ly(
     x = x_lab,
     y = y_ord,
@@ -979,10 +1041,13 @@ plot_feed_matrix_plotly <- function(mat, sel = NULL, grp = NULL) {
     type = "heatmap",
     colorscale = "YlOrRd",
     reversescale = TRUE,
+    zmin = 0,
     hoverinfo = "text",
     text = h_ord,
     colorbar = list(title = "pPREY"),
-    xgap = 1, ygap = 1
+    xgap = 1, ygap = 1,
+    width = sz$width,
+    height = sz$height
   )
   shapes <- list()
   if (!is.null(sel) && length(sel$row_i)) {
@@ -1025,14 +1090,25 @@ plot_feed_matrix_plotly <- function(mat, sel = NULL, grp = NULL) {
   }
   plt <- plotly::layout(
     plt,
-    title = list(text = "Availability matrix (pPREY)", font = list(size = 14)),
-    xaxis = list(title = "Prey", side = "top", tickangle = -60),
-    yaxis = list(title = "Predator", automargin = TRUE),
+    title = list(
+      text = paste0("Availability matrix (pPREY) — ",
+                    nrow(mat), " predators x ", ncol(mat), " prey"),
+      font = list(size = 14)
+    ),
+    xaxis = list(
+      title = "Prey", side = "top", tickangle = -60,
+      type = "category", categoryarray = x_lab, categoryorder = "array",
+      automargin = TRUE
+    ),
+    yaxis = list(
+      title = "Predator", automargin = TRUE,
+      type = "category", categoryarray = y_ord, categoryorder = "array"
+    ),
     shapes = shapes,
     annotations = ann,
-    margin = list(l = 140, t = 80, b = 40)
+    margin = list(l = 160, t = 90, b = 40, r = 20)
   )
-  plotly::config(plt, displaylogo = FALSE,
+  plotly::config(plt, displaylogo = FALSE, scrollZoom = TRUE,
                  modeBarButtonsToRemove = c("lasso2d", "select2d"))
 }
 
