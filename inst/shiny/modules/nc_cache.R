@@ -166,25 +166,46 @@ ensure_project_data <- function(snap, need = character()) {
     nc_init = "init_nc",
     nc_old = "output_nc_old"
   )
+  pending <- character()
   for (fld in names(map)) {
     if (!(fld %in% need || map[[fld]] %in% need)) next
     if (is.null(dat[[fld]]) || !inherits(dat[[fld]], "ncdf4")) {
-      dat[[fld]] <- nc_handle(paths[[map[[fld]]]])
-    }
-    if (identical(fld, "nc_out") && !is.null(dat$nc_out)) {
-      if (is.null(dat$time_dates)) {
-        dat$time_dates <- tryCatch(time_calc(dat$nc_out), error = function(e) NULL)
-      }
-      if (is.null(dat$origin) || (length(dat$origin) == 1 && is.na(dat$origin))) {
-        dat$origin <- tryCatch(nc_time_origin(dat$nc_out), error = function(e) as.Date(NA))
-      }
+      if (path_ok(paths[[map[[fld]]]])) pending <- c(pending, fld)
     }
   }
-  if ("diet" %in% need || "dietcheck" %in% need) {
-    dat <- ensure_diet(dat, paths)
+  open_needed <- function() {
+    n_open <- max(1L, length(pending))
+    for (fld in names(map)) {
+      if (!(fld %in% need || map[[fld]] %in% need)) next
+      if (is.null(dat[[fld]]) || !inherits(dat[[fld]], "ncdf4")) {
+        lab <- unname(as.character(FILE_LABELS[[map[[fld]]]]))
+        if (is.na(lab) || !nzchar(lab)) lab <- fld
+        ra_inc(0.7 / n_open, detail = paste("Opening", lab))
+        dat[[fld]] <<- nc_handle(paths[[map[[fld]]]])
+      }
+      if (identical(fld, "nc_out") && !is.null(dat$nc_out)) {
+        if (is.null(dat$time_dates)) {
+          dat$time_dates <<- tryCatch(time_calc(dat$nc_out), error = function(e) NULL)
+        }
+        if (is.null(dat$origin) || (length(dat$origin) == 1 && is.na(dat$origin))) {
+          dat$origin <<- tryCatch(nc_time_origin(dat$nc_out), error = function(e) as.Date(NA))
+        }
+      }
+    }
+    if ("diet" %in% need || "dietcheck" %in% need) {
+      ra_inc(0.1, detail = "Reading DietCheck")
+      dat <<- ensure_diet(dat, paths)
+    }
+    if ("inf_box" %in% need) {
+      ra_inc(0.1, detail = "Reading box geometry")
+      dat <<- ensure_inf_box(dat, paths)
+    }
+    dat
   }
-  if ("inf_box" %in% need) {
-    dat <- ensure_inf_box(dat, paths)
+  if (length(pending) > 0 || "diet" %in% need || "dietcheck" %in% need ||
+      "inf_box" %in% need) {
+    ra_progress("Reading NetCDF…", open_needed())
+  } else {
+    open_needed()
   }
-  dat
 }

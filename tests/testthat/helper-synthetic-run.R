@@ -251,3 +251,53 @@ write_synthetic_atlantis_run <- function(dir) {
   )
   invisible(dir)
 }
+
+##' Split a mixed Atlantis folder into config/ and output/ subfolders
+split_atlantis_pair <- function(src, dest = NULL) {
+  src <- normalizePath(src, winslash = "/", mustWork = TRUE)
+  if (is.null(dest)) dest <- tempfile("ra_pair_")
+  cfg <- file.path(dest, "config")
+  out <- file.path(dest, "output")
+  dir.create(cfg, recursive = TRUE, showWarnings = FALSE)
+  dir.create(out, recursive = TRUE, showWarnings = FALSE)
+  files <- list.files(src, full.names = TRUE, recursive = FALSE)
+  files <- files[!dir.exists(files)]
+  is_config <- function(bn) {
+    grepl("\\.(prm|bgm)$", bn, ignore.case = TRUE) ||
+      grepl("group|fisher|init|_ini|observation", bn, ignore.case = TRUE) ||
+      (grepl("\\.csv$", bn, ignore.case = TRUE) &&
+         grepl("catch|obs", bn, ignore.case = TRUE))
+  }
+  is_output <- function(bn) {
+    grepl("BiomIndx|DietCheck|SSB\\.txt|YOY\\.txt|SpecificMort|SpecificPred",
+          bn, ignore.case = TRUE) ||
+      grepl("CATCH|PROD", bn, ignore.case = TRUE) ||
+      (grepl("\\.nc$", bn, ignore.case = TRUE) &&
+         !grepl("init|_ini", bn, ignore.case = TRUE))
+  }
+  for (p in files) {
+    bn <- basename(p)
+    if (is_config(bn)) {
+      file.copy(p, file.path(cfg, bn), overwrite = TRUE)
+    }
+    if (is_output(bn)) {
+      file.copy(p, file.path(out, bn), overwrite = TRUE)
+    }
+  }
+  list(root = dest, config_dir = cfg, output_dir = out)
+}
+
+##' Write a synthetic run already split into config/ and output/
+write_synthetic_atlantis_pair <- function(dir) {
+  if (!dir.exists(dir)) dir.create(dir, recursive = TRUE)
+  mixed <- file.path(dir, "_mixed")
+  write_synthetic_atlantis_run(mixed)
+  pair <- split_atlantis_pair(mixed, dir)
+  unlink(mixed, recursive = TRUE)
+  pair
+}
+
+##' NESP-style pair: config (groups/prm/init/bgm) separate from output tables
+write_nesp_style_pair <- function(dir) {
+  write_synthetic_atlantis_pair(dir)
+}

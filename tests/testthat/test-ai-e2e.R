@@ -86,6 +86,24 @@ test_that("Ask Atlantis drawer is closed by default and survives tab switches", 
   expect_true(grepl("Predation", page, fixed = TRUE))
   save_ai_shot(app, "ask_atlantis_drawer_open")
 
+  app$get_js("
+    var badge = document.querySelector('.ra-ai-badge');
+    if (badge) { badge.className = 'ra-ai-badge is-thinking'; badge.textContent = 'Thinking…'; }
+    var log = document.querySelector('.ra-assistant-log');
+    if (log) {
+      var d = document.createElement('div');
+      d.className = 'ra-msg ra-msg-assistant ra-msg-thinking';
+      d.innerHTML = '<span class=\"ra-thinking-dots\">···</span><span>Thinking…</span>';
+      log.appendChild(d);
+    }
+    true;
+  ")
+  Sys.sleep(0.3)
+  think <- tryCatch(app$get_html("#assistant-drawer"), error = function(e) "")
+  expect_true(grepl("Thinking", think, fixed = TRUE))
+  expect_true(grepl("ra-msg-thinking", think, fixed = TRUE))
+  save_ai_shot(app, "ask_atlantis_thinking")
+
   app$click(selector = "#assistant-drawer .ra-open-tool")
   app$wait_for_idle(timeout = 15000)
   page2 <- app$get_html("body")

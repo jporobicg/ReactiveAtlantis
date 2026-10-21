@@ -43,9 +43,9 @@ overview_server <- function(id, project) {
         return(bslib::card(
           bslib::card_header("Load a run"),
           bslib::card_body(
-            shiny::p("Point the left panel at an Atlantis output folder, or attach the individual files, then click Load run."),
+            shiny::p("Point the left panel at a configuration folder and an output folder (or one folder that holds both), then click Load run."),
             shiny::p(class = "ra-muted",
-                     "A local folder path avoids browser upload limits for large NetCDF and DietCheck files.")
+                     "Local folder paths avoid browser upload limits for large NetCDF and DietCheck files.")
           )
         ))
       }

@@ -669,11 +669,26 @@ layer_thickness <- function(nc) {
 ## ~               Ensemble runs                 ~ ##
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
 
-load_run_lite <- function(folder, label = NULL) {
-  paths <- detect_project_files(folder)
+load_run_lite <- function(folder, label = NULL, config_dir = NULL, output_dir = NULL) {
+  fold <- ra_nz(folder)
+  cfg <- ra_nz(config_dir)
+  outd <- ra_nz(output_dir)
+  if (!nzchar(cfg) && nzchar(fold)) cfg <- fold
+  if (!nzchar(outd) && nzchar(fold)) outd <- fold
+  det <- detect_run_pair(cfg, outd)
+  paths <- det$paths
+  if (!is.null(label) && nzchar(ra_nz(label))) {
+    lab <- ra_nz(label)
+  } else if (nzchar(cfg) && nzchar(outd) && !same_dir(cfg, outd)) {
+    lab <- paste(basename(cfg), basename(outd), sep = " + ")
+  } else {
+    lab <- basename(if (nzchar(outd)) outd else cfg)
+  }
   out <- list(
-    label = if (is.null(label) || !nzchar(label)) basename(folder) else label,
-    folder = folder,
+    label = lab,
+    folder = if (nzchar(fold)) fold else if (nzchar(outd)) outd else cfg,
+    config_dir = det$config_dir,
+    output_dir = det$output_dir,
     paths = paths,
     biomindx = NULL,
     yoy = NULL,

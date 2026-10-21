@@ -94,6 +94,9 @@ assistant_server <- function(id, project = NULL, parent_session = NULL) {
     pending_tick <- shiny::reactiveVal(0L)
 
     output$status_badge <- shiny::renderUI({
+      if (isTRUE(busy())) {
+        return(shiny::span(class = "ra-ai-badge is-thinking", "Thinking…"))
+      }
       st <- status()
       shiny::span(
         class = paste("ra-ai-badge", paste0("is-", st$code)),
@@ -104,7 +107,8 @@ assistant_server <- function(id, project = NULL, parent_session = NULL) {
     output$messages <- shiny::renderUI({
       items <- display()
       st <- status()
-      if (length(items) == 0) {
+      thinking <- isTRUE(busy())
+      if (length(items) == 0 && !thinking) {
         return(shiny::div(
           class = "ra-assistant-empty",
           shiny::p(st$detail %||% "Ask a question about Atlantis or this app."),
@@ -168,6 +172,16 @@ assistant_server <- function(id, project = NULL, parent_session = NULL) {
           )
         }
       })
+      if (thinking) {
+        html <- c(html, list(
+          shiny::div(
+            class = "ra-msg ra-msg-assistant ra-msg-thinking",
+            `aria-live` = "polite",
+            shiny::span(class = "ra-thinking-dots", "···"),
+            shiny::span("Thinking…")
+          )
+        ))
+      }
       shiny::tagList(html)
     })
 

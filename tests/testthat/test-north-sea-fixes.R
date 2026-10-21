@@ -1510,6 +1510,133 @@ test_that("problem_cohorts reads only first and last time slices", {
   expect_equal(dim(ends$first)[3], 1)
 })
 
+test_that("detect_run_pair prefers each folder and notes fallback", {
+  tmp <- tempfile("ra_pair_unit_")
+  pair <- write_synthetic_atlantis_pair(tmp)
+  on.exit(unlink(tmp, recursive = TRUE), add = TRUE)
+
+  det <- detect_run_pair(pair$config_dir, pair$output_dir)
+  expect_false(isTRUE(det$same_folder))
+  expect_equal(length(det$fallback), 0)
+  expect_equal(basename(det$paths$groups), "groups.csv")
+  expect_equal(basename(det$paths$biomindx), "BiomIndx.txt")
+  expect_equal(normalizePath(dirname(det$paths$groups), winslash = "/"),
+               normalizePath(pair$config_dir, winslash = "/"))
+  expect_equal(normalizePath(dirname(det$paths$biomindx), winslash = "/"),
+               normalizePath(pair$output_dir, winslash = "/"))
+  note <- scan_note_text(det, "Found")
+  expect_true(grepl("config \\+ output", note) || grepl("file roles", note))
+
+  mixed <- tempfile("ra_mixed_")
+  write_synthetic_atlantis_run(mixed)
+  on.exit(unlink(mixed, recursive = TRUE), add = TRUE)
+  one <- detect_run_pair(mixed, mixed)
+  expect_true(isTRUE(one$same_folder))
+  expect_equal(length(one$fallback), 0)
+  expect_true(grepl("one folder", scan_note_text(one, "Found")))
+
+  only_cfg <- detect_run_pair(mixed, NULL)
+  expect_true(path_ok(only_cfg$paths$groups))
+  expect_true(path_ok(only_cfg$paths$biomindx))
+
+  file.rename(file.path(pair$config_dir, "groups.csv"),
+              file.path(pair$output_dir, "groups.csv"))
+  fb <- detect_run_pair(pair$config_dir, pair$output_dir)
+  expect_true("groups" %in% fb$fallback)
+  expect_true(path_ok(fb$paths$groups))
+  expect_true(grepl("other folder", scan_note_text(fb, "Found")))
+  html <- paste(as.character(role_checklist_ui(list(
+    ready = TRUE, paths = fb$paths, fallback_roles = fb$fallback, data = NULL
+  ))), collapse = " ")
+  expect_true(grepl("data-status=\"fallback\"", html))
+  expect_true(grepl("loaded \\(other folder\\)", html))
+
+  lite <- load_run_lite(pair$output_dir, label = "Alt",
+                        config_dir = pair$config_dir,
+                        output_dir = pair$output_dir)
+  expect_equal(lite$label, "Alt")
+  expect_true(path_ok(lite$paths$groups) || !is.null(lite$biomindx))
+})
+
+test_that("NESP-style pair and North Sea split load as two folders", {
+  nesp <- tempfile("nesp_pair_")
+  pair <- write_nesp_style_pair(nesp)
+  on.exit(unlink(nesp, recursive = TRUE), add = TRUE)
+  expect_true(dir.exists(pair$config_dir))
+  expect_true(dir.exists(pair$output_dir))
+  expect_true(file.exists(file.path(pair$config_dir, "groups.csv")))
+  expect_true(file.exists(file.path(pair$output_dir, "BiomIndx.txt")))
+  expect_false(file.exists(file.path(pair$config_dir, "BiomIndx.txt")))
+
+  fx <- northsea_fixture_dir()
+  skip_if_not(dir.exists(fx) && file.exists(file.path(fx, "functionalGroups.csv")),
+              "North Sea fixture not packaged")
+  dest <- tempfile("ns_pair_")
+  ns <- split_atlantis_pair(fx, dest)
+  on.exit(unlink(dest, recursive = TRUE), add = TRUE)
+  det <- detect_run_pair(ns$config_dir, ns$output_dir)
+  expect_equal(basename(det$paths$groups), "functionalGroups.csv")
+  expect_equal(basename(det$paths$biomindx), "outputNorthSeaBiomIndx.txt")
+  expect_false(isTRUE(det$same_folder))
+  loaded <- load_project(det$paths)
+  expect_true(!is.null(loaded$grp))
+  expect_true(!is.null(loaded$biomindx))
+})
+
+test_that("pair sidebar Load uses config and output folders", {
+  tmp <- tempfile("ra_pair_srv_")
+  pair <- write_synthetic_atlantis_pair(tmp)
+  on.exit(unlink(tmp, recursive = TRUE), add = TRUE)
+  shiny::testServer(project_server, {
+    session$setInputs(
+      run1_name = "Base",
+      run1_config_dir = pair$config_dir,
+      run1_output_dir = pair$output_dir
+    )
+    session$setInputs(scan_folder = 1)
+    note <- paste(as.character(output$scan_note$html), collapse = " ")
+    expect_true(grepl("Scan:", note) || grepl("file roles", note))
+    session$setInputs(load_project = 1)
+    note2 <- paste(as.character(output$scan_note$html), collapse = " ")
+    expect_true(grepl("Loaded", note2))
+    check <- paste(as.character(output$file_checklist$html), collapse = " ")
+    expect_true(grepl("data-status=\"loaded\"", check) || grepl("is-loaded", check))
+    expect_true(isTRUE(rv$state$ready) || isTRUE(rv$ready))
+  })
+})
+
+test_that("launch options accept config_dir and output_dir", {
+  old <- options(
+    reactiveatlantis.project_dir = NULL,
+    reactiveatlantis.config_dir = NULL,
+    reactiveatlantis.output_dir = NULL
+  )
+  on.exit(options(old), add = TRUE)
+  src <- paste(readLines(file.path(root, "R", "launch_app.R")), collapse = "\n")
+  expect_true(grepl("config_dir", src, fixed = TRUE))
+  expect_true(grepl("output_dir", src, fixed = TRUE))
+  expect_true(grepl("reactiveatlantis.config_dir", src, fixed = TRUE))
+})
+
+test_that("busy helpers and Ask Atlantis thinking markup are present", {
+  css <- paste(readLines(file.path(root, "inst", "shiny", "www", "custom.css")),
+               collapse = "\n")
+  expect_true(grepl("shiny-busy", css, fixed = TRUE))
+  expect_true(grepl("recalculating", css, fixed = TRUE))
+  expect_true(grepl("ra-msg-thinking", css, fixed = TRUE))
+  app_src <- paste(readLines(file.path(root, "inst", "shiny", "app.R")),
+                   collapse = "\n")
+  expect_true(grepl("busyIndicatorOptions", app_src, fixed = TRUE))
+  expect_true(grepl("useBusyIndicators", app_src, fixed = TRUE))
+  expect_true(grepl("ra-busy-bar", app_src, fixed = TRUE))
+  ai_src <- paste(readLines(file.path(root, "inst", "shiny", "modules",
+                                      "assistant_module.R")), collapse = "\n")
+  expect_true(grepl("Thinking", ai_src, fixed = TRUE))
+  expect_true(grepl("ra-msg-thinking", ai_src, fixed = TRUE))
+  expect_true(exists("ra_progress", mode = "function"))
+  expect_true(exists("ra_inc", mode = "function"))
+})
+
 test_that("hidden-tab plots are not kept alive after load", {
   mods <- file.path(root, "inst", "shiny", "modules")
   src <- paste(vapply(

@@ -77,12 +77,38 @@ ra_navbar_title <- tags$span(
   tags$span("ReactiveAtlantis", class = "ra-brand-text")
 )
 
+ra_busy_use <- if (exists("useBusyIndicators", where = asNamespace("shiny"),
+                          inherits = FALSE)) {
+  shiny::useBusyIndicators(spinners = TRUE, pulse = TRUE, fade = TRUE)
+} else {
+  NULL
+}
+ra_busy_opts <- if (exists("busyIndicatorOptions", where = asNamespace("shiny"),
+                           inherits = FALSE)) {
+  shiny::busyIndicatorOptions(
+    spinner_type = "dots",
+    spinner_color = "#1D7874",
+    spinner_size = "28px",
+    spinner_delay = "250ms",
+    spinner_selector = "html",
+    fade_opacity = 0.45,
+    fade_selector = "html",
+    pulse_background = "linear-gradient(90deg, #1D7874, #0B3C5D, #328CC1, #1D7874)",
+    pulse_height = "3px",
+    pulse_speed = "1.1s"
+  )
+} else {
+  NULL
+}
+
 ra_header <- tags$head(
   tags$link(rel = "stylesheet", type = "text/css", href = "custom.css"),
   tags$link(rel = "icon", type = "image/x-icon", href = "favicon.ico"),
   tags$link(rel = "icon", type = "image/png", sizes = "32x32", href = "app-icon-32.png"),
   tags$link(rel = "apple-touch-icon", sizes = "180x180", href = "app-icon-180.png"),
   tags$link(rel = "manifest", href = "site.webmanifest"),
+  ra_busy_use,
+  ra_busy_opts,
   tags$script(HTML("
     Shiny.addCustomMessageHandler('ra-open-tab', function(title) {
       var el = Array.from(document.querySelectorAll('a.nav-link')).find(function(a){
@@ -93,10 +119,16 @@ ra_header <- tags$head(
   "))
 )
 
+ra_busy_bar <- tags$div(
+  id = "ra-busy-bar",
+  class = "ra-busy-bar",
+  `aria-hidden` = "true"
+)
+
 ra_page_header <- if (isTRUE(ra_ai_on)) {
-  tagList(ra_header, assistant_ui("assistant"))
+  tagList(ra_header, ra_busy_bar, assistant_ui("assistant"))
 } else {
-  ra_header
+  tagList(ra_header, ra_busy_bar)
 }
 
 ui <- page_navbar(

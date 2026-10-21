@@ -18,6 +18,7 @@ has_bound_output <- function(html) {
     (has_plot_image(html) || has_table(html) ||
        grepl("Only one run", html) ||
        grepl("Paste extra", html) ||
+       grepl("Add another run", html) ||
        grepl("needs more files", html, ignore.case = TRUE))
 }
 
@@ -139,7 +140,8 @@ test_that("folder load fills every tab with a bound plot or table", {
       if (has_bound_output(html)) found <- TRUE
     }
     if (!found && identical(tab$title, "Multi-run")) {
-      found <- grepl("Only one run", last_html) || grepl("Paste extra", last_html)
+      found <- grepl("Only one run", last_html) || grepl("Paste extra", last_html) ||
+        grepl("Add another run", last_html)
     }
     expect_true(found, info = paste(tab$title, "empty:", substr(last_html, 1, 400)))
     save_shot(app, shot_dir, tab$shot)
@@ -371,5 +373,83 @@ test_that("messy North Sea folder first Load click fills Catch Mortality Recruit
                  info = tab$title)
     save_shot(app, shot_dir, tab$shot)
   }
+})
+
+test_that("two-run pair loader and busy indicators are visible", {
+  e2e_chrome()
+  root <- ra_pkg_root()
+  pair_dir <- tempfile("ra_pair_e2e_")
+  pair <- write_synthetic_atlantis_pair(pair_dir)
+  extra_dir <- tempfile("ra_pair_extra_")
+  write_synthetic_atlantis_run(extra_dir)
+  on.exit(unlink(c(pair_dir, extra_dir), recursive = TRUE), add = TRUE)
+
+  shot_dir <- file.path(tempdir(), "ra_e2e_pair_shots")
+  dir.create(shot_dir, showWarnings = FALSE)
+
+  app <- shinytest2::AppDriver$new(
+    app_dir = file.path(root, "inst", "shiny"),
+    name = "reactiveatlantis-pair-loader",
+    height = 1100,
+    width = 1500,
+    load_timeout = 40000,
+    timeout = 20000
+  )
+  on.exit(try(app$stop(), silent = TRUE), add = TRUE)
+
+  app$set_inputs(
+    `project-run1_name` = "Base",
+    `project-run1_config_dir` = pair$config_dir,
+    `project-run1_output_dir` = pair$output_dir,
+    wait_ = FALSE
+  )
+  app$wait_for_idle(timeout = 15000)
+  app$click("project-add_run")
+  app$wait_for_idle(timeout = 15000)
+  app$set_inputs(
+    `project-extra_name_2` = "Alt",
+    `project-extra_config_2` = extra_dir,
+    `project-extra_output_2` = extra_dir,
+    wait_ = FALSE
+  )
+  app$wait_for_idle(timeout = 15000)
+  body <- app$get_html("body")
+  expect_true(grepl("Configuration folder", body, fixed = TRUE))
+  expect_true(grepl("Output folder", body, fixed = TRUE))
+  expect_true(grepl("Run 1", body, fixed = TRUE))
+  expect_true(grepl("Run 2", body, fixed = TRUE))
+  expect_true(grepl("Add another run", body, fixed = TRUE))
+  save_shot(app, shot_dir, "pair_01_two_runs")
+
+  app$click("project-scan_folder")
+  app$wait_for_idle(timeout = 20000)
+  body2 <- app$get_html("body")
+  expect_true(grepl("Scan:", body2) || grepl("file roles", body2))
+  expect_true(grepl("is-loaded", body2) || grepl("data-status=\"loaded\"", body2))
+  save_shot(app, shot_dir, "pair_02_scanned")
+
+  app$click("project-load_project")
+  app$wait_for_idle(timeout = 60000)
+  loaded <- app$get_html("body")
+  expect_true(grepl("Loaded", loaded))
+  save_shot(app, shot_dir, "pair_03_loaded")
+
+  css <- app$get_html("html")
+  expect_true(grepl("busyIndicatorOptions|shiny-busy|recalculating", css) ||
+                grepl("ra-busy", css))
+
+  expect_true(click_nav(app, "Compare"))
+  app$get_js("
+    document.body.classList.add('shiny-busy');
+    document.documentElement.classList.add('shiny-busy');
+    var plot = document.querySelector('#compare-plot_facets_gg, .shiny-plot-output');
+    if (plot) plot.classList.add('recalculating');
+    true;
+  ")
+  Sys.sleep(0.5)
+  save_shot(app, shot_dir, "pair_04_busy_indicators")
+  busy_html <- app$get_html("html")
+  expect_true(grepl("shiny-busy", busy_html, fixed = TRUE))
+  expect_true(grepl("ra-busy-bar", busy_html, fixed = TRUE))
 })
 

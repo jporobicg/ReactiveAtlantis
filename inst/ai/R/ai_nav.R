@@ -70,7 +70,7 @@ ra_ai_nav_catalog <- function() {
       title = "Multi-run",
       module = "ensemble",
       summary = paste(
-        "Overlay biomass, SSB, YOY or catch from extra run folders; ensemble",
+        "Overlay biomass, SSB, YOY or catch from extra run pairs; ensemble",
         "mean and range when more than two runs are loaded."
       ),
       keywords = c("multi-run", "ensemble", "overlay", "scenario compare")
