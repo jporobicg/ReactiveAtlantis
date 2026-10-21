@@ -150,9 +150,10 @@ ra_ai_nav_catalog <- function() {
       title = "Feeding",
       module = "feeding",
       summary = paste(
-        "pPREY matrix by group name and adult/juvenile; one-group bars;",
-        "matrix filters; diagnostics (preference sums, uneaten prey, DietCheck);",
-        "compare edited vs original. Gape overlap and mismatch views remain."
+        "Full pPREY matrix; hover a cell for value and group names with age;",
+        "click to set predator and prey dropdowns and highlight the row/column;",
+        "bar charts of the selected predator row and prey column.",
+        "Diagnostics and compare stay as secondary views."
       ),
       keywords = c("feeding", "pprey", "gape", "availability", "preference",
                    "klp", "kup", "starv", "mum", "dietcheck", "diet")

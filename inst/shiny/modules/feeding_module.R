@@ -11,60 +11,28 @@ feeding_ui <- function(id) {
         width = 300, open = "open",
         selectInput(
           ns("view_type"), "View",
-          choices = list(
-            "Matrix (existing)" = c(
-              "Availability (pPREY)" = "availability",
-              "Gape overlap" = "overlap",
-              "Gape mismatch (pPREY>0, overlap=0)" = "mismatch",
-              "Effective predation" = "effective",
-              "Predation pressure" = "pressure"
-            ),
-            "One-group" = c(
-              "One-group: predator or prey preferences" = "one_group"
-            ),
-            "Matrix filters" = c(
-              "Matrix filters: threshold, interacting, cluster" = "matrix_filters"
-            ),
-            "Diagnostics" = c(
-              "Diagnostics: sums, uneaten prey, DietCheck" = "diagnostics"
-            ),
-            "Compare" = c(
-              "Compare edited vs original" = "compare"
-            )
+          choices = c(
+            "pPREY matrix" = "matrix",
+            "Diagnostics" = "diagnostics",
+            "Compare edited vs original" = "compare"
           ),
-          selected = "availability"
+          selected = "matrix"
         ),
         tags$hr(),
         tags$strong("Predator"),
-        selectInput(ns("pred_group"), "Group name", choices = c("(all)" = "(all)")),
+        selectInput(ns("pred_group"), "Group name", choices = c("(none)" = "(none)")),
         selectInput(ns("pred_stage"), "Adult / juvenile",
-                    choices = c("All" = "all", "Adult" = "2", "Juvenile" = "1",
-                                "Biomass pool" = "pool")),
+                    choices = c("Juvenile" = "1", "Adult" = "2",
+                                "Biomass pool" = "pool"),
+                    selected = "1"),
         tags$strong("Prey"),
-        selectInput(ns("prey_group"), "Group name", choices = c("(all)" = "(all)")),
+        selectInput(ns("prey_group"), "Group name", choices = c("(none)" = "(none)")),
         selectInput(ns("prey_stage"), "Adult / juvenile",
-                    choices = c("All" = "all", "Adult" = "2", "Juvenile" = "1")),
-        conditionalPanel(
-          "input.view_type == 'one_group'", ns = ns,
-          tags$hr(),
-          tags$strong("One-group view"),
-          selectInput(
-            ns("one_dir"), "Direction",
-            choices = c("Predator diet (sorted prey)" = "predator",
-                        "Prey eaten-by (sorted predators)" = "prey")
-          ),
-          p(class = "ra-muted",
-            "Pick a predator group and adult/juvenile for a sorted prey bar chart, or reverse: pick a prey group and stage to list its predators.")
-        ),
-        conditionalPanel(
-          "input.view_type == 'matrix_filters'", ns = ns,
-          tags$hr(),
-          tags$strong("Matrix filters"),
-          sliderInput(ns("hide_below"), "Hide values below",
-                      min = 0, max = 1, value = 0, step = 0.01),
-          checkboxInput(ns("only_interacting"), "Show only interacting groups", FALSE),
-          checkboxInput(ns("cluster_rc"), "Cluster rows and columns", FALSE)
-        ),
+                    choices = c("Juvenile" = "1", "Adult" = "2"),
+                    selected = "1"),
+        textOutput(ns("cell_info")),
+        p(class = "ra-muted",
+          "The full pPREY matrix stays on screen. Hover a cell for the value and groups. Click a cell to set these dropdowns and highlight that row and column."),
         conditionalPanel(
           "input.view_type == 'diagnostics'", ns = ns,
           tags$hr(),
@@ -84,17 +52,24 @@ feeding_ui <- function(id) {
           actionButton(ns("reset_edits"), "Reset to original", class = "btn-sm"),
           textOutput(ns("edit_status")),
           p(class = "ra-muted",
-            "Changed cells only. The group-name and adult/juvenile selectors pick the cell.")
-        ),
-        p(class = "ra-muted",
-          "Predator and prey search is group name plus adult/juvenile everywhere. Existing matrix views keep their plots.")
+            "Changed cells only. Use the group-name and adult/juvenile selectors to pick a cell.")
+        )
       ),
-      plotOutput(ns("feeding_plot_gg"), height = "640px"),
       conditionalPanel(
-        paste0("['availability','overlap','mismatch','effective','pressure']",
-               ".indexOf(input.view_type) >= 0"),
-        ns = ns,
-        plotOutput(ns("detail_plot"), height = "280px")
+        "input.view_type == 'matrix'", ns = ns,
+        plotly::plotlyOutput(ns("feeding_plot_gg"), height = "520px"),
+        fluidRow(
+          column(6, plotOutput(ns("pred_bars"), height = "280px")),
+          column(6, plotOutput(ns("prey_bars"), height = "280px"))
+        )
+      ),
+      conditionalPanel(
+        "input.view_type == 'diagnostics'", ns = ns,
+        plotOutput(ns("diag_plot"), height = "480px")
+      ),
+      conditionalPanel(
+        "input.view_type == 'compare'", ns = ns,
+        plotOutput(ns("compare_plot"), height = "480px")
       ),
       DT::dataTableOutput(ns("bug_table"))
     )
@@ -103,6 +78,7 @@ feeding_ui <- function(id) {
 
 feeding_server <- function(id, project = NULL) {
   moduleServer(id, function(input, output, session) {
+    ns <- session$ns
     ps <- shiny::reactive(project_snapshot(project))
     rv <- reactiveValues(
       ava_mat = NULL, overlap_mat = NULL, real_feed = NULL,
@@ -211,160 +187,40 @@ feeding_server <- function(id, project = NULL) {
       update_select_keep(session, "prey_group", prey_ch, input$prey_group)
     })
 
-    filtered_mats <- reactive({
+    feed_grp <- reactive({
+      tryCatch(ps()$data$grp, error = function(e) NULL)
+    })
+
+    selected_cell <- reactive({
       ava <- current_mat()
       req(ava)
-      hit <- pprey_filter_index(
+      pprey_resolve_selection(
         ava,
         pred_group = input$pred_group,
         pred_stage = input$pred_stage,
         prey_group = input$prey_group,
         prey_stage = input$prey_stage
       )
-      searching <- isTRUE(hit$searching)
-      pred_keep <- hit$pred_keep
-      prey_keep <- hit$prey_keep
-      if (!searching && length(pred_keep) == 0) pred_keep <- seq_len(nrow(ava))
-      if (!searching && length(prey_keep) == 0) prey_keep <- seq_len(ncol(ava))
-      list(
-        ava = ava[pred_keep, prey_keep, drop = FALSE],
-        need_gape = !input$view_type %in% c("availability", "one_group",
-                                            "matrix_filters", "diagnostics",
-                                            "compare"),
-        pred_keep = pred_keep,
-        prey_keep = prey_keep,
-        empty_search = searching && (length(pred_keep) == 0 || length(prey_keep) == 0),
-        hl_pred = if (is.null(input$pred_group) || input$pred_group %in% c("", "(all)")) {
-          NULL
-        } else rownames(ava)[hit$pred_all],
-        hl_prey = if (is.null(input$prey_group) || input$prey_group %in% c("", "(all)")) {
-          NULL
-        } else input$prey_group
-      )
     })
 
-    make_feed_plot <- function() {
-      if (identical(input$view_type, "one_group")) {
-        return(make_one_group_plot())
-      }
-      if (identical(input$view_type, "diagnostics")) {
-        return(make_diagnostics_plot())
-      }
-      if (identical(input$view_type, "compare")) {
-        return(make_compare_plot())
-      }
-      mats <- filtered_mats()
-      if (isTRUE(mats$empty_search) || is.null(mats$ava) || nrow(mats$ava) == 0 || ncol(mats$ava) == 0) {
-        return(ggplot2::ggplot() +
-                 ggplot2::labs(title = "No predators or prey match that group and stage") +
-                 theme_reactiveatlantis())
-      }
-      req(mats$ava, input$view_type)
-      ava_show <- mats$ava
-      if (identical(input$view_type, "matrix_filters")) {
-        ava_show <- filter_feed_matrix(
-          ava_show,
-          threshold = input$hide_below,
-          interacting = isTRUE(input$only_interacting),
-          cluster = isTRUE(input$cluster_rc)
-        )
-        if (is.null(ava_show) || nrow(ava_show) == 0 || ncol(ava_show) == 0) {
-          return(ggplot2::ggplot() +
-                   ggplot2::labs(title = "No interacting groups above that threshold") +
-                   theme_reactiveatlantis())
-        }
-        return(plot_feed_tile(
-          t(ava_show), "Filtered availability (pPREY)",
-          pal = "YlOrRd", legend = "Availability",
-          highlight_pred = mats$hl_pred, highlight_prey = mats$hl_prey
-        ))
-      }
-      gape <- if (isTRUE(mats$need_gape)) gape_built() else NULL
-      overlap <- if (is.null(gape) || is.null(gape$overlap) || length(mats$pred_keep) == 0) {
-        NULL
-      } else gape$overlap[mats$pred_keep, mats$prey_keep, drop = FALSE]
-      real <- if (is.null(gape) || is.null(gape$real) || length(mats$pred_keep) == 0) {
-        NULL
-      } else gape$real[mats$pred_keep, mats$prey_keep, drop = FALSE]
-      pressure <- if (is.null(gape) || is.null(gape$pressure) || length(mats$pred_keep) == 0) {
-        NULL
-      } else gape$pressure[mats$prey_keep, mats$pred_keep, drop = FALSE]
-      bugs <- if (is.null(overlap)) NULL else gape_mismatch(mats$ava, overlap)
-      hl_pred <- mats$hl_pred
-      hl_prey <- mats$hl_prey
-      if (input$view_type == "availability") {
-        plot_feed_tile(t(mats$ava), "Availability matrix (pPREY)",
-                       pal = "YlOrRd", legend = "Availability",
-                       highlight_pred = hl_pred, highlight_prey = hl_prey,
-                       mismatch = if (is.null(bugs)) NULL else t(bugs))
-      } else if (input$view_type == "overlap") {
-        t.o.mat <- t(overlap * mats$ava)
-        t.o.mat[t.o.mat > 0] <- 1
-        plot_feed_overlap(t.o.mat, hl_pred, hl_prey)
-      } else if (input$view_type == "mismatch") {
-        if (is.null(bugs)) {
-          return(ggplot2::ggplot() + ggplot2::labs(title = "Gape overlap was not calculated") +
-                   theme_reactiveatlantis())
-        }
-        plot_feed_mismatch(t(bugs))
-      } else if (input$view_type == "effective") {
-        rff <- log(real)
-        rff[!is.finite(rff)] <- NA
-        plot_feed_tile(t(rff), "Effective predation (log scale)",
-                       pal = "YlGnBu", legend = "Predation\nLn()",
-                       highlight_pred = hl_pred, highlight_prey = hl_prey,
-                       mismatch = if (is.null(bugs)) NULL else t(bugs))
-      } else {
-        press <- pressure
-        if (is.null(press) || !is.matrix(press)) {
-          return(ggplot2::ggplot() +
-                   ggplot2::labs(title = "Predation pressure needs gape overlap (initial.nc + KLP/KUP)") +
-                   theme_reactiveatlantis())
-        }
-        press[!is.finite(press) | press == 0] <- NA
-        plot_feed_tile(press, "Percentage of predation pressure",
-                       pal = "RdPu", legend = "% of diet",
-                       highlight_pred = hl_pred, highlight_prey = hl_prey,
-                       limits = c(0, 100))
-      }
-    }
-
-    make_one_group_plot <- function() {
+    output$cell_info <- renderText({
       ava <- current_mat()
-      req(ava)
-      grp <- tryCatch(ps()$data$grp, error = function(e) NULL)
-      dirn <- if (is.null(input$one_dir)) "predator" else input$one_dir
-      if (identical(dirn, "prey")) {
-        if (is.null(input$prey_group) || input$prey_group %in% c("", "(all)")) {
-          return(ggplot2::ggplot() +
-                   ggplot2::labs(title = "Pick a prey group name, then adult or juvenile") +
-                   theme_reactiveatlantis())
-        }
-        df <- pprey_one_group(ava, "prey", input$prey_group, input$prey_stage, grp)
-      } else {
-        if (is.null(input$pred_group) || input$pred_group %in% c("", "(all)")) {
-          return(ggplot2::ggplot() +
-                   ggplot2::labs(title = "Pick a predator group name, then adult or juvenile") +
-                   theme_reactiveatlantis())
-        }
-        df <- pprey_one_group(ava, "predator", input$pred_group, input$pred_stage, grp)
-      }
-      plot_pprey_one_group(df)
-    }
+      if (is.null(ava)) return("Load biology.prm to show the pPREY matrix.")
+      sel <- tryCatch(selected_cell(), error = function(e) NULL)
+      pprey_cell_info_text(ava, sel, feed_grp())
+    })
 
-    make_diagnostics_plot <- function() {
+    observeEvent(plotly::event_data("plotly_click", source = ns("feed_mat")), {
+      ev <- plotly::event_data("plotly_click", source = ns("feed_mat"))
       ava <- current_mat()
-      req(ava)
-      diag <- pprey_diagnostics(ava)
-      plot_pprey_sum_flags(diag$sums)
-    }
-
-    make_compare_plot <- function() {
-      orig <- pprey_mat()
-      ed <- current_mat()
-      req(orig, ed)
-      plot_pprey_compare(orig, ed)
-    }
+      if (is.null(ava) || is.null(ev)) return()
+      hit <- pprey_selection_from_click(ava, ev$y, ev$x, feed_grp())
+      if (is.null(hit)) return()
+      shiny::updateSelectInput(session, "pred_group", selected = hit$pred_group)
+      shiny::updateSelectInput(session, "pred_stage", selected = hit$pred_stage)
+      shiny::updateSelectInput(session, "prey_group", selected = hit$prey_group)
+      shiny::updateSelectInput(session, "prey_stage", selected = hit$prey_stage)
+    }, ignoreNULL = TRUE)
 
     observeEvent(input$apply_edit, {
       orig <- pprey_mat()
@@ -395,57 +251,69 @@ feeding_server <- function(id, project = NULL) {
       msg
     })
 
-    output$feeding_plot_gg <- renderPlot({
-      plot_or_message("Load biology.prm (and initial.nc) to plot the feeding matrix",
-                      make_feed_plot())
+    output$feeding_plot_gg <- plotly::renderPlotly({
+      ava <- current_mat()
+      if (is.null(ava) || !is.matrix(ava) || nrow(ava) == 0) {
+        p <- ggplot2::ggplot() +
+          ggplot2::labs(title = "Load biology.prm to plot the feeding matrix") +
+          theme_reactiveatlantis()
+        plt <- ra_ggplotly(p, tooltip = "text")
+        if (ra_is_plotly(plt)) plt$x$source <- ns("feed_mat")
+        return(plt)
+      }
+      sel <- tryCatch(selected_cell(), error = function(e) NULL)
+      plt <- plot_feed_matrix_plotly(ava, sel, feed_grp())
+      if (ra_is_plotly(plt)) {
+        plt$x$source <- ns("feed_mat")
+        tryCatch(plotly::event_register(plt, "plotly_click"), error = function(e) plt)
+      }
+      plt
     })
 
-    output$detail_plot <- renderPlot({
-      plot_or_message("Select a predator group and adult/juvenile for the detail chart", {
-      ava_mat <- current_mat()
-      req(ava_mat)
-      if (is.null(input$pred_group) || input$pred_group %in% c("", "(all)")) {
-        plot.new()
-        title("Select a predator group and adult/juvenile for availability, gape overlap and effective predation")
-        return(invisible(NULL))
-      }
-      meta <- parse_pprey_rownames(rownames(ava_mat))
-      rows <- pprey_match_rows(meta, input$pred_group, input$pred_stage)
-      if (!is.null(input$prey_stage) && !input$prey_stage %in% c("", "all", "(all)")) {
-        rows <- intersect(rows, pprey_match_prey_stage(meta, input$prey_stage))
-      }
-      if (length(rows) == 0) {
-        plot.new()
-        title("No pPREY row for that predator group and stage")
-        return(invisible(NULL))
-      }
-      pred <- rownames(ava_mat)[rows[1]]
-      prey <- colnames(ava_mat)
-      ava <- as.numeric(ava_mat[pred, ])
-      gape <- tryCatch(gape_built(), error = function(e) NULL)
-      ov <- if (is.null(gape) || is.null(gape$overlap) || !pred %in% rownames(gape$overlap)) {
-        rep(NA_real_, length(prey))
-      } else as.numeric(gape$overlap[pred, ])
-      eff <- if (is.null(gape) || is.null(gape$real) || !pred %in% rownames(gape$real)) {
-        rep(NA_real_, length(prey))
-      } else as.numeric(gape$real[pred, ])
-      df <- rbind(
-        data.frame(Prey = prey, Value = ava, Metric = "Availability (pPREY)"),
-        data.frame(Prey = prey, Value = ov, Metric = "Gape overlap"),
-        data.frame(Prey = prey, Value = eff, Metric = "Effective predation")
-      )
-      keep <- prey[ava > 0 | (!is.na(ov) & ov > 0)]
-      if (length(keep) == 0) keep <- prey
-      df <- df[df$Prey %in% keep, ]
-      p <- ggplot2::ggplot(df, ggplot2::aes(x = Prey, y = Value, fill = Metric))
-      p <- p + ggplot2::geom_col()
-      p <- p + ggplot2::facet_wrap(~ Metric, ncol = 3, scales = "free_y")
-      extra <- if (length(rows) > 1) paste0(" (1 of ", length(rows), " matching rows)") else ""
-      p <- p + ggplot2::labs(title = paste0("Diet detail — ", pred, extra), x = "Prey", y = NULL)
-      p <- p + theme_reactiveatlantis(base_size = 14)
-      p <- p + ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90, hjust = 1, size = 10),
-                              legend.position = "none")
-      p
+    output$pred_bars <- renderPlot({
+      plot_or_message("Select a predator group and adult/juvenile", {
+        ava <- current_mat()
+        req(ava)
+        if (pprey_is_none(input$pred_group)) {
+          return(ggplot2::ggplot() +
+                   ggplot2::labs(title = "Select a predator (or click a matrix cell)") +
+                   theme_reactiveatlantis())
+        }
+        df <- pprey_one_group(ava, "predator", input$pred_group, input$pred_stage,
+                              feed_grp())
+        plot_pprey_one_group(df)
+      })
+    })
+
+    output$prey_bars <- renderPlot({
+      plot_or_message("Select a prey group and adult/juvenile", {
+        ava <- current_mat()
+        req(ava)
+        if (pprey_is_none(input$prey_group)) {
+          return(ggplot2::ggplot() +
+                   ggplot2::labs(title = "Select a prey (or click a matrix cell)") +
+                   theme_reactiveatlantis())
+        }
+        df <- pprey_one_group(ava, "prey", input$prey_group, input$prey_stage,
+                              feed_grp())
+        plot_pprey_one_group(df)
+      })
+    })
+
+    output$diag_plot <- renderPlot({
+      plot_or_message("Load biology.prm to run feeding diagnostics", {
+        ava <- current_mat()
+        req(ava)
+        plot_pprey_sum_flags(pprey_preference_sums(ava))
+      })
+    })
+
+    output$compare_plot <- renderPlot({
+      plot_or_message("Load biology.prm to compare an edited matrix", {
+        orig <- pprey_mat()
+        ed <- current_mat()
+        req(orig, ed)
+        plot_pprey_compare(orig, ed)
       })
     })
 
@@ -474,23 +342,9 @@ feeding_server <- function(id, project = NULL) {
         }
         return(ra_datatable(ch, options = list(pageLength = 10, dom = "tip")))
       }
-      if (identical(input$view_type, "one_group") ||
-          identical(input$view_type, "matrix_filters")) {
-        return(ra_datatable(data.frame(
-          Note = "This view uses the plot above. Switch to Diagnostics for flags."
-        )))
-      }
-      if (identical(input$view_type, "availability")) {
-        return(ra_datatable(data.frame(
-          Note = "Switch to gape mismatch to list pPREY > 0 cells with zero overlap."
-        )))
-      }
-      gape <- tryCatch(gape_built(), error = function(e) NULL)
-      bugs <- if (is.null(gape)) NULL else gape$bugs
-      if (is.null(bugs) || nrow(bugs) == 0) {
-        return(ra_datatable(data.frame(Note = "No pPREY > 0 cells with zero gape overlap.")))
-      }
-      ra_datatable(bugs, options = list(pageLength = 8, dom = "tip"))
+      ra_datatable(data.frame(
+        Note = "Hover a cell for pPREY and group names. Click to select that predator and prey."
+      ))
     })
 
     keep_outputs_alive(output, "banner")
@@ -938,12 +792,17 @@ pprey_group_label <- function(code, grp = NULL) {
   out
 }
 
+pprey_is_none <- function(x) {
+  is.null(x) || !nzchar(as.character(x)[1]) ||
+    as.character(x)[1] %in% c("(all)", "(none)")
+}
+
 pprey_group_choices <- function(codes, grp = NULL) {
   codes <- unique(as.character(codes))
   codes <- codes[!is.na(codes) & nzchar(codes)]
-  if (length(codes) == 0) return(c("(all)" = "(all)"))
+  if (length(codes) == 0) return(c("(none)" = "(none)"))
   labs <- pprey_group_label(codes, grp)
-  c("(all)" = "(all)", stats::setNames(codes, labs))
+  c("(none)" = "(none)", stats::setNames(codes, labs))
 }
 
 pprey_stage_wanted <- function(stage) {
@@ -964,7 +823,7 @@ pprey_match_stage <- function(stage_int, want) {
 pprey_match_rows <- function(meta, pred_group, pred_stage) {
   if (is.null(meta) || nrow(meta) == 0) return(integer(0))
   keep <- rep(TRUE, nrow(meta))
-  if (!is.null(pred_group) && !pred_group %in% c("", "(all)")) {
+  if (!pprey_is_none(pred_group)) {
     keep <- keep & meta$pred_code == as.character(pred_group)
   }
   keep <- keep & pprey_match_stage(meta$pred_stage, pred_stage)
@@ -984,9 +843,9 @@ pprey_filter_index <- function(mat, pred_group, pred_stage, prey_group, prey_sta
                 pred_all = integer(0), searching = FALSE))
   }
   meta <- parse_pprey_rownames(rownames(mat))
-  pred_sel <- !is.null(pred_group) && !pred_group %in% c("", "(all)")
+  pred_sel <- !pprey_is_none(pred_group)
   pred_st <- !identical(pprey_stage_wanted(pred_stage), "all")
-  prey_sel <- !is.null(prey_group) && !prey_group %in% c("", "(all)")
+  prey_sel <- !pprey_is_none(prey_group)
   prey_st <- !identical(pprey_stage_wanted(prey_stage), "all")
   pred_keep <- pprey_match_rows(meta, pred_group, pred_stage)
   if (prey_st) pred_keep <- intersect(pred_keep, pprey_match_prey_stage(meta, prey_stage))
@@ -1001,6 +860,180 @@ pprey_filter_index <- function(mat, pred_group, pred_stage, prey_group, prey_sta
     pred_all = pred_all,
     searching = pred_sel || pred_st || prey_sel || prey_st
   )
+}
+
+pprey_axis_labels <- function(meta, grp = NULL) {
+  if (is.null(meta) || nrow(meta) == 0) return(character())
+  paste0(
+    pprey_group_label(meta$pred_code, grp),
+    " · ",
+    tolower(pprey_stage_label(meta$pred_stage)),
+    " / ",
+    tolower(pprey_stage_label(meta$prey_stage)), " prey"
+  )
+}
+
+pprey_hover_text <- function(mat, grp = NULL) {
+  if (is.null(mat) || !is.matrix(mat)) {
+    return(matrix(character(), 0, 0))
+  }
+  meta <- parse_pprey_rownames(rownames(mat))
+  pred_lab <- pprey_group_label(meta$pred_code, grp)
+  pred_st <- pprey_stage_label(meta$pred_stage)
+  prey_st <- pprey_stage_label(meta$prey_stage)
+  prey_lab <- pprey_group_label(colnames(mat), grp)
+  out <- matrix("", nrow(mat), ncol(mat), dimnames = dimnames(mat))
+  for (i in seq_len(nrow(mat))) {
+    for (j in seq_len(ncol(mat))) {
+      val <- mat[i, j]
+      lab <- if (is.finite(val)) as.character(signif(val, 4)) else "NA"
+      out[i, j] <- paste0(
+        "pPREY: ", lab,
+        "<br>Predator: ", pred_lab[i], " - ", tolower(pred_st[i]),
+        "<br>Prey: ", prey_lab[j], " - ", tolower(prey_st[i])
+      )
+    }
+  }
+  out
+}
+
+pprey_resolve_selection <- function(mat, pred_group, pred_stage, prey_group, prey_stage) {
+  empty <- list(rows = character(), prey = character(), row_i = integer(0),
+                col_i = integer(0))
+  if (is.null(mat) || !is.matrix(mat)) return(empty)
+  meta <- parse_pprey_rownames(rownames(mat))
+  rows <- integer(0)
+  if (!pprey_is_none(pred_group)) {
+    rows <- pprey_match_rows(meta, pred_group, pred_stage)
+    if (!identical(pprey_stage_wanted(prey_stage), "all") &&
+        !pprey_is_none(prey_group)) {
+      rows <- intersect(rows, pprey_match_prey_stage(meta, prey_stage))
+    }
+  }
+  col_i <- integer(0)
+  if (!pprey_is_none(prey_group)) {
+    col_i <- which(colnames(mat) == as.character(prey_group))
+  }
+  list(
+    rows = if (length(rows)) rownames(mat)[rows] else character(),
+    prey = if (length(col_i)) colnames(mat)[col_i[1]] else character(),
+    row_i = rows,
+    col_i = col_i
+  )
+}
+
+pprey_selection_from_click <- function(mat, y_label, x_label, grp = NULL) {
+  if (is.null(mat) || !is.matrix(mat)) return(NULL)
+  meta <- parse_pprey_rownames(rownames(mat))
+  y_labs <- pprey_axis_labels(meta, grp)
+  x_labs <- pprey_group_label(colnames(mat), grp)
+  y_label <- as.character(y_label)[1]
+  x_label <- as.character(x_label)[1]
+  ri <- which(y_labs == y_label | rownames(mat) == y_label)[1]
+  ci <- which(x_labs == x_label | colnames(mat) == x_label)[1]
+  if (!is.finite(ri) || !is.finite(ci)) return(NULL)
+  list(
+    pred_group = meta$pred_code[ri],
+    pred_stage = if (is.na(meta$pred_stage[ri])) "pool" else as.character(meta$pred_stage[ri]),
+    prey_group = colnames(mat)[ci],
+    prey_stage = if (is.na(meta$prey_stage[ri])) "1" else as.character(meta$prey_stage[ri])
+  )
+}
+
+pprey_cell_info_text <- function(mat, sel, grp = NULL) {
+  if (is.null(mat) || !is.matrix(mat)) return("Load biology.prm to show the pPREY matrix.")
+  if (is.null(sel) || (length(sel$row_i) == 0 && length(sel$col_i) == 0)) {
+    return("Hover a cell for its value. Click to select predator and prey.")
+  }
+  if (length(sel$row_i) == 1 && length(sel$col_i) >= 1) {
+    txt <- pprey_hover_text(mat, grp)[sel$row_i[1], sel$col_i[1]]
+    return(gsub("<br>", " | ", txt, fixed = TRUE))
+  }
+  bits <- character()
+  if (length(sel$rows)) bits <- c(bits, paste("Predator row:", paste(sel$rows, collapse = ", ")))
+  if (length(sel$prey)) bits <- c(bits, paste("Prey column:", sel$prey))
+  paste(bits, collapse = " | ")
+}
+
+plot_feed_matrix_plotly <- function(mat, sel = NULL, grp = NULL) {
+  if (is.null(mat) || !is.matrix(mat) || !requireNamespace("plotly", quietly = TRUE)) {
+    p <- ggplot2::ggplot() +
+      ggplot2::labs(title = "pPREY matrix") +
+      theme_reactiveatlantis()
+    return(ra_ggplotly(p, tooltip = "text"))
+  }
+  meta <- parse_pprey_rownames(rownames(mat))
+  y_lab <- pprey_axis_labels(meta, grp)
+  x_lab <- pprey_group_label(colnames(mat), grp)
+  hover <- pprey_hover_text(mat, grp)
+  z <- mat
+  z[!is.finite(z) | z == 0] <- NA
+  ## First predator row at the top (plotly heatmap otherwise starts at the bottom).
+  y_ord <- rev(y_lab)
+  z_ord <- z[rev(seq_len(nrow(z))), , drop = FALSE]
+  h_ord <- hover[rev(seq_len(nrow(hover))), , drop = FALSE]
+  plt <- plotly::plot_ly(
+    x = x_lab,
+    y = y_ord,
+    z = z_ord,
+    type = "heatmap",
+    colorscale = "YlOrRd",
+    reversescale = TRUE,
+    hoverinfo = "text",
+    text = h_ord,
+    colorbar = list(title = "pPREY"),
+    xgap = 1, ygap = 1
+  )
+  shapes <- list()
+  if (!is.null(sel) && length(sel$row_i)) {
+    for (ri in sel$row_i) {
+      yl <- y_lab[ri]
+      shapes[[length(shapes) + 1]] <- list(
+        type = "rect",
+        xref = "x", yref = "y",
+        x0 = -0.5, x1 = ncol(mat) - 0.5,
+        y0 = yl, y1 = yl,
+        line = list(color = "#C4A35A", width = 3),
+        fillcolor = "rgba(0,0,0,0)"
+      )
+    }
+  }
+  if (!is.null(sel) && length(sel$col_i)) {
+    for (ci in sel$col_i) {
+      xl <- x_lab[ci]
+      shapes[[length(shapes) + 1]] <- list(
+        type = "rect",
+        xref = "x", yref = "y",
+        x0 = xl, x1 = xl,
+        y0 = -0.5, y1 = nrow(mat) - 0.5,
+        line = list(color = "#328CC1", width = 3),
+        fillcolor = "rgba(0,0,0,0)"
+      )
+    }
+  }
+  ann <- list()
+  if (!is.null(sel) && length(sel$row_i) == 1 && length(sel$col_i) >= 1) {
+    ri <- sel$row_i[1]
+    ci <- sel$col_i[1]
+    ann[[1]] <- list(
+      x = x_lab[ci], y = y_lab[ri],
+      text = gsub("<br>", "<br>", hover[ri, ci], fixed = TRUE),
+      showarrow = TRUE, arrowhead = 2, arrowcolor = "#0B3C5D",
+      bgcolor = "#F7F4EC", bordercolor = "#0B3C5D",
+      font = list(size = 11, color = "#1B2833")
+    )
+  }
+  plt <- plotly::layout(
+    plt,
+    title = list(text = "Availability matrix (pPREY)", font = list(size = 14)),
+    xaxis = list(title = "Prey", side = "top", tickangle = -60),
+    yaxis = list(title = "Predator", automargin = TRUE),
+    shapes = shapes,
+    annotations = ann,
+    margin = list(l = 140, t = 80, b = 40)
+  )
+  plotly::config(plt, displaylogo = FALSE,
+                 modeBarButtonsToRemove = c("lasso2d", "select2d"))
 }
 
 filter_feed_matrix <- function(mat, threshold = 0, interacting = FALSE, cluster = FALSE) {
@@ -1034,8 +1067,7 @@ filter_feed_matrix <- function(mat, threshold = 0, interacting = FALSE, cluster 
 pprey_one_group <- function(mat, direction, group, stage, grp = NULL) {
   empty <- data.frame(Label = character(), Value = numeric(), Stage = character(),
                       stringsAsFactors = FALSE)
-  if (is.null(mat) || !is.matrix(mat) || is.null(group) || !nzchar(as.character(group)) ||
-      group %in% c("(all)")) {
+  if (is.null(mat) || !is.matrix(mat) || pprey_is_none(group)) {
     return(empty)
   }
   meta <- parse_pprey_rownames(rownames(mat))
@@ -1417,10 +1449,10 @@ pprey_apply_edit <- function(mat, pred_group, pred_stage, prey_group, prey_stage
   if (!is.finite(val)) {
     return(list(mat = mat, message = "New value must be numeric."))
   }
-  if (is.null(pred_group) || pred_group %in% c("", "(all)")) {
+  if (pprey_is_none(pred_group)) {
     return(list(mat = mat, message = "Pick a predator group name to edit."))
   }
-  if (is.null(prey_group) || prey_group %in% c("", "(all)")) {
+  if (pprey_is_none(prey_group)) {
     return(list(mat = mat, message = "Pick a prey group name to edit."))
   }
   if (!prey_group %in% colnames(mat)) {

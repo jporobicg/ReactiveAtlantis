@@ -1208,7 +1208,7 @@ test_that("feeding predator row filters the matrix and pressure is a matrix", {
   expect_s3_class(p2, "ggplot")
 })
 
-test_that("pPREY group+stage views, filters, diagnostics and compare", {
+test_that("pPREY full matrix hover, click selection, bars, diagnostics and compare", {
   ava <- matrix(
     c(
       0.10, 0.80, 0.05, 0,
@@ -1256,16 +1256,32 @@ test_that("pPREY group+stage views, filters, diagnostics and compare", {
   p_prey <- plot_pprey_one_group(prey_df)
   expect_s3_class(p_prey, "ggplot")
 
-  hid <- filter_feed_matrix(ava, threshold = 0.25, interacting = TRUE, cluster = FALSE)
-  expect_true(all(hid[hid > 0] >= 0.25))
-  expect_false("DET" %in% colnames(hid))
-  expect_false("pPREYPHY" %in% rownames(hid))
-  cl <- filter_feed_matrix(ava, threshold = 0, interacting = TRUE, cluster = TRUE)
-  expect_true(is.matrix(cl) && nrow(cl) > 1 && ncol(cl) > 1)
-  expect_false("DET" %in% colnames(cl))
-  p_filt <- plot_feed_tile(t(hid), "Filtered availability (pPREY)", "YlOrRd",
-                           "Availability", NULL, NULL)
-  expect_s3_class(p_filt, "ggplot")
+  hover <- pprey_hover_text(ava, grp)
+  expect_equal(dim(hover), dim(ava))
+  expect_match(hover["pPREY1COD1", "HAD"], "pPREY: 0.8")
+  expect_match(hover["pPREY1COD1", "HAD"], "Cod")
+  expect_match(hover["pPREY1COD1", "HAD"], "Haddock")
+  expect_match(hover["pPREY1COD1", "HAD"], "juvenile")
+  click <- pprey_selection_from_click(
+    ava, pprey_axis_labels(meta, grp)[1], pprey_group_label("HAD", grp), grp
+  )
+  expect_equal(click$pred_group, "COD")
+  expect_equal(click$pred_stage, "1")
+  expect_equal(click$prey_group, "HAD")
+  expect_equal(click$prey_stage, "1")
+  sel <- pprey_resolve_selection(ava, "COD", "1", "HAD", "1")
+  expect_equal(sel$rows, "pPREY1COD1")
+  expect_equal(sel$prey, "HAD")
+  expect_equal(nrow(ava), 6)
+  expect_equal(ncol(ava), 4)
+  info <- pprey_cell_info_text(ava, sel, grp)
+  expect_match(info, "0.8")
+  plt <- plot_feed_matrix_plotly(ava, sel, grp)
+  expect_true(inherits(plt, "plotly") || inherits(plt, "ggplot"))
+  p_full <- plot_feed_tile(t(ava), "Availability matrix (pPREY)", "YlOrRd",
+                           "Availability", sel$rows, sel$prey)
+  expect_s3_class(p_full, "ggplot")
+  expect_equal(nrow(p_full$data), 24)
 
   sums <- pprey_preference_sums(ava)
   expect_true("pPREYPHY" %in% sums$Predator[sums$Flag == "zero preferences"])
@@ -1312,12 +1328,12 @@ test_that("pPREY group+stage views, filters, diagnostics and compare", {
 
   art <- "/opt/cursor/artifacts"
   if (dir.exists(art)) {
-    ggplot2::ggsave(file.path(art, "feeding_one_group_predator.png"), p_pred,
+    ggplot2::ggsave(file.path(art, "feeding_matrix_full.png"), p_full,
                     width = 9, height = 6, dpi = 120)
-    ggplot2::ggsave(file.path(art, "feeding_one_group_prey.png"), p_prey,
-                    width = 9, height = 6, dpi = 120)
-    ggplot2::ggsave(file.path(art, "feeding_matrix_filters.png"), p_filt,
-                    width = 9, height = 6, dpi = 120)
+    ggplot2::ggsave(file.path(art, "feeding_pred_bars.png"), p_pred,
+                    width = 8, height = 5, dpi = 120)
+    ggplot2::ggsave(file.path(art, "feeding_prey_bars.png"), p_prey,
+                    width = 8, height = 5, dpi = 120)
     ggplot2::ggsave(file.path(art, "feeding_diagnostics.png"), p_diag,
                     width = 9, height = 6, dpi = 120)
     ggplot2::ggsave(file.path(art, "feeding_compare.png"), p_cmp,
