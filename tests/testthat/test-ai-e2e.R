@@ -2,29 +2,6 @@
 
 Sys.setenv(NOT_CRAN = "true")
 
-ai_e2e_chrome <- function() {
-  skip_if_not_installed("shinytest2")
-  skip_if_not_installed("chromote")
-  skip_if_not(file.exists("/usr/local/bin/google-chrome") ||
-                file.exists("/usr/bin/google-chrome-stable") ||
-                file.exists("/usr/bin/google-chrome"),
-              "Google Chrome is required for shinytest2")
-  chrome <- if (file.exists("/usr/local/bin/google-chrome")) {
-    "/usr/local/bin/google-chrome"
-  } else if (file.exists("/usr/bin/google-chrome-stable")) {
-    "/usr/bin/google-chrome-stable"
-  } else {
-    "/usr/bin/google-chrome"
-  }
-  Sys.setenv(CHROMOTE_CHROME = chrome)
-  chrome_dir <- tempfile("chrome-data-")
-  dir.create(chrome_dir)
-  chromote::set_chrome_args(c(
-    "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
-    "--headless=new", paste0("--user-data-dir=", chrome_dir)
-  ))
-  chrome_dir
-}
 
 click_nav <- function(app, title) {
   app$get_js(sprintf(
@@ -32,23 +9,6 @@ click_nav <- function(app, title) {
     deparse(title)
   ))
   app$wait_for_idle(timeout = 20000)
-}
-
-save_ai_shot <- function(app, name) {
-  shot_dir <- file.path(tempdir(), "ra_ai_shots")
-  dir.create(shot_dir, showWarnings = FALSE)
-  shot <- file.path(shot_dir, paste0(name, ".png"))
-  try(app$get_screenshot(shot), silent = TRUE)
-  art <- "/opt/cursor/artifacts"
-  if (dir.exists(art) && file.exists(shot)) {
-    file.copy(shot, file.path(art, paste0(name, ".png")), overwrite = TRUE)
-  }
-  man_fig <- file.path(ra_pkg_root(), "man", "figures")
-  if (identical(name, "ask_atlantis_drawer_open") && dir.exists(man_fig) &&
-      file.exists(shot)) {
-    file.copy(shot, file.path(man_fig, "ask_atlantis.png"), overwrite = TRUE)
-  }
-  shot
 }
 
 test_that("Ask Atlantis button and drawer are absent when disabled", {

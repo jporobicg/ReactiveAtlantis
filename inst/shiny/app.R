@@ -58,10 +58,12 @@ if (!file.exists(ai_load)) {
                       error = function(e) "")
 }
 ra_ai_on <- isTRUE(tryCatch({
+  ## Source into this app environment (unlocked). Do not use the
+  ## package namespace: it is locked after install.
   if (nzchar(ai_load) && file.exists(ai_load)) {
-    source(ai_load, local = FALSE)
+    source(ai_load, local = TRUE)
   }
-  source(file.path(app_dir, "modules", "assistant_module.R"))
+  source(file.path(app_dir, "modules", "assistant_module.R"), local = TRUE)
   ra_ai_enabled()
 }, error = function(e) FALSE))
 

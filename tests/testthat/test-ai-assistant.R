@@ -376,6 +376,22 @@ test_that("RA_AI_CORPUS_DIR expands in the Atlantis manuals manifest", {
   expect_gte(man$max_file_bytes, 11e6)
 })
 
+test_that("Ask Atlantis helpers source into an unlocked environment only", {
+  load_r <- file.path(root, "inst", "ai", "load.R")
+  locked <- new.env(parent = globalenv())
+  lockEnvironment(locked)
+  expect_error(
+    sys.source(load_r, envir = locked, keep.source = FALSE),
+    "locked environment"
+  )
+  open <- new.env(parent = globalenv())
+  open$.ra_ai_load_dir <- dirname(load_r)
+  sys.source(load_r, envir = open, keep.source = FALSE)
+  expect_true(exists("ra_ai_download_atlantis_manuals", envir = open,
+                     inherits = FALSE))
+  expect_true(exists("ra_ai_index", envir = open, inherits = FALSE))
+})
+
 test_that("csiro manual chunk detector ignores fixture manuals", {
   expect_true(ra_ai_is_csiro_manual_chunk(
     "/tmp/AtlantisUserGuide_PartI.pdf",

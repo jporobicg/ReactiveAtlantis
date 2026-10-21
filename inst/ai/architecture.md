@@ -24,7 +24,10 @@ diagnostics.
 
 ## Integration hook
 
-- Core R lives under `inst/ai/R/` and is sourced from `inst/ai/load.R`.
+- Core R lives under `inst/ai/R/` and is sourced from `inst/ai/load.R`
+  into an unlocked environment (a child of the package namespace for
+  exported wrappers, or the Shiny app environment). The installed
+  namespace is locked, so helpers must not be `source()`d into `topenv()`.
 - `inst/shiny/app.R` sources that loader and `modules/assistant_module.R`.
 - When `RA_AI_ENABLED` is true, a floating speech-bubble button and a
   right-hand drawer are added to the page header (fixed overlay). Default is

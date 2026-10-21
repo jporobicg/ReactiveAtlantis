@@ -44,6 +44,7 @@ replace any calibration tool.
 - `tests/testthat/test-ai-assistant.R`
 - `tests/testthat/test-ai-disabled.R`
 - `tests/testthat/test-ai-e2e.R`
+- `tests/testthat/test-ai-installed.R` — `R CMD INSTALL` then exported helpers and drawer
 - `inst/ai/evaluation/questions.json` (24 questions)
 - `inst/ai/evaluation/run_eval.R`
 
@@ -72,7 +73,8 @@ testthat::test_file("tests/testthat/test-e2e-app.R")
 
 | Suite | Result |
 | --- | --- |
-| `test-ai-assistant.R` | PASS 119 |
+| `test-ai-assistant.R` | PASS 122 |
+| `test-ai-installed.R` | PASS 10 |
 | `test-ai-disabled.R` | PASS 4 |
 | `test-ai-e2e.R` | PASS 22 |
 | `test-north-sea-fixes.R` | PASS 343 |
@@ -139,6 +141,9 @@ The Wiley overview paper on that page was skipped (paywall). Atlantis source and
 ## Limitations / follow-on
 
 - Chat is not streamed (`stream: false`).
+- Exported helpers (`download_atlantis_manuals()`, `index_ask_atlantis()`) source
+  `inst/ai` into an unlocked child of the package namespace. Sourcing into
+  `topenv()` after install fails with "cannot add bindings to a locked environment".
 - PDF extraction needs `pdftools`; unreadable pages are logged.
 - The assistant cannot see plot pixels or NetCDF values from the loaded run (by design).
 - Embedding quality was not measured on a real model here.

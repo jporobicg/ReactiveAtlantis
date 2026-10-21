@@ -2,12 +2,19 @@
 ## ~ Ask Atlantis exported indexing commands    ~ ##
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
 
-.ra_ai_ensure_loaded <- local({
-  loaded <- FALSE
+##' Source inst/ai helpers into an unlocked child of this namespace.
+##'
+##' After install the package namespace is locked, so assigning new
+##' bindings there (via source/sys.source into topenv()) fails with
+##' "cannot add bindings to a locked environment".
+.ra_ai_helpers <- local({
+  env <- NULL
   function() {
-    if (isTRUE(loaded) && exists("ra_ai_index", mode = "function",
-                                 inherits = TRUE)) {
-      return(invisible(TRUE))
+    if (is.environment(env) &&
+        exists("ra_ai_index", envir = env, inherits = FALSE) &&
+        exists("ra_ai_download_atlantis_manuals", envir = env,
+               inherits = FALSE)) {
+      return(env)
     }
     load_r <- system.file("ai", "load.R", package = "ReactiveAtlantis")
     if (!nzchar(load_r) || !file.exists(load_r)) {
@@ -23,11 +30,27 @@
       }
       load_r <- hit[1]
     }
-    sys.source(load_r, envir = topenv(), keep.source = FALSE)
-    loaded <<- TRUE
-    invisible(TRUE)
+    load_r <- normalizePath(load_r, winslash = "/", mustWork = TRUE)
+    parent <- tryCatch(asNamespace("ReactiveAtlantis"),
+                       error = function(e) topenv())
+    env <<- new.env(parent = parent)
+    env$.ra_ai_load_dir <- dirname(load_r)
+    sys.source(load_r, envir = env, chdir = FALSE, keep.source = FALSE)
+    need <- c("ra_ai_index", "ra_ai_diagnose", "ra_ai_print_diagnose",
+              "ra_ai_download_atlantis_manuals")
+    missing <- need[!vapply(need, exists, logical(1), envir = env,
+                            inherits = FALSE)]
+    if (length(missing) > 0) {
+      stop("Ask Atlantis helpers failed to load from ", load_r, ": missing ",
+           paste(missing, collapse = ", "), call. = FALSE)
+    }
+    env
   }
 })
+
+.ra_ai_ensure_loaded <- function() {
+  invisible(.ra_ai_helpers())
+}
 
 ##' Build or incrementally update the Ask Atlantis local index
 ##'
@@ -56,9 +79,9 @@
 ##' }
 index_ask_atlantis <- function(sources_config = NULL, index_dir = NULL,
                                embed = TRUE) {
-  .ra_ai_ensure_loaded()
-  ra_ai_index(sources_config = sources_config, index_dir = index_dir,
-              embed = embed)
+  env <- .ra_ai_helpers()
+  env$ra_ai_index(sources_config = sources_config, index_dir = index_dir,
+                  embed = embed)
 }
 
 ##' Print Ask Atlantis index health
@@ -74,9 +97,9 @@ index_ask_atlantis <- function(sources_config = NULL, index_dir = NULL,
 ##' diagnose_ask_atlantis_index()
 ##' }
 diagnose_ask_atlantis_index <- function(index_dir = NULL) {
-  .ra_ai_ensure_loaded()
-  diag <- ra_ai_diagnose(index_dir = index_dir)
-  ra_ai_print_diagnose(diag)
+  env <- .ra_ai_helpers()
+  diag <- env$ra_ai_diagnose(index_dir = index_dir)
+  env$ra_ai_print_diagnose(diag)
 }
 
 ##' Download CSIRO Atlantis user-guide PDFs into a local corpus directory
@@ -101,8 +124,8 @@ diagnose_ask_atlantis_index <- function(index_dir = NULL) {
 ##' index_ask_atlantis(embed = FALSE)
 ##' }
 download_atlantis_manuals <- function(dest_dir = NULL, overwrite = FALSE) {
-  .ra_ai_ensure_loaded()
-  ra_ai_download_atlantis_manuals(dest_dir = dest_dir,
-                                  overwrite = overwrite,
-                                  verbose = TRUE)
+  env <- .ra_ai_helpers()
+  env$ra_ai_download_atlantis_manuals(dest_dir = dest_dir,
+                                      overwrite = overwrite,
+                                      verbose = TRUE)
 }

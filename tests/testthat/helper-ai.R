@@ -121,6 +121,94 @@ with_mock_ollama <- function(code, transport = ra_ai_test_transport) {
   force(code)
 }
 
+save_ai_shot <- function(app, name) {
+  shot_dir <- file.path(tempdir(), "ra_ai_shots")
+  dir.create(shot_dir, showWarnings = FALSE)
+  shot <- file.path(shot_dir, paste0(name, ".png"))
+  try(app$get_screenshot(shot), silent = TRUE)
+  art <- "/opt/cursor/artifacts"
+  if (dir.exists(art) && file.exists(shot)) {
+    file.copy(shot, file.path(art, paste0(name, ".png")), overwrite = TRUE)
+  }
+  man_fig <- file.path(ra_pkg_root(), "man", "figures")
+  if (identical(name, "ask_atlantis_drawer_open") && dir.exists(man_fig) &&
+      file.exists(shot)) {
+    file.copy(shot, file.path(man_fig, "ask_atlantis.png"), overwrite = TRUE)
+  }
+  shot
+}
+
+ai_e2e_chrome <- function() {
+  testthat::skip_if_not_installed("shinytest2")
+  testthat::skip_if_not_installed("chromote")
+  testthat::skip_if_not(file.exists("/usr/local/bin/google-chrome") ||
+                          file.exists("/usr/bin/google-chrome-stable") ||
+                          file.exists("/usr/bin/google-chrome"),
+                        "Google Chrome is required for shinytest2")
+  chrome <- if (file.exists("/usr/local/bin/google-chrome")) {
+    "/usr/local/bin/google-chrome"
+  } else if (file.exists("/usr/bin/google-chrome-stable")) {
+    "/usr/bin/google-chrome-stable"
+  } else {
+    "/usr/bin/google-chrome"
+  }
+  Sys.setenv(CHROMOTE_CHROME = chrome)
+  chrome_dir <- tempfile("chrome-data-")
+  dir.create(chrome_dir)
+  chromote::set_chrome_args(c(
+    "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
+    "--headless=new", paste0("--user-data-dir=", chrome_dir)
+  ))
+  chrome_dir
+}
+
+##' Install this checkout into a throwaway library for installed-package tests.
+ra_install_package <- function() {
+  cached <- Sys.getenv("RA_TEST_INSTALL_LIB", unset = "")
+  if (nzchar(cached) && dir.exists(file.path(cached, "ReactiveAtlantis"))) {
+    return(normalizePath(cached, winslash = "/", mustWork = FALSE))
+  }
+  lib <- tempfile("ra-installed-lib-")
+  dir.create(lib)
+  root <- ra_pkg_root()
+  rbin <- file.path(R.home("bin"), "R")
+  out <- suppressWarnings(system2(
+    rbin,
+    c("CMD", "INSTALL", paste0("--library=", lib), "--no-multiarch",
+      "--no-html", root),
+    stdout = TRUE, stderr = TRUE
+  ))
+  if (!dir.exists(file.path(lib, "ReactiveAtlantis"))) {
+    testthat::skip(paste(
+      "R CMD INSTALL failed:",
+      paste(utils::tail(out, 12), collapse = " ")
+    ))
+  }
+  Sys.setenv(RA_TEST_INSTALL_LIB = lib)
+  normalizePath(lib, winslash = "/", mustWork = FALSE)
+}
+
+##' Run an Rscript against an installed ReactiveAtlantis library.
+ra_installed_rscript <- function(lines, lib = ra_install_package()) {
+  script <- tempfile(fileext = ".R")
+  on.exit(unlink(script), add = TRUE)
+  writeLines(lines, script)
+  libs <- paste(c(lib, .libPaths()), collapse = .Platform$path.sep)
+  out <- suppressWarnings(system2(
+    file.path(R.home("bin"), "Rscript"),
+    c("--vanilla", script),
+    env = c(
+      paste0("R_LIBS=", libs),
+      paste0("R_LIBS_USER=", Sys.getenv("R_LIBS_USER")),
+      "R_LIBS_SITE="
+    ),
+    stdout = TRUE, stderr = TRUE
+  ))
+  status <- attr(out, "status")
+  if (is.null(status)) status <- 0L
+  list(status = as.integer(status), out = out, lib = lib)
+}
+
 build_fixture_index <- function(embed = FALSE) {
   root <- source_ask_atlantis()
   idx <- tempfile("ra-ai-idx-")
