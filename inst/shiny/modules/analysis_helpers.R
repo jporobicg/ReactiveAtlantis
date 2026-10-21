@@ -618,7 +618,7 @@ match_nc_var <- function(nc_vars, candidates) {
   hit[1]
 }
 
-physics_long <- function(nc, varname, box = NULL, info = NULL) {
+physics_long <- function(nc, varname, box = NULL, info = NULL, inf_box = NULL) {
   arr <- nc_get(nc, varname)
   d <- dim(arr)
   if (is.null(d)) {
@@ -627,7 +627,7 @@ physics_long <- function(nc, varname, box = NULL, info = NULL) {
                       stringsAsFactors = FALSE))
   }
   if (exists("atlantis_layer_info", mode = "function") && is.null(info)) {
-    info <- tryCatch(atlantis_layer_info(nc), error = function(e) NULL)
+    info <- tryCatch(atlantis_layer_info(nc, inf_box), error = function(e) NULL)
   }
   if (exists("mask_padded_layers", mode = "function") && !is.null(info) &&
       length(d) >= 2) {

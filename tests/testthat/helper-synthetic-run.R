@@ -303,7 +303,7 @@ write_nesp_style_pair <- function(dir) {
 }
 
 ##' Biology NetCDF with 3 water layers + sediment and padded shallow boxes
-write_layered_biology_nc <- function(path) {
+write_layered_biology_nc <- function(path, count_var = "numlayers") {
   dim_z <- ncdf4::ncdim_def("z", "layer", 1:4)
   dim_b <- ncdf4::ncdim_def("b", "box", 1:3)
   t_vals <- c(0, 365, 730)
@@ -314,11 +314,15 @@ write_layered_biology_nc <- function(path) {
   mk_b <- function(name) {
     ncdf4::ncvar_def(name, "1", list(dim_b), -999, prec = "float")
   }
+  if (is.null(count_var) || !nzchar(as.character(count_var)[1])) {
+    count_var <- "numlayers"
+  }
+  count_var <- as.character(count_var)[1]
   vars <- list(
     mk3("cod1_StructN"), mk3("cod1_ResN"), mk3("cod1_Nums", "individuals"),
     mk3("diatoms_N"), mk3("Temp", "degC"), mk3("volume", "m3"),
     ncdf4::ncvar_def("nominal_dz", "m", list(dim_z, dim_b), -999, prec = "float"),
-    mk_b("numlayers")
+    mk_b(count_var)
   )
   nc <- ncdf4::nc_create(path, vars, force_v4 = TRUE)
   ncdf4::ncatt_put(nc, "t", "units", "days since 1970-01-01")
@@ -354,7 +358,7 @@ write_layered_biology_nc <- function(path) {
   dz[, 2] <- c(0, 30, 40, 5)
   dz[, 3] <- c(0, 0, 40, 5)
   ncdf4::ncvar_put(nc, "nominal_dz", dz)
-  ncdf4::ncvar_put(nc, "numlayers", c(3, 2, 1))
+  ncdf4::ncvar_put(nc, count_var, c(3, 2, 1))
   ncdf4::nc_close(nc)
   invisible(path)
 }

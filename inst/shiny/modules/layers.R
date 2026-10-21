@@ -2,10 +2,12 @@
 ## ~  Atlantis water-column / sediment layers   ~ ##
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
 ##
-## NetCDF z is stored deepest water → surface, then sediment last.
-## Shallow boxes pad unused water layers at the deep end (start of z).
-## Javier's viewer reverses the water block for display so layer 1 is
-## the surface. The same convention is used here.
+## NetCDF z is stored deepest water → surface, then sediment last
+## (Javier's viewer arrange_layers(): c(rev(1:water), sediment)).
+## Shallow boxes pad unused water at the deep end (start of z). Those
+## padded slots must be dropped, not plotted as zeros. Per-box water
+## counts come from numlayers (init/output), nlayers (output), BGM
+## Layers, or non-zero nominal_dz water cells — never the raw z length.
 
 box_water_layer_counts <- function(nc, inf_box = NULL) {
   n_z <- if (!is.null(nc$dim$z)) as.integer(nc$dim$z$len) else 1L
@@ -17,15 +19,37 @@ box_water_layer_counts <- function(nc, inf_box = NULL) {
     vec <- as.integer(as.numeric(vec))
     vec[!is.finite(vec)] <- n_water_max
     if (length(vec) < n_b) vec <- c(vec, rep(n_water_max, n_b - length(vec)))
-    pmin(pmax(vec[seq_len(n_b)], 0L), n_water_max)
+    pmin(pmax(vec[seq_len(min(length(vec), n_b))], 0L), n_water_max)
   }
 
-  if ("numlayers" %in% names(nc$var)) {
-    nl <- nc_get(nc, "numlayers")
-    if (!is.null(nl)) {
-      if (length(dim(nl)) == 2) nl <- nl[, 1]
-      return(as_counts(nl))
+  collapse_box_counts <- function(nl) {
+    if (is.null(nl)) return(NULL)
+    d <- dim(nl)
+    if (is.null(d) || length(d) == 1L) return(as_counts(nl))
+    if (length(d) >= 3L) {
+      nl <- nl[, , 1]
+      d <- dim(nl)
+      if (is.null(d)) return(as_counts(nl))
     }
+    if (length(d) == 2L) {
+      if (d[1] == n_b) return(as_counts(nl[, 1]))
+      if (d[2] == n_b) {
+        return(as_counts(apply(nl, 2, function(x) {
+          x <- x[is.finite(x)]
+          if (!length(x)) n_water_max else max(x)
+        })))
+      }
+      return(as_counts(nl[, 1]))
+    }
+    as_counts(nl)
+  }
+
+  vars <- names(nc$var)
+  for (vn in c("numlayers", "nlayers")) {
+    hit <- vars[tolower(vars) == tolower(vn)]
+    if (!length(hit)) next
+    got <- collapse_box_counts(nc_get(nc, hit[1]))
+    if (!is.null(got)) return(got)
   }
   if (!is.null(inf_box) && is.list(inf_box$info) &&
       "Layers" %in% names(inf_box$info)) {
@@ -145,6 +169,76 @@ storage_z_label <- function(info, z) {
     return(info$water_labs[[k]])
   }
   paste("Layer", z - 1L)
+}
+
+##' Display order matching arrange_layers(): surface → deep water, sediment last.
+layer_lab_levels <- function(info) {
+  labs <- if (!is.null(info)) info$water_labs else character()
+  if (isTRUE(info$has_sediment)) labs <- c(labs, "Sediment")
+  labs
+}
+
+##' Storage-z order used by Javier's arrange_layers() (surface first, sediment last).
+viewer_layer_storage_order <- function(info) {
+  water <- if (info$n_water_max > 0) rev(seq_len(info$n_water_max)) else integer()
+  if (isTRUE(info$has_sediment)) c(water, as.integer(info$n_z)) else water
+}
+
+##' Long table of nominal_dz for layers that actually exist in each box.
+layer_thickness_long <- function(nc, box = NULL, info = NULL, inf_box = NULL) {
+  if (is.null(info)) info <- atlantis_layer_info(nc, inf_box)
+  dz <- tryCatch(layer_thickness(nc), error = function(e) NULL)
+  if (is.null(dz) || is.null(dz$array)) return(NULL)
+  arr <- dz$array
+  d <- dim(arr)
+  if (is.null(d)) return(NULL)
+  empty <- data.frame(Box = integer(), Layer = integer(), Time = integer(),
+                      Thickness = numeric(), LayerLab = character(),
+                      stringsAsFactors = FALSE)
+  take_boxes <- function(n_b_use) {
+    if (is.null(box)) seq_len(n_b_use) - 1L else as.integer(box)
+  }
+  rows <- list()
+  if (length(d) == 2) {
+    if (nrow(arr) != info$n_z && ncol(arr) == info$n_z) arr <- t(arr)
+    n_z_use <- nrow(arr)
+    n_b_use <- ncol(arr)
+    for (b in take_boxes(n_b_use)) {
+      b1 <- as.integer(b) + 1L
+      if (b1 < 1 || b1 > n_b_use) next
+      for (z in seq_len(n_z_use)) {
+        if (!box_has_storage_z(info, b1, z)) next
+        rows[[length(rows) + 1]] <- data.frame(
+          Box = b, Layer = z - 1L, Time = 1L,
+          Thickness = as.numeric(arr[z, b1]),
+          LayerLab = storage_z_label(info, z),
+          stringsAsFactors = FALSE
+        )
+      }
+    }
+  } else if (length(d) == 3) {
+    if (d[1] != info$n_z && d[2] == info$n_z) arr <- aperm(arr, c(2, 1, 3))
+    n_z_use <- dim(arr)[1]
+    n_b_use <- dim(arr)[2]
+    n_t <- dim(arr)[3]
+    for (b in take_boxes(n_b_use)) {
+      b1 <- as.integer(b) + 1L
+      if (b1 < 1 || b1 > n_b_use) next
+      for (z in seq_len(n_z_use)) {
+        if (!box_has_storage_z(info, b1, z)) next
+        rows[[length(rows) + 1]] <- data.frame(
+          Box = b, Layer = z - 1L, Time = seq_len(n_t),
+          Thickness = as.numeric(arr[z, b1, ]),
+          LayerLab = storage_z_label(info, z),
+          stringsAsFactors = FALSE
+        )
+      }
+    }
+  } else {
+    return(NULL)
+  }
+  if (!length(rows)) return(empty)
+  do.call(rbind, rows)
 }
 
 ##' 3D cell biomass [z, b, t] in tonnes, or NULL if the group is 2D

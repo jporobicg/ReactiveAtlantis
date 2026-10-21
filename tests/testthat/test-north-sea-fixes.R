@@ -1684,6 +1684,93 @@ test_that("Atlantis layer helper masks padded water and names surface/sediment",
                      ignore.case = TRUE))
 })
 
+expect_physics_layers_match_box <- function(nc, info, varname = "Temp") {
+  n_b <- info$n_box
+  for (b in seq_len(n_b) - 1L) {
+    phy <- physics_long(nc, varname, box = b, info = info)
+    n_expect <- as.integer(info$n_water[b + 1L]) + as.integer(isTRUE(info$has_sediment))
+    expect_equal(length(unique(phy$Layer)), n_expect)
+    expect_false(any(is.na(phy$LayerLab) | !nzchar(as.character(phy$LayerLab))))
+    if (info$n_water[b + 1L] < info$n_water_max) {
+      unused <- seq_len(info$n_water_max - info$n_water[b + 1L]) - 1L
+      expect_false(any(phy$Layer %in% unused))
+    }
+    dz <- layer_thickness_long(nc, box = b, info = info)
+    if (!is.null(dz)) {
+      expect_equal(length(unique(dz$Layer)), n_expect)
+      expect_false(any(dz$Thickness == 0 & dz$Layer < info$n_water_max))
+    }
+  }
+}
+
+test_that("nlayers and BGM Layers count water columns the same as numlayers", {
+  tmp <- tempfile("ra_nlayers_")
+  dir.create(tmp)
+  on.exit(unlink(tmp, recursive = TRUE), add = TRUE)
+  nc_num <- file.path(tmp, "numlayers.nc")
+  nc_n <- file.path(tmp, "nlayers.nc")
+  write_layered_biology_nc(nc_num, count_var = "numlayers")
+  write_layered_biology_nc(nc_n, count_var = "nlayers")
+  a <- ncdf4::nc_open(nc_num)
+  b <- ncdf4::nc_open(nc_n)
+  on.exit({ ncdf4::nc_close(a); ncdf4::nc_close(b) }, add = TRUE)
+  expect_equal(box_water_layer_counts(a), c(3L, 2L, 1L))
+  expect_equal(box_water_layer_counts(b), c(3L, 2L, 1L))
+  expect_equal(atlantis_layer_info(a)$n_water, atlantis_layer_info(b)$n_water)
+
+  inf <- dummy_inf_box(3, 4)
+  inf$info$Layers <- c(3, 2, 1)
+  info_bgm <- atlantis_layer_info(a, inf)
+  expect_equal(info_bgm$n_water, c(3L, 2L, 1L))
+
+  ## When the NetCDF has no count variable, BGM Layers win over raw z
+  nc_bare <- file.path(tmp, "bare.nc")
+  write_synthetic_biology_nc(nc_bare)
+  c <- ncdf4::nc_open(nc_bare)
+  on.exit(ncdf4::nc_close(c), add = TRUE)
+  expect_false(any(tolower(names(c$var)) %in% c("numlayers", "nlayers")))
+  inf2 <- dummy_inf_box(3, 2)
+  inf2$info$Layers <- c(1, 1, 0)
+  info2 <- atlantis_layer_info(c, inf2)
+  expect_equal(info2$n_water, c(1L, 1L, 0L))
+  shallow <- physics_long(c, "Temp", box = 2, info = info2)
+  expect_true(all(shallow$LayerLab == "Sediment"))
+  expect_false(any(grepl("Water", shallow$LayerLab)))
+})
+
+test_that("layer helper matches Javier viewer arrange_layers order", {
+  tmp <- tempfile("ra_viewer_")
+  dir.create(tmp)
+  on.exit(unlink(tmp, recursive = TRUE), add = TRUE)
+  nc_path <- file.path(tmp, "layered.nc")
+  write_layered_biology_nc(nc_path)
+  nc <- ncdf4::nc_open(nc_path)
+  on.exit(ncdf4::nc_close(nc), add = TRUE)
+  info <- atlantis_layer_info(nc)
+  ## arrange_layers(): c(rev(1:water_layers), sediment_layer)
+  expect_equal(viewer_layer_storage_order(info), c(3L, 2L, 1L, 4L))
+  expect_equal(layer_storage_z(info, "water_1"), 3L)
+  expect_equal(layer_storage_z(info, "water_2"), 2L)
+  expect_equal(layer_storage_z(info, "water_3"), 1L)
+  expect_equal(layer_storage_z(info, "sediment"), 4L)
+  expect_equal(layer_lab_levels(info), c("Surface", "Water layer 2", "Deepest water", "Sediment"))
+  expect_true(all(info$water_keys %in% unname(layer_choices(info))))
+
+  phy <- physics_long(nc, "Temp", box = 2, info = info)
+  expect_equal(sort(unique(as.character(phy$LayerLab))), c("Sediment", "Surface"))
+  expect_false(any(phy$Value[phy$LayerLab == "Surface"] == 0))
+  dz <- layer_thickness_long(nc, box = 2, info = info)
+  expect_equal(sort(unique(as.character(dz$LayerLab))), c("Sediment", "Surface"))
+  expect_false(any(dz$Thickness == 0))
+
+  src_phys <- paste(readLines(file.path(mod, "physics_module.R")), collapse = "\n")
+  src_spat <- paste(readLines(file.path(mod, "spatial_module.R")), collapse = "\n")
+  expect_true(grepl("atlantis_layer_info", src_phys, fixed = TRUE))
+  expect_true(grepl("atlantis_layer_info", src_spat, fixed = TRUE))
+  expect_true(grepl("inf_box", src_phys, fixed = TRUE))
+  expect_true(grepl("layer_thickness_long", src_phys, fixed = TRUE))
+})
+
 test_that("North Sea and NESP fixtures expose water plus sediment layers", {
   nesp <- tempfile("nesp_layers_")
   pair <- write_nesp_style_pair(nesp)
@@ -1696,18 +1783,59 @@ test_that("North Sea and NESP fixtures expose water plus sediment layers", {
   expect_true(info$has_sediment)
   expect_true("integrated" %in% layer_choices(info))
   expect_true("sediment" %in% layer_choices(info))
+  expect_lte(max(info$n_water), info$n_water_max)
+  expect_physics_layers_match_box(nc, info, "Temp")
+  nesp_bio <- biomass_by_box_layer(nc, {
+    grp <- data.frame(code = "COD", name = "cod", numcohorts = 2,
+                      grouptype = "FISH", isturnedon = 1, stringsAsFactors = FALSE)
+    grp
+  }, "COD", "sediment", info)
+  expect_gt(nrow(nesp_bio), 0)
+
+  ## NESP-style pair whose output uses nlayers and padded shallow boxes
+  nesp_pad <- tempfile("nesp_pad_")
+  pair_pad <- write_nesp_style_pair(nesp_pad)
+  on.exit(unlink(nesp_pad, recursive = TRUE), add = TRUE)
+  write_layered_biology_nc(file.path(pair_pad$output_dir, "output.nc"),
+                           count_var = "nlayers")
+  det_pad <- detect_run_pair(pair_pad$config_dir, pair_pad$output_dir)
+  nc_pad <- ncdf4::nc_open(det_pad$paths$output_nc)
+  on.exit(ncdf4::nc_close(nc_pad), add = TRUE)
+  expect_true("nlayers" %in% names(nc_pad$var))
+  expect_false("numlayers" %in% names(nc_pad$var))
+  info_pad <- atlantis_layer_info(nc_pad)
+  expect_equal(info_pad$n_water, c(3L, 2L, 1L))
+  expect_physics_layers_match_box(nc_pad, info_pad, "Temp")
+  pad_box <- physics_long(nc_pad, "Temp", box = 2, info = info_pad)
+  expect_equal(sort(unique(as.character(pad_box$LayerLab))), c("Sediment", "Surface"))
+  expect_false(any(pad_box$Layer %in% 0:1))
 
   fx <- northsea_fixture_dir()
   skip_if_not(dir.exists(fx) && file.exists(file.path(fx, "outputNorthSea.nc")),
               "North Sea fixture not packaged")
   nc2 <- ncdf4::nc_open(file.path(fx, "outputNorthSea.nc"))
   on.exit(ncdf4::nc_close(nc2), add = TRUE)
+  expect_false(any(tolower(names(nc2$var)) %in% c("numlayers", "nlayers")))
   ns <- atlantis_layer_info(nc2)
   expect_gte(ns$n_z, 2)
   expect_true(ns$has_sediment)
+  expect_lte(max(ns$n_water), ns$n_water_max)
+  expect_physics_layers_match_box(nc2, ns, "Temp")
   phy <- physics_long(nc2, "Temp", box = 0, info = ns)
   expect_gt(nrow(phy), 0)
-  expect_false(any(is.na(phy$LayerLab) & nzchar(phy$LayerLab)))
+  expect_false(any(is.na(phy$LayerLab) | !nzchar(as.character(phy$LayerLab))))
+  expect_true(any(grepl("Sediment|Water", phy$LayerLab)))
+  ## BGM Layers from the North Sea geometry must not invent extra water layers
+  bgm <- file.path(fx, "NorthSea.bgm")
+  if (file.exists(bgm)) {
+    depths <- infer_cum_depths(nc2)
+    inf_ns <- tryCatch(boxes.prop(bgm, depths), error = function(e) NULL)
+    if (!is.null(inf_ns)) {
+      ns_bgm <- atlantis_layer_info(nc2, inf_ns)
+      expect_lte(max(ns_bgm$n_water), ns_bgm$n_water_max)
+      expect_physics_layers_match_box(nc2, ns_bgm, "Temp")
+    }
+  }
 })
 
 test_that("shared palette spreads adjacent series colours", {
