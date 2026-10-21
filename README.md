@@ -68,9 +68,13 @@ launch_reactiveatlantis()
 | Tab | What you get |
 | --- | --- |
 | Compare | Faceted biomass with free y, GroupType / search filter, relative-to-initial toggle, optional 0.5–1.5 band on relative views, age-structure bars, observed biomass points |
-| Spatial | Biomass per box drawn from `.bgm` polygons, time slider, group selector, per-box series; boundary boxes outlined |
+| Spatial | Biomass per box from `.bgm` polygons, depth-layer selector (each water layer, sediment, integrated), time slider, optional stable colour scale, per-box series; dark box outlines |
+
+![Spatial water layer](man/figures/spatial_layer_water.png)
+
+![Spatial sediment layer](man/figures/spatial_layer_sediment.png)
 | Consumption | Tonnes consumed from `outputPROD.nc`: age groups `<name><cohort>_Eat`, pools `<name>Grazing` (Name column, case-sensitive) × volume × DietCheck; predator and prey views. Disabled if PROD is missing |
-| Physics | Temperature, salinity, NO3, NH3, Chl_a and denitrification by box and layer, plus `nominal_dz` |
+| Physics | Temperature, salinity, NO3, NH3, Chl_a and denitrification by box and the water/sediment layers that exist in that box, plus `nominal_dz` |
 | Multi-run | Overlay biomass, SSB, YOY or catch from extra run pairs; ensemble mean and range when more than two runs are loaded |
 | Predation | Stacked diet composition, top N prey plus Other, year axis |
 | Food web | Interactive network (visNetwork when installed) with a time slider |

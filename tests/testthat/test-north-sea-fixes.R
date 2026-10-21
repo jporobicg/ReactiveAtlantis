@@ -41,6 +41,7 @@ source(file.path(mod, "compare_module.R"), local = TRUE)
 source(file.path(mod, "project_store.R"), local = TRUE)
 source(file.path(mod, "nc_cache.R"), local = TRUE)
 source(file.path(mod, "analysis_helpers.R"), local = TRUE)
+source(file.path(mod, "layers.R"), local = TRUE)
 source(file.path(mod, "overview_module.R"), local = TRUE)
 source(file.path(mod, "feeding_module.R"), local = TRUE)
 source(file.path(mod, "growth_module.R"), local = TRUE)
@@ -958,7 +959,10 @@ test_that("spatial_server draws from BGM polygons and consumption needs PROD", {
   shiny::testServer(spatial_server, args = list(project = proj), {
     ui_html <- paste(as.character(spatial_ui("spatial")), collapse = " ")
     expect_true(grepl("time_i", ui_html) || grepl("Functional group", ui_html))
-    session$setInputs(fg = "COD", time_i = 1, highlight_boundary = TRUE)
+    expect_true(grepl("Depth layer", ui_html) || grepl("layer", ui_html))
+    expect_true(grepl("Stable colour scale", ui_html))
+    session$setInputs(fg = "COD", layer = "integrated", time_i = 1,
+                      highlight_boundary = TRUE, stable_scale = TRUE)
     expect_true(!is.null(output$map_plot))
   })
 
@@ -1385,6 +1389,7 @@ test_that("app.R sources the new analysis modules", {
   txt <- paste(vapply(parsed, function(e) paste(deparse(e), collapse = " "), character(1)),
                collapse = "\n")
   expect_true(grepl("analysis_helpers.R", txt, fixed = TRUE))
+  expect_true(grepl("layers.R", txt, fixed = TRUE))
   expect_true(grepl("nc_cache.R", txt, fixed = TRUE))
   expect_true(grepl("spatial_ui", txt, fixed = TRUE))
   expect_true(grepl("consumption_ui", txt, fixed = TRUE))
@@ -1616,6 +1621,100 @@ test_that("launch options accept config_dir and output_dir", {
   expect_true(grepl("config_dir", src, fixed = TRUE))
   expect_true(grepl("output_dir", src, fixed = TRUE))
   expect_true(grepl("reactiveatlantis.config_dir", src, fixed = TRUE))
+})
+
+hex_dist <- function(a, b) {
+  ra <- col2rgb(a)
+  rb <- col2rgb(b)
+  sqrt(sum((ra - rb)^2))
+}
+
+test_that("Atlantis layer helper masks padded water and names surface/sediment", {
+  tmp <- tempfile("ra_layers_")
+  dir.create(tmp)
+  on.exit(unlink(tmp, recursive = TRUE), add = TRUE)
+  nc_path <- file.path(tmp, "layered.nc")
+  write_layered_biology_nc(nc_path)
+  nc <- ncdf4::nc_open(nc_path)
+  on.exit(ncdf4::nc_close(nc), add = TRUE)
+  info <- atlantis_layer_info(nc)
+  expect_equal(info$n_z, 4L)
+  expect_equal(info$n_water_max, 3L)
+  expect_true(info$has_sediment)
+  expect_equal(info$n_water, c(3L, 2L, 1L))
+  expect_equal(unname(layer_choices(info)[1]), "integrated")
+  expect_true("sediment" %in% layer_choices(info))
+  expect_equal(layer_storage_z(info, "water_1"), 3L)
+  expect_equal(layer_storage_z(info, "sediment"), 4L)
+  expect_true(box_has_storage_z(info, 1, 1))
+  expect_false(box_has_storage_z(info, 2, 1))
+  expect_false(box_has_storage_z(info, 3, 1))
+  expect_false(box_has_storage_z(info, 3, 2))
+  expect_true(box_has_storage_z(info, 3, 3))
+  expect_true(box_has_storage_z(info, 3, 4))
+
+  temp <- physics_long(nc, "Temp", box = 2, info = info)
+  expect_false(any(temp$Layer %in% 0:1))
+  expect_true(all(temp$Layer %in% c(2, 3)))
+  expect_true(any(grepl("Surface|Sediment", temp$LayerLab)))
+
+  temp0 <- physics_long(nc, "Temp", box = 0, info = info)
+  expect_equal(sort(unique(temp0$Layer)), 0:3)
+
+  grp <- data.frame(code = "COD", name = "cod", numcohorts = 1,
+                    grouptype = "FISH", isturnedon = 1, stringsAsFactors = FALSE)
+  ## one cohort uses _N; write uses StructN. Use diatoms as pool.
+  grp_phy <- data.frame(code = "PHY", name = "diatoms", numcohorts = 1,
+                        grouptype = "LG_PHY", isturnedon = 1, stringsAsFactors = FALSE)
+  surf <- biomass_by_box_layer(nc, grp_phy, "PHY", "water_1", info)
+  deep <- biomass_by_box_layer(nc, grp_phy, "PHY", "water_3", info)
+  expect_equal(nrow(surf), 9)
+  expect_true(all(is.na(deep$Biomass[deep$Box == 2]) | deep$Biomass[deep$Box == 2] == 0))
+  expect_true(any(is.finite(surf$Biomass[surf$Box == 2])))
+
+  src <- paste(readLines(file.path(root, "inst", "shiny", "modules", "spatial_module.R")),
+               collapse = "\n")
+  expect_true(grepl("RA_BOX_OUTLINE", src, fixed = TRUE))
+  expect_true(grepl("#1B2833", src, fixed = TRUE))
+})
+
+test_that("North Sea and NESP fixtures expose water plus sediment layers", {
+  nesp <- tempfile("nesp_layers_")
+  pair <- write_nesp_style_pair(nesp)
+  on.exit(unlink(nesp, recursive = TRUE), add = TRUE)
+  det <- detect_run_pair(pair$config_dir, pair$output_dir)
+  nc <- ncdf4::nc_open(det$paths$output_nc)
+  on.exit(ncdf4::nc_close(nc), add = TRUE)
+  info <- atlantis_layer_info(nc)
+  expect_gte(info$n_z, 2)
+  expect_true(info$has_sediment)
+  expect_true("integrated" %in% layer_choices(info))
+  expect_true("sediment" %in% layer_choices(info))
+
+  fx <- northsea_fixture_dir()
+  skip_if_not(dir.exists(fx) && file.exists(file.path(fx, "outputNorthSea.nc")),
+              "North Sea fixture not packaged")
+  nc2 <- ncdf4::nc_open(file.path(fx, "outputNorthSea.nc"))
+  on.exit(ncdf4::nc_close(nc2), add = TRUE)
+  ns <- atlantis_layer_info(nc2)
+  expect_gte(ns$n_z, 2)
+  expect_true(ns$has_sediment)
+  phy <- physics_long(nc2, "Temp", box = 0, info = ns)
+  expect_gt(nrow(phy), 0)
+  expect_false(any(is.na(phy$LayerLab) & nzchar(phy$LayerLab)))
+})
+
+test_that("shared palette spreads adjacent series colours", {
+  codes <- c("COD", "HAD", "WHG", "POK", "HER")
+  types <- rep("FISH", length(codes))
+  pal <- build_fg_palette(codes, types)
+  expect_equal(unname(pal["COD"]),
+               unname(build_fg_palette(codes, types)["COD"]))
+  d12 <- hex_dist(pal["COD"], pal["HAD"])
+  d13 <- hex_dist(pal["COD"], pal["WHG"])
+  expect_gt(d12, 40)
+  expect_gt(d13, 20)
+  expect_false(identical(unname(pal["COD"]), unname(pal["HAD"])))
 })
 
 test_that("busy helpers and Ask Atlantis thinking markup are present", {

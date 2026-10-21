@@ -301,3 +301,60 @@ write_synthetic_atlantis_pair <- function(dir) {
 write_nesp_style_pair <- function(dir) {
   write_synthetic_atlantis_pair(dir)
 }
+
+##' Biology NetCDF with 3 water layers + sediment and padded shallow boxes
+write_layered_biology_nc <- function(path) {
+  dim_z <- ncdf4::ncdim_def("z", "layer", 1:4)
+  dim_b <- ncdf4::ncdim_def("b", "box", 1:3)
+  t_vals <- c(0, 365, 730)
+  dim_t <- ncdf4::ncdim_def("t", "days since 1970-01-01", t_vals)
+  mk3 <- function(name, units = "mg N m-3") {
+    ncdf4::ncvar_def(name, units, list(dim_z, dim_b, dim_t), -999, prec = "float")
+  }
+  mk_b <- function(name) {
+    ncdf4::ncvar_def(name, "1", list(dim_b), -999, prec = "float")
+  }
+  vars <- list(
+    mk3("cod1_StructN"), mk3("cod1_ResN"), mk3("cod1_Nums", "individuals"),
+    mk3("diatoms_N"), mk3("Temp", "degC"), mk3("volume", "m3"),
+    ncdf4::ncvar_def("nominal_dz", "m", list(dim_z, dim_b), -999, prec = "float"),
+    mk_b("numlayers")
+  )
+  nc <- ncdf4::nc_create(path, vars, force_v4 = TRUE)
+  ncdf4::ncatt_put(nc, "t", "units", "days since 1970-01-01")
+  fill <- function(name, v) {
+    arr <- array(v, dim = c(4, 3, 3))
+    ## Pads at the deep end for shallow boxes: box 2 (1 water), box 1 (2 water)
+    arr[1, 2, ] <- 0
+    arr[1:2, 3, ] <- 0
+    ncdf4::ncvar_put(nc, name, arr)
+  }
+  fill("cod1_StructN", 10)
+  fill("cod1_ResN", 5)
+  fill("cod1_Nums", 100)
+  fill("diatoms_N", 2)
+  fill("Temp", 8)
+  ncdf4::ncvar_put(nc, "Temp", {
+    arr <- array(0, dim = c(4, 3, 3))
+    ## storage: z1 deep, z3 surface, z4 sediment
+    arr[1, , ] <- 4
+    arr[2, , ] <- 6
+    arr[3, , ] <- 10
+    arr[4, , ] <- 2
+    arr[1, 2, ] <- 0
+    arr[1:2, 3, ] <- 0
+    arr
+  })
+  vol <- array(1e6, dim = c(4, 3, 3))
+  vol[1, 2, ] <- 0
+  vol[1:2, 3, ] <- 0
+  ncdf4::ncvar_put(nc, "volume", vol)
+  dz <- array(0, dim = c(4, 3))
+  dz[, 1] <- c(20, 30, 40, 5)
+  dz[, 2] <- c(0, 30, 40, 5)
+  dz[, 3] <- c(0, 0, 40, 5)
+  ncdf4::ncvar_put(nc, "nominal_dz", dz)
+  ncdf4::ncvar_put(nc, "numlayers", c(3, 2, 1))
+  ncdf4::nc_close(nc)
+  invisible(path)
+}

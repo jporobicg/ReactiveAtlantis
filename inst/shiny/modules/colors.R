@@ -23,17 +23,25 @@
 }
 
 .family_pools <- list(
-  fish = c("#0B3C5D", "#328CC1", "#1D7874", "#56B4E9", "#0072B2",
-           "#134074", "#4C9F70", "#5FA8D3", "#009E73", "#4E79A7"),
-  warm = c("#D55E00", "#C46D5E", "#E69F00", "#A33B20", "#CC79A7",
-           "#B56576", "#E07A5F", "#F28E2B", "#E15759", "#9C755F"),
-  invert = c("#1D7874", "#2A9D8F", "#40916C", "#52B788", "#74C69D",
-             "#76B7B2", "#95D5B2", "#2D6A4F", "#0081A7", "#3D5A80"),
-  producer = c("#C4A35A", "#E9C46A", "#B7B35A", "#A7C957", "#BCBD8B",
-               "#D4A373", "#F0E442", "#EDC948", "#A7C4A0", "#C9A227"),
-  detritus = c("#6C757D", "#8D99AE", "#ADB5BD", "#495057", "#9A8C98",
-               "#BAB0AC", "#7D6E83", "#5C6B73")
+  fish = c("#0B3C5D", "#56B4E9", "#0072B2", "#4C9F70", "#134074",
+           "#00A6A6", "#328CC1", "#1B4D89", "#5FA8D3", "#009E73"),
+  warm = c("#D55E00", "#CC79A7", "#E69F00", "#A33B20", "#F28E2B",
+           "#882255", "#E07A5F", "#AA4499", "#C46D5E", "#9C755F"),
+  invert = c("#1D7874", "#6A4C93", "#2A9D8F", "#332288", "#40916C",
+             "#0081A7", "#76B7B2", "#117733", "#44AA99", "#3D5A80"),
+  producer = c("#C4A35A", "#117733", "#E69F00", "#44AA99", "#A7C957",
+               "#B35806", "#F0E442", "#66A61E", "#D4A373", "#999933"),
+  detritus = c("#4D4D4D", "#8D99AE", "#332288", "#6C757D", "#BAB0AC",
+               "#5C6B73", "#7D6E83", "#ADB5BD")
 )
+
+##' Reorder a pool so neighbours in CSV order are far apart in hue
+spread_pool <- function(n, pool) {
+  base <- cycle_pool(n, pool)
+  if (n <= 2) return(base)
+  idx <- c(seq(1L, n, by = 2L), seq(2L, n, by = 2L))
+  base[idx]
+}
 
 grouptype_family <- function(grouptypes) {
   g <- toupper(trimws(as.character(grouptypes)))
@@ -84,7 +92,7 @@ build_fg_palette <- function(codes, grouptypes = NULL) {
   names(pal) <- codes
 
   if (is.null(grouptypes) || length(grouptypes) != n) {
-    pal[] <- cycle_pool(n, .qualitative_pool())
+    pal[] <- spread_pool(n, .qualitative_pool())
     return(pal)
   }
 
@@ -93,7 +101,7 @@ build_fg_palette <- function(codes, grouptypes = NULL) {
     idx <- which(fam == family)
     pool <- .family_pools[[family]]
     if (is.null(pool)) pool <- .qualitative_pool()
-    pal[idx] <- cycle_pool(length(idx), pool)
+    pal[idx] <- spread_pool(length(idx), pool)
   }
   pal
 }

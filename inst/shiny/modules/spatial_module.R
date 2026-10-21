@@ -2,6 +2,8 @@
 ## ~              Spatial biomass map            ~ ##
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
 
+RA_BOX_OUTLINE <- "#1B2833"
+
 spatial_ui <- function(id) {
   ns <- NS(id)
   tagList(
@@ -10,8 +12,11 @@ spatial_ui <- function(id) {
       sidebar = sidebar(
         width = 280, open = "open",
         selectInput(ns("fg"), "Functional group", choices = character()),
+        selectInput(ns("layer"), "Depth layer",
+                    choices = c("All layers (integrated)" = "integrated")),
         sliderInput(ns("time_i"), "Time step", min = 1, max = 1, value = 1, step = 1),
         textOutput(ns("time_lab")),
+        checkboxInput(ns("stable_scale"), "Stable colour scale across time", TRUE),
         checkboxInput(ns("highlight_boundary"), "Highlight boundary boxes", TRUE)
       ),
       plotOutput(ns("map_plot"), height = "420px"),
@@ -26,12 +31,25 @@ spatial_server <- function(id, project = NULL) {
 
     output$banner <- renderUI(tool_banner(ps(), "spatial"))
 
+    layer_info <- reactive({
+      dat <- ensure_project_data(ps(), c("nc_out", "inf_box"))
+      if (is.null(dat$nc_out)) return(NULL)
+      atlantis_layer_info(dat$nc_out, dat$inf_box)
+    })
+
     observe({
       req(isTRUE(ps()$ready), ps()$data$grp)
       update_select_keep(session, "fg", fg_select_choices(ps()$data$grp), input$fg)
     })
 
+    observe({
+      info <- layer_info()
+      if (is.null(info)) return()
+      update_select_keep(session, "layer", layer_choices(info), input$layer)
+    })
+
     fg_d <- ra_debounce(shiny::reactive(input$fg), 250)
+    layer_d <- ra_debounce(shiny::reactive(input$layer), 250)
 
     polys <- reactive({
       dat <- ps()$data
@@ -40,9 +58,12 @@ spatial_server <- function(id, project = NULL) {
     })
 
     box_bio <- reactive({
-      dat <- ensure_project_data(ps(), "nc_out")
+      dat <- ensure_project_data(ps(), c("nc_out", "inf_box"))
       req(dat$nc_out, dat$grp, fg_d())
-      bio <- biomass_by_box(dat$nc_out, dat$grp, fg_d())
+      info <- atlantis_layer_info(dat$nc_out, dat$inf_box)
+      key <- layer_d()
+      if (is.null(key) || !nzchar(as.character(key))) key <- "integrated"
+      bio <- biomass_by_box_layer(dat$nc_out, dat$grp, fg_d(), key, info)
       n_t <- if (nrow(bio) > 0) max(bio$Time) else 1
       shiny::updateSliderInput(session, "time_i", min = 1, max = max(1, n_t))
       bio
@@ -67,11 +88,20 @@ spatial_server <- function(id, project = NULL) {
       snap <- bio[bio$Time == input$time_i, ]
       poly$Biomass <- snap$Biomass[match(poly$boxid, snap$Box)]
       pal <- get_fg_colors(fg_d(), ps()$data$fg_palette)
+      fill_lim <- NULL
+      if (isTRUE(input$stable_scale)) {
+        rng <- range(bio$Biomass, na.rm = TRUE)
+        if (all(is.finite(rng))) fill_lim <- rng
+      }
+      info <- layer_info()
+      lay_lab <- layer_label(info, layer_d())
       p <- ggplot2::ggplot(poly, ggplot2::aes(x = x, y = y, group = boxid, fill = Biomass))
-      p <- p + ggplot2::geom_polygon(colour = "#F7F4EC", linewidth = 0.25)
+      p <- p + ggplot2::geom_polygon(colour = RA_BOX_OUTLINE, linewidth = 0.25)
       p <- p + ggplot2::coord_equal()
-      p <- p + ggplot2::scale_fill_gradient(low = "#F7F4EC", high = unname(pal[1]),
-                                            na.value = "#E6E2D6", name = "Biomass (t)")
+      fill_args <- list(low = "#F7F4EC", high = unname(pal[1]),
+                        na.value = "#E6E2D6", name = "Biomass (t)")
+      if (!is.null(fill_lim)) fill_args$limits <- fill_lim
+      p <- p + do.call(ggplot2::scale_fill_gradient, fill_args)
       if (isTRUE(input$highlight_boundary) && any(poly$boundary)) {
         bnd <- poly[poly$boundary, ]
         p <- p + ggplot2::geom_polygon(
@@ -79,7 +109,7 @@ spatial_server <- function(id, project = NULL) {
           fill = NA, colour = "#0B3C5D", linewidth = 0.9, inherit.aes = FALSE
         )
       }
-      p <- p + ggplot2::labs(title = paste("Biomass by box —", fg_d()),
+      p <- p + ggplot2::labs(title = paste("Biomass by box —", fg_d(), "—", lay_lab),
                              x = NULL, y = NULL)
       p + theme_reactiveatlantis() +
         ggplot2::theme(axis.text = ggplot2::element_blank(),
@@ -108,14 +138,16 @@ spatial_server <- function(id, project = NULL) {
       n_box <- length(unique(bio$Box))
       p <- ggplot2::ggplot(bio, ggplot2::aes(x = Date, y = Biomass, colour = BoxLab,
                                              linewidth = Boundary))
-      p <- p + ggplot2::geom_line(alpha = 0.85)
+      p <- p + ggplot2::geom_line(alpha = 0.85, na.rm = TRUE)
       p <- p + ggplot2::scale_linewidth_manual(values = c("FALSE" = 0.5, "TRUE" = 1.1),
                                                labels = c("Interior", "Boundary"),
                                                name = NULL)
       if (n_box > 12) {
         p <- p + ggplot2::guides(colour = "none")
       }
-      p <- p + ggplot2::labs(title = "Biomass through time in each box",
+      info <- layer_info()
+      lay_lab <- layer_label(info, layer_d())
+      p <- p + ggplot2::labs(title = paste("Biomass through time in each box —", lay_lab),
                              x = "Year", y = "Biomass (tons)", colour = "Box")
       p <- p + theme_reactiveatlantis()
       ra_scale_x_year(p, bio$Date)

@@ -38,10 +38,12 @@ ra_ai_nav_catalog <- function() {
       title = "Spatial",
       module = "spatial",
       summary = paste(
-        "Biomass per box drawn from .bgm polygons, time slider, group selector,",
+        "Biomass per box drawn from .bgm polygons, depth-layer selector",
+        "(water layers, sediment, integrated), time slider, group selector,",
         "per-box series; boundary boxes outlined."
       ),
-      keywords = c("spatial", "map", "box", "polygon", "bgm", "distribution")
+      keywords = c("spatial", "map", "box", "polygon", "bgm", "distribution",
+                   "layer", "depth", "sediment")
     ),
     consumption = list(
       id = "consumption",

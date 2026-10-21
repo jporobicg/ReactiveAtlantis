@@ -618,12 +618,27 @@ match_nc_var <- function(nc_vars, candidates) {
   hit[1]
 }
 
-physics_long <- function(nc, varname, box = NULL) {
+physics_long <- function(nc, varname, box = NULL, info = NULL) {
   arr <- nc_get(nc, varname)
   d <- dim(arr)
   if (is.null(d)) {
     return(data.frame(Time = seq_along(arr), Layer = 0, Box = 0,
-                      Value = as.numeric(arr), stringsAsFactors = FALSE))
+                      Value = as.numeric(arr), LayerLab = "Layer 0",
+                      stringsAsFactors = FALSE))
+  }
+  if (exists("atlantis_layer_info", mode = "function") && is.null(info)) {
+    info <- tryCatch(atlantis_layer_info(nc), error = function(e) NULL)
+  }
+  if (exists("mask_padded_layers", mode = "function") && !is.null(info) &&
+      length(d) >= 2) {
+    arr <- mask_padded_layers(arr, info)
+  }
+  lab_for <- function(z1) {
+    if (!is.null(info) && exists("storage_z_label", mode = "function")) {
+      storage_z_label(info, z1)
+    } else {
+      paste("Layer", z1 - 1L)
+    }
   }
   if (length(d) == 2) {
     ## b, t  or z, b (no time) — treat columns as time if 2nd dim looks like t
@@ -632,7 +647,8 @@ physics_long <- function(nc, varname, box = NULL) {
       boxes <- if (is.null(box)) seq_len(d[1]) - 1L else box
       rows <- lapply(boxes, function(b) {
         data.frame(Time = seq_len(d[2]), Layer = 0, Box = b,
-                   Value = as.numeric(arr[b + 1, ]), stringsAsFactors = FALSE)
+                   Value = as.numeric(arr[b + 1, ]), LayerLab = "Layer 0",
+                   stringsAsFactors = FALSE)
       })
       return(do.call(rbind, rows))
     }
@@ -644,17 +660,30 @@ physics_long <- function(nc, varname, box = NULL) {
     boxes <- if (is.null(box)) seq_len(n_b) - 1L else as.integer(box)
     rows <- list()
     for (b in boxes) {
+      b1 <- as.integer(b) + 1L
       for (z in seq_len(n_z)) {
+        if (!is.null(info) && exists("box_has_storage_z", mode = "function") &&
+            !box_has_storage_z(info, b1, z)) {
+          next
+        }
         rows[[length(rows) + 1]] <- data.frame(
           Time = seq_len(n_t), Layer = z - 1L, Box = b,
-          Value = as.numeric(arr[z, b + 1, ]),
+          Value = as.numeric(arr[z, b1, ]),
+          LayerLab = lab_for(z),
           stringsAsFactors = FALSE
         )
       }
     }
+    if (length(rows) == 0) {
+      return(data.frame(Time = integer(), Layer = integer(), Box = integer(),
+                        Value = numeric(), LayerLab = character(),
+                        stringsAsFactors = FALSE))
+    }
     return(do.call(rbind, rows))
   }
-  data.frame(Time = integer(), Layer = integer(), Box = integer(), Value = numeric())
+  data.frame(Time = integer(), Layer = integer(), Box = integer(),
+             Value = numeric(), LayerLab = character(),
+             stringsAsFactors = FALSE)
 }
 
 layer_thickness <- function(nc) {

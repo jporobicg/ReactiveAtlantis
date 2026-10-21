@@ -453,3 +453,55 @@ test_that("two-run pair loader and busy indicators are visible", {
   expect_true(grepl("ra-busy-bar", busy_html, fixed = TRUE))
 })
 
+test_that("Spatial map can show two depth layers", {
+  e2e_chrome()
+  root <- ra_pkg_root()
+  run_dir <- tempfile("ra_spatial_layers_")
+  dir.create(run_dir)
+  on.exit(unlink(run_dir, recursive = TRUE), add = TRUE)
+  write_synthetic_atlantis_run(run_dir)
+
+  shot_dir <- file.path(tempdir(), "ra_e2e_spatial_layers")
+  dir.create(shot_dir, showWarnings = FALSE)
+
+  app <- shinytest2::AppDriver$new(
+    app_dir = file.path(root, "inst", "shiny"),
+    name = "reactiveatlantis-spatial-layers",
+    height = 1100,
+    width = 1500,
+    load_timeout = 40000,
+    timeout = 20000
+  )
+  on.exit(try(app$stop(), silent = TRUE), add = TRUE)
+
+  app$set_inputs(`project-folder_path` = run_dir, wait_ = FALSE)
+  app$wait_for_idle(timeout = 15000)
+  app$click("project-load_project")
+  app$wait_for_idle(timeout = 60000)
+  expect_true(click_nav(app, "Spatial"))
+
+  body <- app$get_html("body")
+  expect_true(grepl("Depth layer", body, fixed = TRUE) ||
+                grepl("spatial-layer", body))
+  expect_true(plot_is_real(app$get_html("#spatial-map_plot")))
+
+  app$set_inputs(`spatial-fg` = "COD", `spatial-layer` = "water_1",
+                 `spatial-stable_scale` = TRUE, wait_ = FALSE)
+  app$wait_for_idle(timeout = 40000)
+  expect_true(plot_is_real(app$get_html("#spatial-map_plot")))
+  save_shot(app, shot_dir, "spatial_layer_water")
+
+  app$set_inputs(`spatial-layer` = "sediment", wait_ = FALSE)
+  app$wait_for_idle(timeout = 40000)
+  expect_true(plot_is_real(app$get_html("#spatial-map_plot")))
+  save_shot(app, shot_dir, "spatial_layer_sediment")
+
+  click_nav(app, "Consumption")
+  app$set_inputs(`consumption-view` = "predator", `consumption-fg` = "COD",
+                 wait_ = FALSE)
+  app$wait_for_idle(timeout = 40000)
+  expect_true(plot_is_real(app$get_html("#consumption-cons_plot_gg")) ||
+                nchar(app$get_html("#consumption-cons_plot_gg")) > 40)
+  save_shot(app, shot_dir, "consumption_palette_after")
+})
+

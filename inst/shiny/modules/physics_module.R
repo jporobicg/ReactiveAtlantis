@@ -57,9 +57,11 @@ physics_server <- function(id, project = NULL) {
       } else {
         df$Date <- days_as_date(df$Time, dat$origin)
       }
-      df$LayerLab <- paste("Layer", df$Layer)
+      if (!"LayerLab" %in% names(df) || all(!nzchar(as.character(df$LayerLab)))) {
+        df$LayerLab <- paste("Layer", df$Layer)
+      }
       if (isTRUE(input$all_boxes)) {
-        df <- stats::aggregate(Value ~ Date + LayerLab, data = df, mean)
+        df <- stats::aggregate(Value ~ Date + LayerLab, data = df, mean, na.rm = TRUE)
         names(df)[names(df) == "LayerLab"] <- "LayerLab"
       }
       p <- ggplot2::ggplot(df, ggplot2::aes(x = Date, y = Value, colour = LayerLab))
