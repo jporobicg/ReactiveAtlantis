@@ -277,6 +277,42 @@
         "must_cite": true
       },
       "rubric_notes": "Linear natural mortality, not fishing. Mortality tab stacks fishing, natural and predation."
+    },
+    {
+      "id": "q25",
+      "kind": "success",
+      "question": "why some of my FDO is collapsing?",
+      "expect": {
+        "in_scope": true,
+        "claim_kinds": ["hypothesis"],
+        "nav_ids": ["overview", "compare", "predation", "mortality", "recruitment"],
+        "must_not_invent_numbers": true
+      },
+      "rubric_notes": "In-scope calibration question naming a group code. Structured hypotheses and existing-tab checks, never the out-of-scope refusal."
+    },
+    {
+      "id": "q26",
+      "kind": "success",
+      "question": "how can I check why FDO is collapsing?",
+      "expect": {
+        "in_scope": true,
+        "claim_kinds": ["hypothesis"],
+        "nav_ids": ["overview", "compare", "predation", "consumption", "feeding", "recruitment"],
+        "must_not_invent_numbers": true
+      },
+      "rubric_notes": "Same as q25: how-to-check wording must stay in-scope and offer validated navigation."
+    },
+    {
+      "id": "q27",
+      "kind": "success",
+      "question": "my XXX crashed after year 10",
+      "expect": {
+        "in_scope": true,
+        "claim_kinds": ["hypothesis"],
+        "nav_ids": ["overview", "compare", "mortality", "recruitment"],
+        "must_not_invent_numbers": true
+      },
+      "rubric_notes": "Generic all-caps group code plus crash/year. Guidance, not a diagnosis."
     }
   ]
 }

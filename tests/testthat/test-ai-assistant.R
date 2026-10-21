@@ -128,6 +128,69 @@ test_that("no invented simulation numbers without data", {
                ignore.case = TRUE)
 })
 
+test_that("functional-group collapse questions stay in-scope with guidance", {
+  cfg <- build_fixture_index(embed = FALSE)
+  groups <- data.frame(
+    code = c("FDO", "COD"),
+    name = c("flathead_dogfish", "cod"),
+    longname = c("Flathead dogfish", "Cod"),
+    stringsAsFactors = FALSE
+  )
+  ctx <- list(groups = groups)
+  questions <- c(
+    "why some of my FDO is collapsing?",
+    "how can I check why FDO is collapsing?",
+    "my XXX crashed after year 10"
+  )
+  oos <- "I only answer questions about the Atlantis ecosystem model"
+  catalog_ids <- names(ra_ai_nav_catalog())
+
+  for (q in questions) {
+    scope <- ra_ai_scope_check(q, ctx)
+    expect_true(isTRUE(scope$ok), info = q)
+    expect_false(identical(scope$reason, "out_of_scope"), info = q)
+    expect_true(ra_ai_in_domain(q, groups), info = q)
+
+    ans <- ra_ai_answer(q, context = ctx, config = cfg)
+    expect_false(isTRUE(ans$blocked), info = q)
+    expect_false(grepl(oos, ans$answer, fixed = TRUE), info = q)
+    expect_match(ans$answer, "guidance, not a diagnosis", ignore.case = TRUE)
+    expect_match(ans$answer, "Predation", info = q)
+    expect_match(ans$answer, "Starvation|food limitation", ignore.case = TRUE)
+    expect_match(ans$answer, "Recruitment", info = q)
+    expect_match(ans$answer, "Fishing", info = q)
+    expect_match(ans$answer, "ResN|StructN", info = q)
+    expect_match(ans$answer, "Physics", info = q)
+    expect_match(ans$answer, "Spatial", info = q)
+    expect_true("hypothesis" %in% ans$claim_kinds, info = q)
+
+    ids <- vapply(ans$nav_targets, function(x) x$id, character(1))
+    expect_true(length(ids) > 0, info = q)
+    expect_true(all(ids %in% catalog_ids), info = q)
+    expect_true(any(c("overview", "compare") %in% ids), info = q)
+    expect_true(any(c("predation", "mortality", "recruitment") %in% ids),
+                info = q)
+    expect_false("ages" %in% ids, info = q)
+  }
+
+  resolved <- ra_ai_resolve_group_codes(
+    "why some of my FDO is collapsing?", groups
+  )
+  expect_true("FDO" %in% resolved$codes)
+  expect_true(any(grepl("Flathead dogfish", resolved$labels, fixed = TRUE)))
+  ans_fdo <- ra_ai_answer(
+    "why some of my FDO is collapsing?",
+    context = ctx, config = cfg
+  )
+  expect_match(ans_fdo$answer, "Flathead dogfish", ignore.case = TRUE)
+
+  exp_q <- ra_ai_expand_retrieval_query(
+    "why some of my FDO is collapsing?", resolved
+  )
+  expect_true(grepl("Flathead dogfish", exp_q, fixed = TRUE))
+  expect_true(grepl("pPREY|KDENR|mum", exp_q))
+})
+
 test_that("out-of-scope and prompt-injection questions are blocked", {
   cfg <- build_fixture_index(embed = FALSE)
   out <- ra_ai_answer("What is the capital of France and can you write me a poem about it?",

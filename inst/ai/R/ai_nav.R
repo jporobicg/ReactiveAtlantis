@@ -20,7 +20,8 @@ ra_ai_nav_catalog <- function() {
         "of the initial value."
       ),
       keywords = c("overview", "health", "extinct", "exploding", "summary",
-                   "structn", "resn", "what can reactive")
+                   "structn", "resn", "what can reactive", "collapse", "crash",
+                   "declin")
     ),
     compare = list(
       id = "compare",
@@ -31,7 +32,7 @@ ra_ai_nav_catalog <- function() {
         "toggle, optional 0.5-1.5 band, age-structure bars, and observed biomass points."
       ),
       keywords = c("compare", "biomass", "bt/b0", "relative", "age structure",
-                   "small multiples")
+                   "small multiples", "collapse", "crash", "declin")
     ),
     spatial = list(
       id = "spatial",
@@ -43,7 +44,7 @@ ra_ai_nav_catalog <- function() {
         "per-box series; boundary boxes outlined."
       ),
       keywords = c("spatial", "map", "box", "polygon", "bgm", "distribution",
-                   "layer", "depth", "sediment")
+                   "layer", "depth", "sediment", "collapse", "crash")
     ),
     consumption = list(
       id = "consumption",
@@ -54,7 +55,8 @@ ra_ai_nav_catalog <- function() {
         "pools <name>Grazing (Name column) times volume times DietCheck.",
         "Predator and prey views. Disabled if PROD is missing."
       ),
-      keywords = c("consumption", "consumed", "eat", "grazing", "prod.nc", "dietcheck")
+      keywords = c("consumption", "consumed", "eat", "grazing", "prod.nc",
+                   "dietcheck", "starv", "food limitation")
     ),
     physics = list(
       id = "physics",
@@ -65,7 +67,7 @@ ra_ai_nav_catalog <- function() {
         "layer, plus nominal_dz."
       ),
       keywords = c("physics", "temperature", "salinity", "nitrate", "nh3",
-                   "chl", "denitrif", "nominal_dz", "tracer")
+                   "chl", "denitrif", "nominal_dz", "tracer", "oxygen")
     ),
     ensemble = list(
       id = "ensemble",
@@ -84,7 +86,8 @@ ra_ai_nav_catalog <- function() {
       summary = paste(
         "Stacked diet composition, top N prey plus Other, year axis."
       ),
-      keywords = c("predation", "predator", "prey", "diet", "dietcheck")
+      keywords = c("predation", "predator", "prey", "diet", "dietcheck",
+                   "collapse", "crash")
     ),
     foodweb = list(
       id = "foodweb",
@@ -104,7 +107,8 @@ ra_ai_nav_catalog <- function() {
         "Beverton-Holt alpha/beta in a side panel; SSB view; observed",
         "Recruitment / SSB ribbons. YOY.txt CODE.0 plus larvae from the curve."
       ),
-      keywords = c("recruit", "yoy", "ssb", "beverton", "alpha", "beta", "larvae")
+      keywords = c("recruit", "yoy", "ssb", "beverton", "alpha", "beta", "larvae",
+                   "kdenr", "collapse", "crash")
     ),
     growth = list(
       id = "growth",
@@ -115,7 +119,7 @@ ra_ai_nav_catalog <- function() {
         "years on the x-axis."
       ),
       keywords = c("growth", "light", "nutrient", "eddy", "primary producer",
-                   "phyto")
+                   "phyto", "condition", "resn", "structn")
     ),
     catch = list(
       id = "catch",
@@ -125,7 +129,8 @@ ra_ai_nav_catalog <- function() {
         "Stacked catch by group or fleet; observed overlay and skill when a",
         "catch CSV is loaded."
       ),
-      keywords = c("catch", "harvest", "fleet", "landings", "discard", "skill")
+      keywords = c("catch", "harvest", "fleet", "landings", "discard", "skill",
+                   "fishing")
     ),
     feeding = list(
       id = "feeding",
@@ -136,7 +141,7 @@ ra_ai_nav_catalog <- function() {
         "gape overlap = 0 are flagged."
       ),
       keywords = c("feeding", "pprey", "gape", "availability", "preference",
-                   "klp", "kup")
+                   "klp", "kup", "starv", "mum")
     ),
     mortality = list(
       id = "mortality",
@@ -146,7 +151,7 @@ ra_ai_nav_catalog <- function() {
         "Fishing, natural and predation mortality stacked per age (Age01-Age10)."
       ),
       keywords = c("mortality", "fishing mortality", "natural mortality",
-                   "predation mortality", "specificmort")
+                   "predation mortality", "specificmort", "collapse", "crash")
     )
   )
 }
@@ -201,6 +206,12 @@ ra_ai_validate_nav <- function(targets, catalog = ra_ai_nav_catalog()) {
   if (is.null(a) || (length(a) == 1 && is.na(a))) b else a
 }
 
+##' Existing tabs that inspect a collapsing / crashing group.
+ra_ai_investigation_nav_ids <- function() {
+  c("overview", "compare", "predation", "consumption", "feeding",
+    "recruitment", "growth", "mortality", "catch", "spatial", "physics")
+}
+
 ##' Keyword map from a question onto existing tabs (no LLM involved).
 ra_ai_suggest_nav <- function(question, catalog = ra_ai_nav_catalog()) {
   q <- tolower(as.character(question)[1])
@@ -216,11 +227,26 @@ ra_ai_suggest_nav <- function(question, catalog = ra_ai_nav_catalog()) {
       )
     }
   }
+  if (exists("ra_ai_is_calibration_investigation", mode = "function") &&
+      isTRUE(ra_ai_is_calibration_investigation(question))) {
+    extra <- ra_ai_validate_nav(ra_ai_investigation_nav_ids(), catalog)
+    seen <- if (length(hits) > 0) {
+      vapply(hits, function(x) x$id, character(1))
+    } else {
+      character()
+    }
+    for (n in extra) {
+      if (!n$id %in% seen) {
+        hits[[length(hits) + 1]] <- n
+        seen <- c(seen, n$id)
+      }
+    }
+  }
   hits
 }
 
-##' Safe session metadata only: current tab title and selected group code.
-ra_ai_safe_ui_context <- function(input) {
+##' Safe session metadata: current tab, selected group, loaded groups table.
+ra_ai_safe_ui_context <- function(input, project = NULL) {
   page <- NULL
   if (!is.null(input) && !is.null(input$ra_page) && nzchar(as.character(input$ra_page)[1])) {
     page <- as.character(input$ra_page)[1]
@@ -245,8 +271,38 @@ ra_ai_safe_ui_context <- function(input) {
       selected_group <- as.character(val)[1]
     }
   }
+  groups <- ra_ai_groups_from_project(project)
   list(
     page = page,
-    selected_group = selected_group
+    selected_group = selected_group,
+    groups = groups
   )
+}
+
+##' Extract the loaded groups table from a project snapshot or reactive.
+ra_ai_groups_from_project <- function(project) {
+  if (is.null(project)) return(NULL)
+  grp <- tryCatch({
+    if (inherits(project, "reactivevalues") || inherits(project, "reactiveValues")) {
+      st <- project$state
+      if (!is.null(st) && is.list(st$data) && !is.null(st$data$grp)) {
+        st$data$grp
+      } else if (!is.null(project$data) && !is.null(project$data$grp)) {
+        project$data$grp
+      } else {
+        NULL
+      }
+    } else if (is.list(project)) {
+      if (!is.null(project$data) && !is.null(project$data$grp)) {
+        project$data$grp
+      } else if (!is.null(project$grp)) {
+        project$grp
+      } else {
+        NULL
+      }
+    } else {
+      NULL
+    }
+  }, error = function(e) NULL)
+  ra_ai_normalise_groups(grp)
 }

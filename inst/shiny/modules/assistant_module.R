@@ -217,7 +217,7 @@ assistant_server <- function(id, project = NULL, parent_session = NULL) {
     shiny::observeEvent(pending_tick(), {
       question <- pending_q()
       if (is.null(question) || pending_tick() < 1) return()
-      ctx <- tryCatch(ra_ai_safe_ui_context(parent_input()),
+      ctx <- tryCatch(ra_ai_safe_ui_context(parent_input(), project),
                       error = function(e) list())
       hist_now <- history()
       if (!is.null(ask_task)) {

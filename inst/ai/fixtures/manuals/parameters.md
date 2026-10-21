@@ -37,3 +37,16 @@ pPREY is the availability of a prey group to a predator age class. It is not
 a diet proportion. Realised diet also depends on prey biomass, gape overlap
 and spatial overlap. Inspect pPREY on the Feeding tab; inspect realised diet
 on the Predation tab.
+
+## mum
+
+mum is a maximum consumption / growth-rate scalar for a functional group.
+When mum or clearance C is too low relative to prey, intake falls and
+biomass can decline even if fishing looks stable. Check Consumption and
+Feeding before changing mum.
+
+## KDENR
+
+KDENR is a recruitment-related density parameter used with the stock-recruit
+relationship. If KDENR or the Beverton-Holt alpha/beta settings starve the
+curve, YOY can crash after a lag. Inspect the Recruitment tab.
