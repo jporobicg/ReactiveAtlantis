@@ -66,8 +66,10 @@ consumption_server <- function(id, project = NULL) {
       }
       origin <- ensure_project_data(ps(), "nc_out")$origin
       df$Date <- days_as_date(df$Time, origin)
-      pal <- get_fg_colors(setdiff(unique(df$series), "Other"), ps()$data$fg_palette)
+      pal <- get_fg_colors(setdiff(unique(df$series), c("Other", "Total")),
+                           ps()$data$fg_palette)
       pal <- c(pal, Other = "#8D99AE", Total = "#0B3C5D")
+      df$series <- factor(df$series, levels = spread_series_levels(df$series, pal))
       title <- if (identical(view_d(), "predator")) {
         paste("Tonnes consumed by", fg_d())
       } else {

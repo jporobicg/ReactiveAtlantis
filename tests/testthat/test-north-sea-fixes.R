@@ -1718,9 +1718,15 @@ test_that("shared palette spreads adjacent series colours", {
                unname(build_fg_palette(codes, types)["COD"]))
   d12 <- hex_dist(pal["COD"], pal["HAD"])
   d13 <- hex_dist(pal["COD"], pal["WHG"])
-  expect_gt(d12, 40)
-  expect_gt(d13, 20)
+  expect_gt(d12, 80)
+  expect_gt(d13, 40)
   expect_false(identical(unname(pal["COD"]), unname(pal["HAD"])))
+  pair <- utils::combn(codes, 2, simplify = FALSE)
+  mind <- min(vapply(pair, function(ab) hex_dist(pal[ab[1]], pal[ab[2]]), numeric(1)))
+  expect_gt(mind, 50)
+  lv <- spread_series_levels(c("COD", "HAD", "WHG", "Other"), pal)
+  expect_identical(tail(lv, 1), "Other")
+  expect_true(all(c("COD", "HAD", "WHG") %in% lv))
 })
 
 test_that("busy helpers and Ask Atlantis thinking markup are present", {
