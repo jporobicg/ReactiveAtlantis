@@ -150,11 +150,12 @@ ra_ai_nav_catalog <- function() {
       title = "Feeding",
       module = "feeding",
       summary = paste(
-        "Searchable pPREY heatmap; gape overlap; cells with pPREY > 0 and",
-        "gape overlap = 0 are flagged."
+        "pPREY matrix by group name and adult/juvenile; one-group bars;",
+        "matrix filters; diagnostics (preference sums, uneaten prey, DietCheck);",
+        "compare edited vs original. Gape overlap and mismatch views remain."
       ),
       keywords = c("feeding", "pprey", "gape", "availability", "preference",
-                   "klp", "kup", "starv", "mum")
+                   "klp", "kup", "starv", "mum", "dietcheck", "diet")
     ),
     mortality = list(
       id = "mortality",

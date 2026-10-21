@@ -1208,6 +1208,123 @@ test_that("feeding predator row filters the matrix and pressure is a matrix", {
   expect_s3_class(p2, "ggplot")
 })
 
+test_that("pPREY group+stage views, filters, diagnostics and compare", {
+  ava <- matrix(
+    c(
+      0.10, 0.80, 0.05, 0,
+      0.00, 0.20, 0.00, 0,
+      0.40, 0.10, 0.00, 0,
+      0.00, 0.30, 0.00, 0,
+      0.00, 0.00, 0.50, 0,
+      0.00, 0.00, 0.00, 0
+    ),
+    nrow = 6, byrow = TRUE,
+    dimnames = list(
+      c("pPREY1COD1", "pPREY2COD1", "pPREY1COD2", "pPREY2COD2",
+        "pPREY1HAD1", "pPREYPHY"),
+      c("COD", "HAD", "PHY", "DET")
+    )
+  )
+  grp <- data.frame(
+    code = c("COD", "HAD", "PHY", "DET"),
+    name = c("cod", "haddock", "diatoms", "detritus"),
+    longname = c("Cod", "Haddock", "Phytoplankton", "Detritus"),
+    stringsAsFactors = FALSE
+  )
+  meta <- parse_pprey_rownames(rownames(ava))
+  expect_equal(meta$pred_code, c("COD", "COD", "COD", "COD", "HAD", "PHY"))
+  expect_equal(meta$pred_stage, c(1L, 1L, 2L, 2L, 1L, NA))
+  expect_equal(meta$prey_stage, c(1L, 2L, 1L, 2L, 1L, NA))
+
+  idx <- pprey_filter_index(ava, "COD", "1", "(all)", "all")
+  expect_equal(rownames(ava)[idx$pred_keep], c("pPREY1COD1", "pPREY2COD1"))
+  idx2 <- pprey_filter_index(ava, "COD", "2", "HAD", "1")
+  expect_equal(rownames(ava)[idx2$pred_keep], "pPREY1COD2")
+  expect_equal(colnames(ava)[idx2$prey_keep], "HAD")
+
+  pred_df <- pprey_one_group(ava, "predator", "COD", "1", grp)
+  expect_true(nrow(pred_df) >= 2)
+  expect_equal(as.character(pred_df$Label[1]), as.character(pred_df$Label[order(-pred_df$Value)[1]]))
+  expect_true(pred_df$Value[1] >= pred_df$Value[nrow(pred_df)])
+  expect_match(attr(pred_df, "title"), "Cod")
+  p_pred <- plot_pprey_one_group(pred_df)
+  expect_s3_class(p_pred, "ggplot")
+
+  prey_df <- pprey_one_group(ava, "prey", "HAD", "1", grp)
+  expect_true(nrow(prey_df) >= 1)
+  expect_true(all(prey_df$Value > 0))
+  p_prey <- plot_pprey_one_group(prey_df)
+  expect_s3_class(p_prey, "ggplot")
+
+  hid <- filter_feed_matrix(ava, threshold = 0.25, interacting = TRUE, cluster = FALSE)
+  expect_true(all(hid[hid > 0] >= 0.25))
+  expect_false("DET" %in% colnames(hid))
+  expect_false("pPREYPHY" %in% rownames(hid))
+  cl <- filter_feed_matrix(ava, threshold = 0, interacting = TRUE, cluster = TRUE)
+  expect_true(is.matrix(cl) && nrow(cl) > 1 && ncol(cl) > 1)
+  expect_false("DET" %in% colnames(cl))
+  p_filt <- plot_feed_tile(t(hid), "Filtered availability (pPREY)", "YlOrRd",
+                           "Availability", NULL, NULL)
+  expect_s3_class(p_filt, "ggplot")
+
+  sums <- pprey_preference_sums(ava)
+  expect_true("pPREYPHY" %in% sums$Predator[sums$Flag == "zero preferences"])
+  uneaten <- pprey_uneaten_prey(ava)
+  expect_true("DET" %in% uneaten$Prey)
+  none <- pprey_uneaten_prey(ava[, c("HAD", "PHY"), drop = FALSE])
+  expect_equal(nrow(none), 0)
+  unnamed <- ava
+  colnames(unnamed) <- NULL
+  expect_equal(nrow(pprey_uneaten_prey(unnamed[, 1:2, drop = FALSE])), 0)
+  diet <- data.frame(
+    Time = c(0, 0),
+    Predator = "COD",
+    Cohort = c(1, 2),
+    COD = c(0, 0),
+    HAD = c(0.8, 0.9),
+    PHY = c(0.2, 0),
+    DET = c(0, 0),
+    stringsAsFactors = FALSE
+  )
+  mm <- pprey_dietcheck_mismatch(ava, diet, eps = 0.001)
+  expect_true(any(grepl("pPREY > 0, DietCheck", mm$Flag) & mm$Prey == "COD"))
+  expect_true(nrow(mm) >= 1)
+  diag_tab <- pprey_diagnostics_table(ava, diet, 0.001)
+  expect_true(any(diag_tab$Type == "preference_sum"))
+  expect_true(any(diag_tab$Type == "uneaten_prey"))
+  expect_true(any(diag_tab$Type == "dietcheck"))
+  p_diag <- plot_pprey_sum_flags(sums)
+  expect_s3_class(p_diag, "ggplot")
+
+  edited <- ava
+  hit <- pprey_apply_edit(edited, "COD", "1", "HAD", "1", 0.55)
+  expect_equal(hit$mat["pPREY1COD1", "HAD"], 0.55)
+  expect_equal(ava["pPREY1COD1", "HAD"], 0.80)
+  ch <- pprey_changed_cells(ava, hit$mat)
+  expect_equal(nrow(ch), 1)
+  expect_equal(ch$Prey, "HAD")
+  expect_equal(ch$Original, 0.80)
+  expect_equal(ch$Edited, 0.55)
+  p_cmp <- plot_pprey_compare(ava, hit$mat)
+  expect_s3_class(p_cmp, "ggplot")
+  p_none <- plot_pprey_compare(ava, ava)
+  expect_s3_class(p_none, "ggplot")
+
+  art <- "/opt/cursor/artifacts"
+  if (dir.exists(art)) {
+    ggplot2::ggsave(file.path(art, "feeding_one_group_predator.png"), p_pred,
+                    width = 9, height = 6, dpi = 120)
+    ggplot2::ggsave(file.path(art, "feeding_one_group_prey.png"), p_prey,
+                    width = 9, height = 6, dpi = 120)
+    ggplot2::ggsave(file.path(art, "feeding_matrix_filters.png"), p_filt,
+                    width = 9, height = 6, dpi = 120)
+    ggplot2::ggsave(file.path(art, "feeding_diagnostics.png"), p_diag,
+                    width = 9, height = 6, dpi = 120)
+    ggplot2::ggsave(file.path(art, "feeding_compare.png"), p_cmp,
+                    width = 9, height = 6, dpi = 120)
+  }
+})
+
 test_that("growth limitation plot has labelled factors and a 0-1 axis", {
   Time <- as.Date("1970-01-01") + c(0, 365, 730)
   plot_df <- rbind(

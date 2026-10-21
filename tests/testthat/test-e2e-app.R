@@ -316,6 +316,30 @@ test_that("North Sea real names load COD into every group tab", {
   feed <- tryCatch(app$get_html("#feeding-feeding_plot_gg"), error = function(e) "")
   expect_true(plot_is_real(feed) || nchar(feed) > 40)
   save_shot(app, shot_dir, "ns_11_feeding")
+
+  feed_views <- list(
+    list(view = "one_group", shot = "ns_11_feeding_one_group",
+         extras = list(`feeding-pred_group` = "COD", `feeding-pred_stage` = "1",
+                       `feeding-one_dir` = "predator")),
+    list(view = "matrix_filters", shot = "ns_11_feeding_filters",
+         extras = list(`feeding-hide_below` = 0.05, `feeding-only_interacting` = TRUE,
+                       `feeding-cluster_rc` = TRUE)),
+    list(view = "diagnostics", shot = "ns_11_feeding_diagnostics", extras = list()),
+    list(view = "compare", shot = "ns_11_feeding_compare",
+         extras = list(`feeding-pred_group` = "COD", `feeding-pred_stage` = "1",
+                       `feeding-prey_group` = "PHY", `feeding-edit_value` = 0.42))
+  )
+  for (fv in feed_views) {
+    args <- c(list(`feeding-view_type` = fv$view), fv$extras, list(wait_ = FALSE))
+    try(do.call(app$set_inputs, args), silent = TRUE)
+    if (identical(fv$view, "compare")) {
+      try(app$click("feeding-apply_edit"), silent = TRUE)
+    }
+    app$wait_for_idle(timeout = 40000)
+    html <- tryCatch(app$get_html("#feeding-feeding_plot_gg"), error = function(e) "")
+    expect_true(plot_is_real(html) || nchar(html) > 40, info = fv$view)
+    save_shot(app, shot_dir, fv$shot)
+  }
 })
 
 test_that("messy North Sea folder first Load click fills Catch Mortality Recruitment Spatial", {
