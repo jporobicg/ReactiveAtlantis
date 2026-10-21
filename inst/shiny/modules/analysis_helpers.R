@@ -46,6 +46,140 @@ code_from_fg_label <- function(fg) {
   ifelse(nzchar(out), out, as.character(fg))
 }
 
+AGE_CLASS_VARS <- c("ResN", "StructN", "Numbers", "Biomass")
+
+##' Subset a tracer array to a box and/or display layer (pads already NA).
+age_subset_array <- function(arr, box = NULL, layer_key = "integrated", info = NULL) {
+  if (is.null(arr)) return(NULL)
+  d <- dim(arr)
+  if (!is.null(info) && !is.null(d) && length(d) >= 2 &&
+      exists("mask_padded_layers", mode = "function")) {
+    arr <- mask_padded_layers(arr, info)
+    d <- dim(arr)
+  }
+  if (!is.null(d) && length(d) == 3) {
+    if (!is.null(layer_key) && !identical(layer_key, "integrated") &&
+        exists("layer_storage_z", mode = "function") && !is.null(info)) {
+      z <- layer_storage_z(info, layer_key)
+      if (!is.finite(z) || z < 1 || z > d[1]) {
+        arr[] <- NA_real_
+      } else {
+        arr <- arr[z, , , drop = FALSE]
+      }
+    }
+    if (!is.null(box)) {
+      b1 <- as.integer(box)[1] + 1L
+      if (is.finite(b1) && b1 >= 1 && b1 <= dim(arr)[2]) {
+        arr <- arr[, b1, , drop = FALSE]
+      } else {
+        arr[] <- NA_real_
+      }
+    }
+    return(arr)
+  }
+  if (!is.null(d) && length(d) == 2 && !is.null(box)) {
+    b1 <- as.integer(box)[1] + 1L
+    if (is.finite(b1) && b1 >= 1 && b1 <= d[1]) {
+      arr <- arr[b1, , drop = FALSE]
+    } else {
+      arr[] <- NA_real_
+    }
+  }
+  arr
+}
+
+weighted_mean_space <- function(val, w) {
+  if (is.null(val) || is.null(w)) return(numeric())
+  d <- dim(val)
+  if (is.null(d) || length(d) == 1) {
+    ww <- as.numeric(w)
+    vv <- as.numeric(val)
+    ok <- is.finite(vv) & is.finite(ww) & ww > 0
+    if (!any(ok)) return(NA_real_)
+    return(sum(vv[ok] * ww[ok]) / sum(ww[ok]))
+  }
+  n_t <- d[length(d)]
+  vapply(seq_len(n_t), function(t) {
+    vv <- as.numeric(time_slice(val, t))
+    ww <- as.numeric(time_slice(w, t))
+    ok <- is.finite(vv) & is.finite(ww) & ww > 0
+    if (!any(ok)) return(NA_real_)
+    sum(vv[ok] * ww[ok]) / sum(ww[ok])
+  }, numeric(1))
+}
+
+##' Age-class time series: ResN, StructN, Numbers, Biomass.
+##'
+##' System-wide when \code{box} is NULL and \code{layer_key} is integrated.
+##' Numbers are summed; ResN/StructN are numbers-weighted means; biomass uses
+##' the same \code{mg2t * x.cn} conversion as Compare / Spatial.
+age_class_long <- function(nc, grp, fg_code, box = NULL,
+                           layer_key = "integrated", info = NULL,
+                           mg2t = 0.00000002, x.cn = 5.7) {
+  empty <- data.frame(
+    Time = integer(), Age = integer(), AgeLab = character(),
+    Variable = character(), Value = numeric(),
+    stringsAsFactors = FALSE
+  )
+  if (is.null(nc) || is.null(grp) || !nzchar(as.character(fg_code)[1])) {
+    return(empty)
+  }
+  row <- grp[grp$code == fg_code, , drop = FALSE]
+  if (nrow(row) == 0) return(empty)
+  n.coh <- as.integer(row$numcohorts[1])
+  gtype <- as.character(row$grouptype[1])
+  if (!is.finite(n.coh) || n.coh < 2 || gtype %in% AGE_SPECIAL) return(empty)
+  if (is.null(info) && exists("atlantis_layer_info", mode = "function")) {
+    info <- tryCatch(atlantis_layer_info(nc), error = function(e) NULL)
+  }
+  path <- tryCatch(nc$filename, error = function(e) "anon")
+  box_key <- if (is.null(box)) "all" else paste(as.integer(box), collapse = ",")
+  ck <- paste("agecls", file_cache_key(path, fg_code), box_key,
+              as.character(layer_key)[1], mg2t, x.cn, sep = "|")
+  hit <- tryCatch(ra_cache_get(ck), error = function(e) NULL)
+  if (!is.null(hit)) return(hit)
+
+  name <- as.character(row$name[1])
+  vars <- names(nc$var)
+  rows <- list()
+  for (coh in seq_len(n.coh)) {
+    n_var <- paste0(name, coh, "_Nums")
+    r_var <- paste0(name, coh, "_ResN")
+    s_var <- paste0(name, coh, "_StructN")
+    if (!all(c(n_var, r_var, s_var) %in% vars)) next
+    nums <- age_subset_array(nc_get(nc, n_var), box, layer_key, info)
+    resn <- age_subset_array(nc_get(nc, r_var), box, layer_key, info)
+    strn <- age_subset_array(nc_get(nc, s_var), box, layer_key, info)
+    if (is.null(nums)) next
+    n_t <- if (!is.null(dim(nums))) dim(nums)[length(dim(nums))] else length(nums)
+    nums_t <- as.numeric(sum_space(nums))
+    resn_t <- as.numeric(weighted_mean_space(resn, nums))
+    strn_t <- as.numeric(weighted_mean_space(strn, nums))
+    biom_t <- as.numeric(sum_space((resn + strn) * nums)) * mg2t * x.cn
+    if (length(nums_t) != n_t) n_t <- length(nums_t)
+    rows[[length(rows) + 1]] <- data.frame(
+      Time = rep(seq_len(n_t), 4L),
+      Age = coh,
+      AgeLab = paste("Age", coh),
+      Variable = rep(c("ResN", "StructN", "Numbers", "Biomass"), each = n_t),
+      Value = c(resn_t, strn_t, nums_t, biom_t),
+      stringsAsFactors = FALSE
+    )
+  }
+  out <- if (length(rows)) do.call(rbind, rows) else empty
+  tryCatch(ra_cache_set(ck, out), error = function(e) NULL)
+  out
+}
+
+age_class_ylab <- function(variable) {
+  switch(as.character(variable)[1],
+         ResN = "Reserve nitrogen (mg N)",
+         StructN = "Structural nitrogen (mg N)",
+         Numbers = "Numbers",
+         Biomass = "Biomass (t)",
+         "Value")
+}
+
 ##' Relative StructN / ResN at the end of the run versus t0
 ##'
 ##' Age-class groups only. A cohort is a problem when the spatial-mean

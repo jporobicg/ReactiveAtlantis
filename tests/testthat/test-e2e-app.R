@@ -117,6 +117,7 @@ test_that("folder load fills every tab with a bound plot or table", {
 
   tabs <- list(
     list(title = "Compare", ids = c("#compare-plot_facets_gg"), shot = "03_compare"),
+    list(title = "Ages", ids = c("#ages-age_plot"), shot = "03b_ages"),
     list(title = "Spatial", ids = c("#spatial-map_plot", "#spatial-box_ts"), shot = "04_spatial"),
     list(title = "Consumption", ids = c("#consumption-cons_plot_gg"), shot = "05_consumption"),
     list(title = "Physics", ids = c("#physics-tracer_plot", "#physics-dz_plot"), shot = "06_physics"),
@@ -282,6 +283,7 @@ test_that("North Sea real names load COD into every group tab", {
   save_shot(app, shot_dir, "ns_03_compare_relative")
 
   tab_cod <- list(
+    list(title = "Ages", id = "ages-fg", plot = "#ages-age_plot", shot = "ns_03b_ages"),
     list(title = "Spatial", id = "spatial-fg", plot = "#spatial-map_plot", shot = "ns_04_spatial"),
     list(title = "Consumption", id = "consumption-fg", plot = "#consumption-cons_plot_gg", shot = "ns_05_consumption"),
     list(title = "Predation", id = "predation-fg", plot = "#predation-plot_pred_gg", shot = "ns_06_predation"),

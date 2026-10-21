@@ -34,6 +34,17 @@ ra_ai_nav_catalog <- function() {
       keywords = c("compare", "biomass", "bt/b0", "relative", "age structure",
                    "small multiples", "collapse", "crash", "declin")
     ),
+    ages = list(
+      id = "ages",
+      title = "Ages",
+      module = "ages",
+      summary = paste(
+        "Whole-system age-class time series for a cohort group: reserve and",
+        "structural nitrogen (numbers-weighted means), numbers, and biomass."
+      ),
+      keywords = c("ages", "age class", "cohort", "resn", "structn", "numbers",
+                   "weight", "age structure")
+    ),
     spatial = list(
       id = "spatial",
       title = "Spatial",
@@ -41,10 +52,11 @@ ra_ai_nav_catalog <- function() {
       summary = paste(
         "Biomass per box drawn from .bgm polygons, depth-layer selector",
         "(water layers, sediment, integrated), time slider, group selector,",
-        "per-box series; boundary boxes outlined."
+        "per-box series; boundary boxes outlined. By-age view plots ResN,",
+        "StructN, numbers and biomass for one box and layer."
       ),
       keywords = c("spatial", "map", "box", "polygon", "bgm", "distribution",
-                   "layer", "depth", "sediment", "collapse", "crash")
+                   "layer", "depth", "sediment", "collapse", "crash", "age class")
     ),
     consumption = list(
       id = "consumption",
@@ -208,7 +220,7 @@ ra_ai_validate_nav <- function(targets, catalog = ra_ai_nav_catalog()) {
 
 ##' Existing tabs that inspect a collapsing / crashing group.
 ra_ai_investigation_nav_ids <- function() {
-  c("overview", "compare", "predation", "consumption", "feeding",
+  c("overview", "compare", "ages", "predation", "consumption", "feeding",
     "recruitment", "growth", "mortality", "catch", "spatial", "physics")
 }
 

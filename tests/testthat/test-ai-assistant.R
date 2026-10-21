@@ -170,7 +170,7 @@ test_that("functional-group collapse questions stay in-scope with guidance", {
     expect_true(any(c("overview", "compare") %in% ids), info = q)
     expect_true(any(c("predation", "mortality", "recruitment") %in% ids),
                 info = q)
-    expect_false("ages" %in% ids, info = q)
+    expect_true("ages" %in% ids, info = q)
   }
 
   resolved <- ra_ai_resolve_group_codes(

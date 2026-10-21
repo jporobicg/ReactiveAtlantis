@@ -58,6 +58,7 @@ TOOL_REQUIREMENTS <- list(
   spatial = c("groups", "output_nc", "bgm"),
   consumption = c("groups", "prod_nc"),
   physics = c("output_nc"),
+  ages = c("groups", "output_nc"),
   ensemble = c("groups")
 )
 

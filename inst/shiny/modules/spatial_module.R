@@ -13,16 +13,37 @@ spatial_ui <- function(id) {
     layout_sidebar(
       sidebar = sidebar(
         width = 280, open = "open",
+        selectInput(ns("view"), "View",
+                    choices = c("Map" = "map", "By age class" = "age"),
+                    selected = "map"),
         selectInput(ns("fg"), "Functional group", choices = character()),
         selectInput(ns("layer"), "Depth layer",
                     choices = c("All layers (integrated)" = "integrated")),
-        sliderInput(ns("time_i"), "Time step", min = 1, max = 1, value = 1, step = 1),
-        textOutput(ns("time_lab")),
-        checkboxInput(ns("stable_scale"), "Stable colour scale across time", TRUE),
-        checkboxInput(ns("highlight_boundary"), "Highlight boundary boxes", TRUE)
+        conditionalPanel(
+          "input.view == 'map'", ns = ns,
+          sliderInput(ns("time_i"), "Time step", min = 1, max = 1, value = 1, step = 1),
+          textOutput(ns("time_lab")),
+          checkboxInput(ns("stable_scale"), "Stable colour scale across time", TRUE),
+          checkboxInput(ns("highlight_boundary"), "Highlight boundary boxes", TRUE)
+        ),
+        conditionalPanel(
+          "input.view == 'age'", ns = ns,
+          selectInput(ns("box"), "Box", choices = 0),
+          checkboxInput(ns("show_biomass"), "Biomass", TRUE),
+          checkboxInput(ns("show_resn"), "Reserve N", TRUE),
+          checkboxInput(ns("show_structn"), "Structural N", TRUE),
+          checkboxInput(ns("show_numbers"), "Numbers", TRUE)
+        )
       ),
-      plotOutput(ns("map_plot"), height = "420px"),
-      plotOutput(ns("box_ts"), height = "320px")
+      conditionalPanel(
+        "input.view == 'map'", ns = ns,
+        plotOutput(ns("map_plot"), height = "420px"),
+        plotOutput(ns("box_ts"), height = "320px")
+      ),
+      conditionalPanel(
+        "input.view == 'age'", ns = ns,
+        plotOutput(ns("age_plot"), height = "640px")
+      )
     )
   )
 }
@@ -41,7 +62,19 @@ spatial_server <- function(id, project = NULL) {
 
     observe({
       req(isTRUE(ps()$ready), ps()$data$grp)
-      update_select_keep(session, "fg", fg_select_choices(ps()$data$grp), input$fg)
+      dat <- ensure_project_data(ps(), "nc_out")
+      n_box <- if (!is.null(dat$nc_out) && !is.null(dat$nc_out$dim$b)) {
+        dat$nc_out$dim$b$len
+      } else {
+        1
+      }
+      update_select_keep(session, "box", as.character(seq(0, max(0, n_box - 1))),
+                         input$box)
+      if (identical(input$view, "age")) {
+        update_select_keep(session, "fg", age_select_choices(ps()$data$grp), input$fg)
+      } else {
+        update_select_keep(session, "fg", fg_select_choices(ps()$data$grp), input$fg)
+      }
     })
 
     observe({
@@ -153,6 +186,45 @@ spatial_server <- function(id, project = NULL) {
                              x = "Year", y = "Biomass (tons)", colour = "Box")
       p <- p + theme_reactiveatlantis()
       ra_scale_x_year(p, bio$Date)
+      })
+    })
+
+    output$age_plot <- renderPlot({
+      plot_or_message("Load a run to plot age classes in a box and layer", {
+      dat <- ensure_project_data(ps(), c("nc_out", "inf_box"))
+      req(dat$nc_out, dat$grp, fg_d())
+      info <- atlantis_layer_info(dat$nc_out, dat$inf_box)
+      key <- layer_d()
+      if (is.null(key) || !nzchar(as.character(key))) key <- "integrated"
+      box <- as.integer(input$box)
+      df <- age_class_long(dat$nc_out, dat$grp, fg_d(), box = box,
+                           layer_key = key, info = info)
+      vars <- c(
+        if (isTRUE(input$show_biomass)) "Biomass",
+        if (isTRUE(input$show_resn)) "ResN",
+        if (isTRUE(input$show_structn)) "StructN",
+        if (isTRUE(input$show_numbers)) "Numbers"
+      )
+      df <- df[df$Variable %in% vars, , drop = FALSE]
+      req(nrow(df) > 0)
+      tdates <- dat$time_dates
+      if (!is.null(tdates) && length(tdates) >= max(df$Time)) {
+        df$Date <- tdates[df$Time]
+      } else {
+        df$Date <- days_as_date(df$Time, dat$origin)
+      }
+      pal <- age_class_palette(length(unique(df$Age)), sort(unique(df$AgeLab)))
+      lay_lab <- layer_label(info, key)
+      p <- ggplot2::ggplot(df, ggplot2::aes(x = Date, y = Value, colour = AgeLab))
+      p <- p + ggplot2::geom_line(linewidth = 0.8, na.rm = TRUE)
+      p <- p + ggplot2::facet_wrap(~ Variable, ncol = 1, scales = "free_y")
+      p <- p + ggplot2::scale_colour_manual(values = pal, name = "Age class")
+      p <- p + ggplot2::labs(
+        title = paste("Age classes —", fg_d(), "— box", box, "—", lay_lab),
+        x = "Year", y = NULL
+      )
+      p <- p + theme_reactiveatlantis()
+      ra_scale_x_year(p, df$Date)
       })
     })
 

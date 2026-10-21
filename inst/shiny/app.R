@@ -45,6 +45,7 @@ source(file.path(app_dir, "modules", "analysis_helpers.R"))
 source(file.path(app_dir, "modules", "layers.R"))
 source(file.path(app_dir, "modules", "overview_module.R"))
 source(file.path(app_dir, "modules", "spatial_module.R"))
+source(file.path(app_dir, "modules", "ages_module.R"))
 source(file.path(app_dir, "modules", "consumption_module.R"))
 source(file.path(app_dir, "modules", "physics_module.R"))
 source(file.path(app_dir, "modules", "ensemble_module.R"))
@@ -149,6 +150,7 @@ ui <- page_navbar(
   nav_item(input_dark_mode(id = "color_mode", mode = "light")),
   nav_panel("Overview", overview_ui("overview")),
   nav_panel("Compare", compare_ui("compare")),
+  nav_panel("Ages", ages_ui("ages")),
   nav_panel("Spatial", spatial_ui("spatial")),
   nav_panel("Consumption", consumption_ui("consumption")),
   nav_panel("Physics", physics_ui("physics")),
@@ -166,6 +168,7 @@ server <- function(input, output, session) {
   project <- project_server("project")
   overview_server("overview", project)
   compare_server("compare", project)
+  ages_server("ages", project)
   spatial_server("spatial", project)
   consumption_server("consumption", project)
   physics_server("physics", project)

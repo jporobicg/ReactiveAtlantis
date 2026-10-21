@@ -251,6 +251,18 @@ get_mortality_colors <- function(n) {
   cycle_pool(n, RColorBrewer::brewer.pal(12, "Paired"))
 }
 
+##' Sequential palette for age classes (young → old).
+age_class_palette <- function(n, labels = NULL) {
+  n <- max(1L, as.integer(n)[1])
+  if (is.null(labels)) labels <- paste("Age", seq_len(n))
+  labels <- as.character(labels)
+  if (n == 1L) {
+    return(stats::setNames("#0B3C5D", labels[1]))
+  }
+  pal <- grDevices::hcl.colors(n, palette = "viridis")
+  stats::setNames(pal, labels[seq_len(n)])
+}
+
 mortality_type_colors <- function() {
   c(
     "Fishing" = "#0B3C5D",

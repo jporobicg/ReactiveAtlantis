@@ -47,6 +47,7 @@ source(file.path(mod, "feeding_module.R"), local = TRUE)
 source(file.path(mod, "growth_module.R"), local = TRUE)
 source(file.path(mod, "recruitment_module.R"), local = TRUE)
 source(file.path(mod, "spatial_module.R"), local = TRUE)
+source(file.path(mod, "ages_module.R"), local = TRUE)
 source(file.path(mod, "consumption_module.R"), local = TRUE)
 source(file.path(mod, "physics_module.R"), local = TRUE)
 source(file.path(mod, "ensemble_module.R"), local = TRUE)
@@ -1392,6 +1393,7 @@ test_that("app.R sources the new analysis modules", {
   expect_true(grepl("layers.R", txt, fixed = TRUE))
   expect_true(grepl("nc_cache.R", txt, fixed = TRUE))
   expect_true(grepl("spatial_ui", txt, fixed = TRUE))
+  expect_true(grepl("ages_ui", txt, fixed = TRUE))
   expect_true(grepl("consumption_ui", txt, fixed = TRUE))
   expect_true(grepl("physics_ui", txt, fixed = TRUE))
   expect_true(grepl("ensemble_ui", txt, fixed = TRUE))
@@ -1857,6 +1859,82 @@ test_that("shared palette spreads adjacent series colours", {
   expect_true(all(c("COD", "HAD", "WHG") %in% lv))
 })
 
+test_that("Ages tab and Spatial by-age use shared layer helper", {
+  tmp <- tempfile("ra_ages_")
+  dir.create(tmp)
+  on.exit(unlink(tmp, recursive = TRUE), add = TRUE)
+  nc_path <- file.path(tmp, "layered.nc")
+  write_layered_biology_nc(nc_path)
+  nc <- ncdf4::nc_open(nc_path)
+  on.exit(ncdf4::nc_close(nc), add = TRUE)
+  info <- atlantis_layer_info(nc)
+  grp <- data.frame(code = "COD", name = "cod", numcohorts = 2,
+                    grouptype = "FISH", isturnedon = 1, stringsAsFactors = FALSE)
+  sys <- age_class_long(nc, grp, "COD", box = NULL, layer_key = "integrated",
+                        info = info)
+  expect_true(all(AGE_CLASS_VARS %in% sys$Variable))
+  expect_equal(sort(unique(sys$Age)), 1:2)
+  nums1 <- sys$Value[sys$Age == 1 & sys$Variable == "Numbers" & sys$Time == 1]
+  ## box0: 3 water + sed; box1: 2 water + sed; box2: 1 water + sed; 100 each
+  expect_equal(nums1, 100 * (4 + 3 + 2))
+  resn1 <- sys$Value[sys$Age == 1 & sys$Variable == "ResN" & sys$Time == 1]
+  expect_equal(resn1, 5)
+  biom1 <- sys$Value[sys$Age == 1 & sys$Variable == "Biomass" & sys$Time == 1]
+  expect_equal(biom1, nums1 * (10 + 5) * 0.00000002 * 5.7)
+
+  surf <- age_class_long(nc, grp, "COD", box = 2, layer_key = "water_1",
+                         info = info)
+  expect_equal(surf$Value[surf$Age == 1 & surf$Variable == "Numbers" &
+                            surf$Time == 1], 100)
+  deep <- age_class_long(nc, grp, "COD", box = 2, layer_key = "water_3",
+                         info = info)
+  expect_true(all(!is.finite(deep$Value[deep$Variable == "Numbers"]) |
+                    deep$Value[deep$Variable == "Numbers"] == 0))
+
+  pal <- age_class_palette(4)
+  expect_equal(length(unique(unname(pal))), 4)
+  ui_a <- paste(as.character(ages_ui("ages")), collapse = " ")
+  expect_true(grepl("Functional group", ui_a))
+  ui_s <- paste(as.character(spatial_ui("spatial")), collapse = " ")
+  expect_true(grepl("By age class", ui_s))
+  expect_false(grepl("Show box labels|Show outlines", ui_s, ignore.case = TRUE))
+
+  nesp <- tempfile("nesp_ages_")
+  pair <- write_nesp_style_pair(nesp)
+  on.exit(unlink(nesp, recursive = TRUE), add = TRUE)
+  det <- detect_run_pair(pair$config_dir, pair$output_dir)
+  nc_n <- ncdf4::nc_open(det$paths$output_nc)
+  on.exit(ncdf4::nc_close(nc_n), add = TRUE)
+  grp_n <- data.frame(code = "COD", name = "cod", numcohorts = 2,
+                      grouptype = "FISH", isturnedon = 1, stringsAsFactors = FALSE)
+  info_n <- atlantis_layer_info(nc_n)
+  nesp_sys <- age_class_long(nc_n, grp_n, "COD", info = info_n)
+  expect_gt(nrow(nesp_sys), 0)
+  expect_equal(sort(unique(nesp_sys$Age)), 1:2)
+  nesp_box <- age_class_long(nc_n, grp_n, "COD", box = 0, layer_key = "sediment",
+                             info = info_n)
+  expect_gt(nrow(nesp_box), 0)
+  expect_lt(max(nesp_box$Value[nesp_box$Variable == "Numbers"], na.rm = TRUE),
+            max(nesp_sys$Value[nesp_sys$Variable == "Numbers"], na.rm = TRUE))
+
+  fx <- northsea_fixture_dir()
+  skip_if_not(dir.exists(fx) && file.exists(file.path(fx, "outputNorthSea.nc")),
+              "North Sea fixture not packaged")
+  nc_ns <- ncdf4::nc_open(file.path(fx, "outputNorthSea.nc"))
+  on.exit(ncdf4::nc_close(nc_ns), add = TRUE)
+  grp_ns <- data.frame(code = "COD", name = "cod", numcohorts = 14,
+                       grouptype = "FISH", isturnedon = 1, stringsAsFactors = FALSE)
+  ns_info <- atlantis_layer_info(nc_ns)
+  ns_sys <- age_class_long(nc_ns, grp_ns, "COD", info = ns_info)
+  expect_equal(sort(unique(ns_sys$Age)), 1:14)
+  expect_true(all(AGE_CLASS_VARS %in% ns_sys$Variable))
+  ns_box <- age_class_long(nc_ns, grp_ns, "COD", box = 1,
+                           layer_key = "integrated", info = ns_info)
+  expect_gt(nrow(ns_box), 0)
+  expect_lt(max(ns_box$Value[ns_box$Variable == "Numbers"], na.rm = TRUE),
+            max(ns_sys$Value[ns_sys$Variable == "Numbers"], na.rm = TRUE))
+})
+
 test_that("busy helpers and Ask Atlantis thinking markup are present", {
   css <- paste(readLines(file.path(root, "inst", "shiny", "www", "custom.css")),
                collapse = "\n")
@@ -1879,7 +1957,8 @@ test_that("busy helpers and Ask Atlantis thinking markup are present", {
 test_that("hidden-tab plots are not kept alive after load", {
   mods <- file.path(root, "inst", "shiny", "modules")
   src <- paste(vapply(
-    c("consumption_module.R", "spatial_module.R", "compare_module.R",
+    c("consumption_module.R", "spatial_module.R", "ages_module.R",
+      "compare_module.R",
       "recruitment_module.R", "growth_module.R", "feeding_module.R",
       "predation_module.R", "foodweb_module.R", "catch_module.R",
       "physics_module.R", "mortality_module.R"),

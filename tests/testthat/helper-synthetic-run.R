@@ -320,6 +320,7 @@ write_layered_biology_nc <- function(path, count_var = "numlayers") {
   count_var <- as.character(count_var)[1]
   vars <- list(
     mk3("cod1_StructN"), mk3("cod1_ResN"), mk3("cod1_Nums", "individuals"),
+    mk3("cod2_StructN"), mk3("cod2_ResN"), mk3("cod2_Nums", "individuals"),
     mk3("diatoms_N"), mk3("Temp", "degC"), mk3("volume", "m3"),
     ncdf4::ncvar_def("nominal_dz", "m", list(dim_z, dim_b), -999, prec = "float"),
     mk_b(count_var)
@@ -336,6 +337,9 @@ write_layered_biology_nc <- function(path, count_var = "numlayers") {
   fill("cod1_StructN", 10)
   fill("cod1_ResN", 5)
   fill("cod1_Nums", 100)
+  fill("cod2_StructN", 8)
+  fill("cod2_ResN", 4)
+  fill("cod2_Nums", 50)
   fill("diatoms_N", 2)
   fill("Temp", 8)
   ncdf4::ncvar_put(nc, "Temp", {
