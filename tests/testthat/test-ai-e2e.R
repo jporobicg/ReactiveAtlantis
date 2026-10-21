@@ -104,7 +104,7 @@ test_that("Ask Atlantis drawer is closed by default and survives tab switches", 
   expect_true(grepl("ra-msg-thinking", think, fixed = TRUE))
   save_ai_shot(app, "ask_atlantis_thinking")
 
-  app$click(selector = "#assistant-drawer .ra-open-tool")
+  app$click(selector = "#assistant-drawer .ra-open-tool[data-ra-nav='Predation']")
   app$wait_for_idle(timeout = 15000)
   page2 <- app$get_html("body")
   expect_true(grepl("Predation", page2, fixed = TRUE))

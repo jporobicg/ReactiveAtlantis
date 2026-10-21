@@ -30,6 +30,9 @@ if (!exists(".ra_ai_load_dir", inherits = FALSE) ||
 .ra_ai_files <- file.path(.ra_ai_load_dir, "R", c(
   "ai_config.R",
   "ai_nav.R",
+  "ai_cases.R",
+  "ai_tools.R",
+  "ai_context.R",
   "ai_ollama.R",
   "ai_store.R",
   "ai_ingest.R",

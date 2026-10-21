@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "items": [
+    {
+      "qa_id": "qa-blank-spatial",
+      "question": "Why is the Spatial map blank?",
+      "status": "confirmed",
+      "tool_ids": ["spatial"],
+      "sources": ["reactiveatlantis-local"]
+    },
+    {
+      "qa_id": "qa-pprey",
+      "question": "What is pPREY?",
+      "status": "confirmed",
+      "tool_ids": ["feeding", "predation"],
+      "sources": ["fixture-manuals"]
+    },
+    {
+      "qa_id": "qa-ml",
+      "question": "Is mL fishing mortality?",
+      "status": "confirmed",
+      "tool_ids": ["mortality"],
+      "sources": ["fixture-manuals"]
+    },
+    {
+      "qa_id": "qa-readonly",
+      "question": "Can the Guide change pPREY for me?",
+      "status": "confirmed",
+      "tool_ids": ["feeding"],
+      "sources": ["ra-knowledge"]
+    },
+    {
+      "qa_id": "qa-offline",
+      "question": "Why does the Guide say Offline?",
+      "status": "confirmed",
+      "tool_ids": [],
+      "sources": ["reactiveatlantis-local"]
+    },
+    {
+      "qa_id": "qa-no-internet",
+      "question": "Do I need the internet to ask a question?",
+      "status": "confirmed",
+      "tool_ids": [],
+      "sources": ["ra-knowledge"]
+    },
+    {
+      "qa_id": "qa-no-mum-rule",
+      "question": "Should I increase mum when biomass declines?",
+      "status": "confirmed",
+      "tool_ids": ["consumption", "feeding", "compare"],
+      "sources": ["ra-knowledge"]
+    },
+    {
+      "qa_id": "qa-appendix1",
+      "question": "Where is Appendix 1 of the HTML manual?",
+      "status": "unconfirmed",
+      "tool_ids": [],
+      "sources": ["atlantis-manual-appendix1"]
+    },
+    {
+      "qa_id": "qa-google-group",
+      "question": "Are Google Group answers reliable?",
+      "status": "unconfirmed",
+      "tool_ids": [],
+      "sources": ["atlantis-google-group"]
+    },
+    {
+      "qa_id": "qa-morell",
+      "question": "Does Morell et al. 2026 change this app?",
+      "status": "unconfirmed",
+      "tool_ids": [],
+      "sources": ["morell-2026"]
+    }
+  ]
+}

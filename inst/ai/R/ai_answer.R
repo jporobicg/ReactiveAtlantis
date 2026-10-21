@@ -68,12 +68,112 @@ ra_ai_validate_citations <- function(citations, chunks) {
   out
 }
 
+ra_ai_chr_list <- function(x) {
+  if (is.null(x)) return(character())
+  if (is.list(x)) x <- unlist(lapply(x, function(i) as.character(i)[1]))
+  x <- as.character(x)
+  unname(x[!is.na(x) & nzchar(trimws(x))])
+}
+
+ra_ai_validate_evidence_status <- function(x, default = "insufficient") {
+  allowed <- c("supported", "partial", "insufficient", "out_of_scope")
+  x <- tolower(as.character(x %||% default)[1])
+  if (x %in% allowed) x else default
+}
+
+ra_ai_structured_fields <- function(parsed = list(),
+                                    chunks = data.frame(),
+                                    question = "",
+                                    context = list(),
+                                    default_status = "insufficient") {
+  ranked <- if (exists("ra_ai_rank_tools", mode = "function")) {
+    ra_ai_rank_tools(question, context)
+  } else {
+    list()
+  }
+  ranked_ids <- if (length(ranked) > 0) {
+    vapply(ranked, function(x) x$id, character(1))
+  } else {
+    character()
+  }
+  model_ids <- if (exists("ra_ai_validate_tool_ids", mode = "function")) {
+    ra_ai_validate_tool_ids(parsed$recommended_tool_ids)
+  } else {
+    character()
+  }
+  tool_ids <- unique(c(model_ids, ranked_ids))
+  cases <- if (exists("ra_ai_match_cases", mode = "function")) {
+    ra_ai_match_cases(question)
+  } else {
+    list()
+  }
+  explanations <- ra_ai_chr_list(parsed$possible_explanations)
+  if (length(explanations) == 0 && exists("ra_ai_case_explanations",
+                                          mode = "function")) {
+    explanations <- ra_ai_case_explanations(cases)
+  }
+  checks <- ra_ai_chr_list(parsed$suggested_checks)
+  if (length(checks) == 0 && exists("ra_ai_case_checks", mode = "function")) {
+    checks <- ra_ai_case_checks(cases)
+  }
+  if (length(checks) == 0 && length(tool_ids) > 0) {
+    checks <- paste("Inspect the", tool_ids, "tab")
+  }
+  known <- as.character(parsed$what_is_known %||% "")[1]
+  if (!nzchar(known) && !is.null(chunks) && nrow(chunks) > 0) {
+    known <- paste(
+      "Local indexed passages were retrieved. They are not a diagnosis",
+      "of the loaded run."
+    )
+  }
+  limits <- as.character(parsed$limitations %||% "")[1]
+  if (!nzchar(limits)) {
+    limits <- paste(
+      "Guidance only. The assistant cannot see numerical results, write",
+      "files, or execute code. Do not treat one symptom as one cause."
+    )
+  }
+  follow <- as.character(parsed$follow_up_question %||% "")[1]
+  status <- ra_ai_validate_evidence_status(parsed$evidence_status, default_status)
+  if ((is.null(chunks) || nrow(chunks) == 0) && identical(status, "supported")) {
+    status <- "insufficient"
+  }
+  list(
+    what_is_known = known,
+    possible_explanations = explanations,
+    suggested_checks = checks,
+    recommended_tool_ids = tool_ids,
+    limitations = limits,
+    evidence_status = status,
+    follow_up_question = follow
+  )
+}
+
+ra_ai_with_structured <- function(result, extra) {
+  for (nm in names(extra)) result[[nm]] <- extra[[nm]]
+  if (length(extra$recommended_tool_ids) > 0 &&
+      exists("ra_ai_tools_as_nav", mode = "function")) {
+    result$nav_targets <- ra_ai_merge_nav(
+      result$nav_targets %||% list(),
+      ra_ai_tools_as_nav(extra$recommended_tool_ids)
+    )
+  }
+  result
+}
+
 ra_ai_plain_answer <- function(text) {
   list(
     answer = as.character(text)[1],
     claim_kinds = "insufficient_evidence",
     citations = list(),
-    nav_targets = list()
+    nav_targets = list(),
+    what_is_known = "",
+    possible_explanations = character(),
+    suggested_checks = character(),
+    recommended_tool_ids = character(),
+    limitations = "Guidance only.",
+    evidence_status = "insufficient",
+    follow_up_question = ""
   )
 }
 
@@ -195,15 +295,48 @@ ra_ai_investigation_answer <- function(question, chunks, resolved = NULL) {
     }
   }
   if (is.null(chunks)) chunks <- data.frame()
-  list(
-    ok = TRUE,
-    blocked = FALSE,
-    reason = "answered",
-    answer = answer,
-    claim_kinds = "hypothesis",
-    citations = citations,
-    nav_targets = nav,
-    retrieved = chunks
+  extra <- ra_ai_structured_fields(
+    list(), chunks, question, list(),
+    default_status = if (length(citations) > 0) "partial" else "insufficient"
+  )
+  extra$possible_explanations <- unique(c(
+    extra$possible_explanations,
+    "Predation may have increased.",
+    "Intake or gape/pPREY may be limiting.",
+    "Recruitment (YOY/SSB/KDENR) may have failed.",
+    "Fishing may have increased.",
+    "Condition (ResN/StructN) may have dropped.",
+    "Physics or spatial distribution may have changed."
+  ))
+  extra$suggested_checks <- unique(c(
+    extra$suggested_checks,
+    "Overview health flags",
+    "Compare biomass",
+    "Predation and Mortality",
+    "Recruitment YOY/SSB",
+    "Consumption and Feeding",
+    "Spatial and Physics"
+  ))
+  extra$limitations <- paste(
+    "This is guidance, not a diagnosis. One symptom does not identify",
+    "one cause. The assistant cannot see numerical results of the loaded run."
+  )
+  extra$follow_up_question <- extra$follow_up_question
+  if (!nzchar(extra$follow_up_question)) {
+    extra$follow_up_question <- "Which of those processes looks most off on the plots?"
+  }
+  ra_ai_with_structured(
+    list(
+      ok = TRUE,
+      blocked = FALSE,
+      reason = "answered",
+      answer = answer,
+      claim_kinds = "hypothesis",
+      citations = citations,
+      nav_targets = nav,
+      retrieved = chunks
+    ),
+    extra
   )
 }
 
@@ -216,29 +349,53 @@ ra_ai_answer <- function(question,
                          retrieved = NULL) {
   scope <- ra_ai_scope_check(question, context)
   if (!isTRUE(scope$ok)) {
-    return(list(
-      ok = TRUE,
-      blocked = TRUE,
-      reason = scope$reason,
-      answer = scope$message,
-      claim_kinds = "insufficient_evidence",
-      citations = list(),
-      nav_targets = list(),
-      retrieved = data.frame()
+    status <- if (identical(scope$reason, "out_of_scope")) {
+      "out_of_scope"
+    } else {
+      "insufficient"
+    }
+    return(ra_ai_with_structured(
+      list(
+        ok = TRUE,
+        blocked = TRUE,
+        reason = scope$reason,
+        answer = scope$message,
+        claim_kinds = "insufficient_evidence",
+        citations = list(),
+        nav_targets = list(),
+        retrieved = data.frame()
+      ),
+      list(
+        what_is_known = "",
+        possible_explanations = character(),
+        suggested_checks = character(),
+        recommended_tool_ids = character(),
+        limitations = "The assistant stays read-only and in-domain.",
+        evidence_status = status,
+        follow_up_question = ""
+      )
     ))
   }
 
   if (ra_ai_wants_simulation_numbers(question)) {
     nav <- ra_ai_validate_nav(ra_ai_suggest_nav(question))
-    return(list(
-      ok = TRUE,
-      blocked = FALSE,
-      reason = "no_simulation_data",
-      answer = ra_ai_no_sim_data_message(),
-      claim_kinds = "insufficient_evidence",
-      citations = list(),
-      nav_targets = nav,
-      retrieved = data.frame()
+    extra <- ra_ai_structured_fields(list(), data.frame(), question, context,
+                                     default_status = "insufficient")
+    extra$what_is_known <- "The assistant cannot see numerical results of the loaded run."
+    extra$limitations <- "No plot pixels or NetCDF values are available to the drawer."
+    extra$follow_up_question <- "Which tab are you looking at, and what do you observe?"
+    return(ra_ai_with_structured(
+      list(
+        ok = TRUE,
+        blocked = FALSE,
+        reason = "no_simulation_data",
+        answer = ra_ai_no_sim_data_message(),
+        claim_kinds = "insufficient_evidence",
+        citations = list(),
+        nav_targets = nav,
+        retrieved = data.frame()
+      ),
+      extra
     ))
   }
 
@@ -303,19 +460,25 @@ ra_ai_answer <- function(question,
   }, error = function(e) e)
 
   if (inherits(raw, "error")) {
-    return(list(
-      ok = FALSE,
-      blocked = FALSE,
-      reason = "ollama_error",
-      answer = paste(
-        "I could not reach the local language model.",
-        raw$message,
-        "Existing calibration tools are unaffected."
+    extra <- ra_ai_structured_fields(list(), chunks, question, context,
+                                     default_status = "insufficient")
+    extra$limitations <- "Local model unreachable. Existing tabs still work."
+    return(ra_ai_with_structured(
+      list(
+        ok = FALSE,
+        blocked = FALSE,
+        reason = "ollama_error",
+        answer = paste(
+          "I could not reach the local language model.",
+          raw$message,
+          "Existing calibration tools are unaffected."
+        ),
+        claim_kinds = "insufficient_evidence",
+        citations = list(),
+        nav_targets = ra_ai_validate_nav(ra_ai_suggest_nav(question)),
+        retrieved = chunks
       ),
-      claim_kinds = "insufficient_evidence",
-      citations = list(),
-      nav_targets = ra_ai_validate_nav(ra_ai_suggest_nav(question)),
-      retrieved = chunks
+      extra
     ))
   }
 
@@ -332,7 +495,15 @@ ra_ai_answer <- function(question,
   citations <- ra_ai_validate_citations(parsed$citations, chunks)
   model_nav <- ra_ai_validate_nav(parsed$nav_targets)
   hint_nav <- ra_ai_validate_nav(ra_ai_suggest_nav(question))
-  nav <- ra_ai_merge_nav(model_nav, hint_nav)
+  extra <- ra_ai_structured_fields(parsed, chunks, question, context,
+                                   default_status = if (nrow(chunks) > 0)
+                                     "partial" else "insufficient")
+  tool_nav <- if (exists("ra_ai_tools_as_nav", mode = "function")) {
+    ra_ai_tools_as_nav(extra$recommended_tool_ids)
+  } else {
+    list()
+  }
+  nav <- ra_ai_merge_nav(model_nav, hint_nav, tool_nav)
 
   kinds <- unlist(parsed$claim_kinds)
   if (length(kinds) == 0) kinds <- character()
@@ -370,16 +541,19 @@ ra_ai_answer <- function(question,
     )
   }
 
-  list(
-    ok = TRUE,
-    blocked = FALSE,
-    reason = "answered",
-    answer = answer_txt,
-    claim_kinds = kinds,
-    citations = citations,
-    nav_targets = nav,
-    retrieved = chunks,
-    raw = raw
+  ra_ai_with_structured(
+    list(
+      ok = TRUE,
+      blocked = FALSE,
+      reason = "answered",
+      answer = answer_txt,
+      claim_kinds = kinds,
+      citations = citations,
+      nav_targets = nav,
+      retrieved = chunks,
+      raw = raw
+    ),
+    extra
   )
 }
 

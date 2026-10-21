@@ -37,7 +37,8 @@
     env$.ra_ai_load_dir <- dirname(load_r)
     sys.source(load_r, envir = env, chdir = FALSE, keep.source = FALSE)
     need <- c("ra_ai_index", "ra_ai_diagnose", "ra_ai_print_diagnose",
-              "ra_ai_download_atlantis_manuals")
+              "ra_ai_download_atlantis_manuals",
+              "ra_ai_download_html_manual")
     missing <- need[!vapply(need, exists, logical(1), envir = env,
                             inherits = FALSE)]
     if (length(missing) > 0) {
@@ -128,4 +129,21 @@ download_atlantis_manuals <- function(dest_dir = NULL, overwrite = FALSE) {
   env$ra_ai_download_atlantis_manuals(dest_dir = dest_dir,
                                       overwrite = overwrite,
                                       verbose = TRUE)
+}
+
+##' Download the maintained HTML Atlantis manual into a local corpus dir
+##'
+##' Fetches public HTML pages (index and Part I index) into
+##' \code{RA_AI_CORPUS_DIR}. Nothing is committed. Not used at question
+##' time.
+##'
+##' @param dest_dir Local directory. Default
+##'   \code{file.path(RA_AI_CORPUS_DIR, "AtlantisManual-html")}.
+##' @param overwrite Re-download files that already exist.
+##' @return Invisibly, dest_dir and a file-status table.
+##' @export
+download_atlantis_html_manual <- function(dest_dir = NULL, overwrite = FALSE) {
+  env <- .ra_ai_helpers()
+  env$ra_ai_download_html_manual(dest_dir = dest_dir, overwrite = overwrite,
+                                 verbose = TRUE)
 }

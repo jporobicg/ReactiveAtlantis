@@ -1,4 +1,7 @@
-# Ask Atlantis architecture note
+# Atlantis Scientific Guide architecture note
+
+The Guide is this drawer (formerly labelled Ask Atlantis). See
+`docs/ai/ARCHITECTURE.md` for the full note.
 
 ## What this is
 
@@ -13,7 +16,7 @@ diagnostics.
   `inst/shiny/app.R`.
 - The app is a `bslib::page_navbar` with a left **Run** sidebar
   (`project_store.R`) and these tabs, confirmed in `app.R`:
-  Overview, Compare, Spatial, Consumption, Physics, Multi-run, Predation,
+  Overview, Compare, Ages, Spatial, Consumption, Physics, Multi-run, Predation,
   Food web, Recruitment, Growth, Catch, Feeding, Mortality.
 - Shared run state lives in `project_server()`; each tool is a Shiny module.
 - Selected functional group is per-module (`compare-fg_total`, `predation-fg`,

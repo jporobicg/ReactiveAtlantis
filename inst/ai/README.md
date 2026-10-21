@@ -1,4 +1,4 @@
-# Ask Atlantis (optional local guidance)
+# Atlantis Scientific Guide (optional local guidance)
 
 A small, optional drawer in the unified ReactiveAtlantis app. It answers
 questions from a **local** index (manuals, code, calibration notes) using a
@@ -95,7 +95,7 @@ not switch to a remote API.
 
 ## Evaluation questions
 
-`inst/ai/evaluation/questions.json` is a 24-question set (success, ambiguous,
+`inst/ai/evaluation/questions.json` is a 60–100 question set (success, ambiguous,
 unsupported, adversarial) with expected source types, nav ids, and a 0–2
 rubric. Retrieval-only scoring:
 

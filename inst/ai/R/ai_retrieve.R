@@ -29,8 +29,25 @@ ra_ai_source_weight <- function(source_type) {
          atlantis_code = 1.05,
          manual = 1.00,
          reactive_code = 0.95,
+         knowledge = 0.90,
          calibration = 0.70,
          0.80)
+}
+
+ra_ai_dedup_chunks <- function(rows) {
+  if (is.null(rows) || nrow(rows) < 2) return(rows)
+  keep <- rep(TRUE, nrow(rows))
+  seen <- character()
+  for (i in seq_len(nrow(rows))) {
+    lead <- substring(gsub("\\s+", " ", rows$text[i]), 1, 96)
+    key <- paste(rows$source_id[i], lead, sep = "|")
+    if (key %in% seen) {
+      keep[i] <- FALSE
+    } else {
+      seen <- c(seen, key)
+    }
+  }
+  rows[keep, , drop = FALSE]
 }
 
 ra_ai_cosine <- function(a, b) {
@@ -83,6 +100,7 @@ ra_ai_retrieve <- function(question, index_dir = NULL, config = ra_ai_config(),
                            k = NULL) {
   if (is.null(index_dir)) index_dir <- config$index_dir
   if (is.null(k)) k <- config$max_chunks
+  k <- max(1L, min(6L, as.integer(k)))
   dbfile <- ra_ai_db_file(index_dir)
   if (!file.exists(dbfile)) {
     return(list(
@@ -147,8 +165,26 @@ ra_ai_retrieve <- function(question, index_dir = NULL, config = ra_ai_config(),
   }, numeric(1))
   rows$score <- scores
   rows <- rows[order(rows$score, decreasing = TRUE), , drop = FALSE]
-  if (nrow(rows) > k) rows <- rows[seq_len(k), , drop = FALSE]
+  rows <- ra_ai_dedup_chunks(rows)
+  rows <- ra_ai_select_diverse_chunks(rows, k)
   list(chunks = rows, message = NULL)
+}
+
+##' Keep top-k passages but do not let one source type fill every slot.
+ra_ai_select_diverse_chunks <- function(rows, k) {
+  if (is.null(rows) || nrow(rows) == 0) return(rows)
+  k <- as.integer(k)
+  if (nrow(rows) <= k) return(rows)
+  types <- unique(as.character(rows$source_type))
+  pick <- integer()
+  for (typ in types) {
+    i <- which(as.character(rows$source_type) == typ)[1]
+    if (!is.na(i)) pick <- c(pick, i)
+  }
+  rest <- setdiff(seq_len(nrow(rows)), pick)
+  pick <- unique(c(pick, rest))
+  pick <- pick[seq_len(min(k, length(pick)))]
+  rows[pick, , drop = FALSE]
 }
 
 ra_ai_format_passages <- function(chunks, max_chars = 1200L) {

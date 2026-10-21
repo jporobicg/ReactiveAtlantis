@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "concepts": [
+    {"concept_id": "param-KLP", "name": "KLP", "verified": true, "sources": ["fixture-manuals"], "tool_ids": ["feeding"]},
+    {"concept_id": "param-KUP", "name": "KUP", "verified": true, "sources": ["fixture-manuals"], "tool_ids": ["feeding"]},
+    {"concept_id": "param-C", "name": "C", "verified": true, "sources": ["fixture-manuals", "fixture-atlantis-code"], "tool_ids": ["consumption", "feeding"]},
+    {"concept_id": "param-mL", "name": "mL", "verified": true, "sources": ["fixture-manuals"], "tool_ids": ["mortality"]},
+    {"concept_id": "param-pPREY", "name": "pPREY", "verified": true, "sources": ["fixture-manuals"], "tool_ids": ["feeding", "predation"]},
+    {"concept_id": "param-mum", "name": "mum", "verified": true, "sources": ["fixture-manuals"], "tool_ids": ["consumption", "feeding"]},
+    {"concept_id": "param-KDENR", "name": "KDENR", "verified": true, "sources": ["fixture-manuals"], "tool_ids": ["recruitment"]},
+    {"concept_id": "tracer-ResN", "name": "ResN", "verified": true, "sources": ["reactiveatlantis-local"], "tool_ids": ["overview", "ages", "spatial"]},
+    {"concept_id": "tracer-StructN", "name": "StructN", "verified": true, "sources": ["reactiveatlantis-local"], "tool_ids": ["overview", "ages", "spatial"]},
+    {"concept_id": "file-DietCheck", "name": "DietCheck", "verified": true, "sources": ["reactiveatlantis-local"], "tool_ids": ["predation", "feeding", "foodweb"]}
+  ]
+}

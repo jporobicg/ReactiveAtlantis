@@ -38,10 +38,18 @@ ra_ai_system_prompt <- function() {
     "",
     "Return ONLY a JSON object with keys:",
     "  answer (string),",
+    "  what_is_known (string),",
+    "  possible_explanations (array of strings),",
+    "  suggested_checks (array of strings),",
+    "  recommended_tool_ids (array of allowed tool ids only),",
+    "  citations (array of {chunk_id, source_id} from retrieved passages),",
+    "  limitations (string),",
+    "  evidence_status (supported | partial | insufficient | out_of_scope),",
+    "  follow_up_question (string),",
     "  claim_kinds (array of documented_fact | code_verified |",
     "    calibration_example | hypothesis | insufficient_evidence),",
-    "  citations (array of {chunk_id, source_id}),",
     "  nav_targets (array of {id} using allowed ids only).",
+    "Cite only retrieved passages. Use only allowed tool ids.",
     sep = "\n"
   )
 }
@@ -319,6 +327,19 @@ ra_ai_build_user_prompt <- function(question, passages, context, allowed_nav) {
       ctx_lines,
       paste("Functional group codes mentioned:",
             paste(resolved$labels, collapse = "; "))
+    )
+  }
+  if (length(context$available_roles) > 0) {
+    ctx_lines <- c(
+      ctx_lines,
+      paste("File roles present:",
+            paste(context$available_roles, collapse = ", "))
+    )
+  }
+  if (length(context$run_labels) > 0) {
+    ctx_lines <- c(
+      ctx_lines,
+      paste("Loaded runs:", paste(context$run_labels, collapse = ", "))
     )
   }
   ctx_txt <- if (length(ctx_lines)) {

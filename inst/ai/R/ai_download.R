@@ -202,3 +202,56 @@ ra_ai_download_atlantis_manuals <- function(dest_dir = NULL,
     files = files
   )
 }
+
+##' Fetch the maintained HTML manual pages into the local corpus dir.
+##'
+##' Not used at question time. Pages are not committed. Failures are
+##' recorded; the rest of the app is unaffected.
+ra_ai_download_html_manual <- function(dest_dir = NULL, overwrite = FALSE,
+                                       verbose = TRUE) {
+  if (is.null(dest_dir) || !nzchar(as.character(dest_dir)[1])) {
+    dest_dir <- file.path(ra_ai_default_corpus_dir(), "AtlantisManual-html")
+  }
+  dest_dir <- normalizePath(dest_dir, winslash = "/", mustWork = FALSE)
+  if (!dir.exists(dest_dir)) {
+    dir.create(dest_dir, recursive = TRUE, showWarnings = FALSE)
+  }
+  pages <- list(
+    list(id = "index", url = "https://atlantis-ecosystem-model.github.io/AtlantisManual/",
+         file = "index.html"),
+    list(id = "part1-index",
+         url = "https://atlantis-ecosystem-model.github.io/AtlantisManual/user_guides/quarto_site/part1/",
+         file = "part1-index.html")
+  )
+  rows <- lapply(pages, function(pg) {
+    dest <- file.path(dest_dir, pg$file)
+    status <- "error"
+    err <- NA_character_
+    if (file.exists(dest) && !isTRUE(overwrite)) {
+      status <- "skipped"
+    } else {
+      ok <- tryCatch({
+        ra_ai_http_download(pg$url, dest)
+        TRUE
+      }, error = function(e) {
+        err <<- e$message
+        FALSE
+      })
+      if (isTRUE(ok) && file.exists(dest) && file.size(dest) > 0) {
+        status <- "downloaded"
+      } else if (!isTRUE(ok)) {
+        status <- "error"
+      }
+    }
+    if (isTRUE(verbose)) {
+      message(pg$id, ": ", status, if (!is.na(err)) paste0(" (", err, ")") else "")
+    }
+    data.frame(
+      id = pg$id, url = pg$url, path = dest, status = status,
+      error = err, stringsAsFactors = FALSE
+    )
+  })
+  files <- do.call(rbind, rows)
+  invisible(list(dest_dir = dest_dir, ok = all(files$status %in% c("downloaded", "skipped")),
+                 files = files))
+}

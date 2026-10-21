@@ -3,6 +3,7 @@
 export(catch)
 export(compare)
 export(diagnose_ask_atlantis_index)
+export(download_atlantis_html_manual)
 export(download_atlantis_manuals)
 export(feeding.mat)
 export(food.web)

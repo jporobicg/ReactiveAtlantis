@@ -62,6 +62,13 @@
       "path": "${RA_R_DIR}",
       "version": "package",
       "include": ["*.R"]
+    },
+    {
+      "id": "ra-knowledge",
+      "type": "knowledge",
+      "path": "${RA_AI_DIR}/knowledge",
+      "version": "package",
+      "include": ["**/*.md"]
     }
   ]
 }

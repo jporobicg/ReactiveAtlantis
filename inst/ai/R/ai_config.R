@@ -125,7 +125,7 @@ ra_ai_config <- function() {
     timeout_s = timeout_s,
     health_timeout_s = 2,
     max_history = 12L,
-    max_chunks = 8L,
+    max_chunks = 6L,
     max_chunk_chars = 1200L
   )
 }
@@ -136,4 +136,23 @@ ra_ai_need_pkg <- function(pkg) {
 
 ra_ai_db_file <- function(index_dir = ra_ai_config()$index_dir) {
   file.path(index_dir, "ask-atlantis.sqlite")
+}
+
+##' Locate a file under inst/ai, preferring this checkout over an older install.
+ra_ai_ai_file <- function(...) {
+  rel <- file.path(...)
+  cands <- c(
+    file.path(ra_ai_paths()$ai, rel),
+    file.path(getwd(), "inst", "ai", rel),
+    file.path(getwd(), "ai", rel),
+    file.path(getwd(), "..", "inst", "ai", rel),
+    file.path(getwd(), "..", "..", "inst", "ai", rel)
+  )
+  env <- Sys.getenv("RA_PKG_ROOT", unset = "")
+  if (nzchar(env)) {
+    cands <- c(cands, file.path(env, "inst", "ai", rel), file.path(env, "ai", rel))
+  }
+  hit <- cands[file.exists(cands)]
+  if (length(hit) > 0) return(hit[1])
+  file.path(ra_ai_paths()$ai, rel)
 }

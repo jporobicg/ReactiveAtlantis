@@ -575,3 +575,48 @@ h2, h3, h4, h5 {
 [data-bs-theme="dark"] .ra-ai-close {
   filter: invert(1);
 }
+
+.ra-example-q {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--ra-teal, #1d7874);
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.ra-example-q:hover {
+  color: var(--ra-navy, #0b3c5d);
+}
+
+.ra-msg-section,
+.ra-msg-cautions {
+  margin-top: 0.55rem;
+}
+
+.ra-msg-section ul,
+.ra-msg-cautions ul {
+  margin: 0.25rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.ra-msg-cautions {
+  color: #8a6d1f;
+}
+
+.ra-assistant-failure,
+.ra-msg-failure {
+  border-color: rgba(176, 80, 70, 0.35);
+}
+
+.ra-assistant-failure {
+  color: #8a3a32;
+  font-weight: 600;
+  margin-bottom: 0.4rem;
+}
+
+.ra-msg-followup {
+  margin-top: 0.5rem;
+}

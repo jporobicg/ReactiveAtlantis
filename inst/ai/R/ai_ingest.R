@@ -361,6 +361,22 @@ ra_ai_index <- function(sources_config = NULL, index_dir = NULL,
   ra_ai_store_meta_set(con, "manifest", sources_config)
   ra_ai_store_meta_set(con, "indexed_at",
                        format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"))
+  old_embed <- ra_ai_store_meta_get(con, "embed_model", default = "")
+  new_embed <- as.character(config$embed_model %||% "")[1]
+  embed_reset <- FALSE
+  if (isTRUE(embed) && nzchar(old_embed) && nzchar(new_embed) &&
+      !identical(old_embed, new_embed)) {
+    DBI::dbExecute(con, "DELETE FROM embeddings")
+    ra_ai_store_log(
+      con,
+      paste("Embeddings cleared: model changed from", old_embed, "to", new_embed),
+      NA_character_, "warn"
+    )
+    embed_reset <- TRUE
+  }
+  if (nzchar(new_embed)) {
+    ra_ai_store_meta_set(con, "embed_model", new_embed)
+  }
 
   ignored <- list()
   failures <- list()
@@ -462,6 +478,10 @@ ra_ai_index <- function(sources_config = NULL, index_dir = NULL,
 
   embed_n <- 0L
   embed_err <- NULL
+  if (isTRUE(embed) && isTRUE(embed_reset)) {
+    all_ids <- DBI::dbGetQuery(con, "SELECT chunk_id FROM chunks")$chunk_id
+    all_new_ids <- unique(c(all_new_ids, as.character(all_ids)))
+  }
   if (isTRUE(embed) && length(all_new_ids) > 0) {
     embed_res <- tryCatch(
       ra_ai_embed_chunks(con, all_new_ids, config),

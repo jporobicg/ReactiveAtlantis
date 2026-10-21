@@ -19,8 +19,8 @@ assistant_ui <- function(id) {
       id = ns("fab"),
       class = "ra-ai-fab",
       type = "button",
-      title = "Ask Atlantis",
-      `aria-label` = "Ask Atlantis",
+      title = "Atlantis Scientific Guide",
+      `aria-label` = "Atlantis Scientific Guide",
       `aria-expanded` = "false",
       `aria-controls` = ns("drawer"),
       bubble
@@ -29,20 +29,20 @@ assistant_ui <- function(id) {
       id = ns("drawer"),
       class = "ra-ai-drawer",
       role = "dialog",
-      `aria-label` = "Ask Atlantis",
+      `aria-label` = "Atlantis Scientific Guide",
       `aria-hidden` = "true",
       shiny::div(
         class = "ra-assistant",
         shiny::div(
           class = "ra-assistant-header",
-          shiny::h3("Ask Atlantis"),
+          shiny::h3("Atlantis Scientific Guide"),
           shiny::uiOutput(ns("status_badge"), inline = TRUE),
           shiny::tags$button(
             id = ns("close"),
             class = "ra-ai-close btn-close",
             type = "button",
-            title = "Close Ask Atlantis",
-            `aria-label` = "Close Ask Atlantis"
+            title = "Close Atlantis Scientific Guide",
+            `aria-label` = "Close Atlantis Scientific Guide"
           )
         ),
         shiny::p(
@@ -52,9 +52,26 @@ assistant_ui <- function(id) {
         ),
         shiny::div(
           class = "ra-assistant-starters",
-          shiny::actionLink(ns("starter_what"), "What can Reactive Atlantis do?"),
-          shiny::actionLink(ns("starter_pred"), "Where do I inspect predation?"),
-          shiny::actionLink(ns("starter_rec"), "What should I check when recruitment is low?")
+          lapply(
+            if (exists("ra_ai_example_questions", mode = "function")) {
+              ra_ai_example_questions()
+            } else {
+              c(
+                "What does the Atlantis parameter KLP represent?",
+                "What is pPREY? Is it a diet proportion?",
+                "Where do I inspect predation?",
+                "What should I check when biomass is declining?",
+                "What should I check when recruitment is low?"
+              )
+            },
+            function(q) {
+            shiny::tags$button(
+              type = "button",
+              class = "ra-example-q",
+              `data-ra-q` = q,
+              q
+            )
+          })
         ),
         shiny::div(
           class = "ra-assistant-log",
@@ -76,9 +93,9 @@ assistant_ui <- function(id) {
       )
     ),
     shiny::tags$script(shiny::HTML(sprintf(
-      "(function() {\n  var shellId = '%s', drawerId = '%s', fabId = '%s', closeId = '%s', openInput = '%s';\n  function setOpen(open) {\n    var shell = document.getElementById(shellId);\n    var drawer = document.getElementById(drawerId);\n    var fab = document.getElementById(fabId);\n    if (!drawer || !fab) return;\n    drawer.classList.toggle('is-open', !!open);\n    if (shell) shell.classList.toggle('is-open', !!open);\n    fab.setAttribute('aria-expanded', open ? 'true' : 'false');\n    drawer.setAttribute('aria-hidden', open ? 'false' : 'true');\n    if (window.Shiny && Shiny.setInputValue) {\n      Shiny.setInputValue(openInput, !!open, {priority: 'event'});\n    }\n  }\n  $(document).on('click', '#' + fabId, function(e) {\n    e.preventDefault();\n    var drawer = document.getElementById(drawerId);\n    setOpen(!(drawer && drawer.classList.contains('is-open')));\n  });\n  $(document).on('click', '#' + closeId, function(e) {\n    e.preventDefault();\n    setOpen(false);\n  });\n  $(document).on('keydown', function(e) {\n    if (e.key === 'Escape') setOpen(false);\n  });\n  $(document).on('click', '#' + drawerId + ' .ra-open-tool', function() {\n    Shiny.setInputValue('%s', $(this).attr('data-ra-nav'), {priority: 'event'});\n  });\n  $(document).on('keydown', '#%s textarea', function(e) {\n    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {\n      e.preventDefault();\n      $('#%s').click();\n    }\n  });\n})();\n",
+      "(function() {\n  var shellId = '%s', drawerId = '%s', fabId = '%s', closeId = '%s', openInput = '%s';\n  function setOpen(open) {\n    var shell = document.getElementById(shellId);\n    var drawer = document.getElementById(drawerId);\n    var fab = document.getElementById(fabId);\n    if (!drawer || !fab) return;\n    drawer.classList.toggle('is-open', !!open);\n    if (shell) shell.classList.toggle('is-open', !!open);\n    fab.setAttribute('aria-expanded', open ? 'true' : 'false');\n    drawer.setAttribute('aria-hidden', open ? 'false' : 'true');\n    if (window.Shiny && Shiny.setInputValue) {\n      Shiny.setInputValue(openInput, !!open, {priority: 'event'});\n    }\n  }\n  $(document).on('click', '#' + fabId, function(e) {\n    e.preventDefault();\n    var drawer = document.getElementById(drawerId);\n    setOpen(!(drawer && drawer.classList.contains('is-open')));\n  });\n  $(document).on('click', '#' + closeId, function(e) {\n    e.preventDefault();\n    setOpen(false);\n  });\n  $(document).on('keydown', function(e) {\n    if (e.key === 'Escape') setOpen(false);\n  });\n  $(document).on('click', '#' + drawerId + ' .ra-open-tool', function() {\n    Shiny.setInputValue('%s', $(this).attr('data-ra-nav'), {priority: 'event'});\n  });\n  $(document).on('click', '#' + drawerId + ' .ra-example-q', function() {\n    Shiny.setInputValue('%s', $(this).attr('data-ra-q'), {priority: 'event'});\n  });\n  $(document).on('keydown', '#%s textarea', function(e) {\n    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {\n      e.preventDefault();\n      $('#%s').click();\n    }\n  });\n})();\n",
       ns("shell"), ns("drawer"), ns("fab"), ns("close"), ns("drawer_open"),
-      ns("go_nav"), ns("question"), ns("send")
+      ns("go_nav"), ns("example_q"), ns("question"), ns("send")
     )))
   )
 }
@@ -125,50 +142,12 @@ assistant_server <- function(id, project = NULL, parent_session = NULL) {
             shiny::HTML(ra_ai_safe_html(msg$content))
           )
         } else {
-          nav_btns <- NULL
-          if (length(msg$nav_targets) > 0) {
-            nav_btns <- shiny::div(
-              class = "ra-msg-nav",
-              lapply(msg$nav_targets, function(tgt) {
-                shiny::tags$button(
-                  type = "button",
-                  class = "btn btn-sm btn-outline-primary ra-open-tool",
-                  `data-ra-nav` = tgt$title,
-                  paste("Open", tgt$title)
-                )
-              })
-            )
-          }
-          src <- NULL
-          if (length(msg$citations) > 0) {
-            src <- shiny::tags$details(
-              class = "ra-msg-sources",
-              shiny::tags$summary(paste(length(msg$citations), "sources")),
-              shiny::tags$ul(lapply(msg$citations, function(cit) {
-                loc <- cit$location %||% ""
-                lab <- paste0(
-                  cit$title, " — ", cit$section,
-                  if (nzchar(loc)) paste0(" (", loc, ")") else "",
-                  " [", cit$source_type, "]"
-                )
-                shiny::tags$li(
-                  shiny::span(lab),
-                  shiny::span(class = "ra-muted", paste0(" ", cit$path))
-                )
-              }))
-            )
-          }
-          kinds <- NULL
-          if (length(msg$claim_kinds) > 0) {
-            kinds <- shiny::p(
-              class = "ra-muted ra-msg-kinds",
-              paste("Claim type:", paste(msg$claim_kinds, collapse = ", "))
-            )
-          }
           shiny::div(
-            class = "ra-msg ra-msg-assistant",
-            shiny::HTML(ra_ai_safe_html(msg$content)),
-            nav_btns, src, kinds
+            class = paste(
+              "ra-msg ra-msg-assistant",
+              if (isTRUE(msg$failed)) "ra-msg-failure" else NULL
+            ),
+            ra_ai_render_message(msg)
           )
         }
       })
@@ -217,8 +196,13 @@ assistant_server <- function(id, project = NULL, parent_session = NULL) {
     shiny::observeEvent(pending_tick(), {
       question <- pending_q()
       if (is.null(question) || pending_tick() < 1) return()
-      ctx <- tryCatch(ra_ai_safe_ui_context(parent_input(), project),
-                      error = function(e) list())
+      ctx <- tryCatch({
+        if (exists("ra_ai_session_context", mode = "function")) {
+          ra_ai_session_context(parent_input(), project)
+        } else {
+          ra_ai_safe_ui_context(parent_input(), project)
+        }
+      }, error = function(e) list())
       hist_now <- history()
       if (!is.null(ask_task)) {
         ask_task$invoke(question, hist_now, ctx, config)
@@ -253,6 +237,9 @@ assistant_server <- function(id, project = NULL, parent_session = NULL) {
 
     shiny::observeEvent(input$send, enqueue_question(input$question),
                         ignoreInit = TRUE)
+    shiny::observeEvent(input$example_q, {
+      enqueue_question(input$example_q)
+    }, ignoreInit = TRUE)
     shiny::observeEvent(input$starter_what, {
       enqueue_question("What can Reactive Atlantis do?")
     }, ignoreInit = TRUE)
@@ -290,10 +277,129 @@ ra_ai_commit_result <- function(question, result, history, display, busy) {
     content = result$answer,
     citations = result$citations,
     nav_targets = result$nav_targets,
-    claim_kinds = result$claim_kinds
+    claim_kinds = result$claim_kinds,
+    what_is_known = result$what_is_known,
+    possible_explanations = result$possible_explanations,
+    suggested_checks = result$suggested_checks,
+    recommended_tool_ids = result$recommended_tool_ids,
+    limitations = result$limitations,
+    evidence_status = result$evidence_status,
+    follow_up_question = result$follow_up_question,
+    failed = !isTRUE(result$ok)
   )
   display(items)
   busy(FALSE)
+}
+
+ra_ai_render_message <- function(msg) {
+  nav_btns <- NULL
+  if (length(msg$nav_targets) > 0) {
+    nav_btns <- shiny::div(
+      class = "ra-msg-nav",
+      lapply(msg$nav_targets, function(tgt) {
+        shiny::tags$button(
+          type = "button",
+          class = "btn btn-sm btn-outline-primary ra-open-tool",
+          `data-ra-nav` = tgt$title,
+          paste("Open", tgt$title)
+        )
+      })
+    )
+  }
+  src <- NULL
+  if (length(msg$citations) > 0) {
+    src <- shiny::tags$details(
+      class = "ra-msg-sources",
+      shiny::tags$summary(paste(length(msg$citations), "sources")),
+      shiny::tags$ul(lapply(msg$citations, function(cit) {
+        loc <- cit$location %||% ""
+        typ <- cit$source_type %||% "source"
+        lab <- paste0(
+          cit$title, " — ", cit$section,
+          if (nzchar(loc)) paste0(" (", loc, ")") else "",
+          " [", typ, "]"
+        )
+        shiny::tags$li(
+          shiny::span(lab),
+          shiny::span(class = "ra-muted", paste0(" ", cit$path))
+        )
+      }))
+    )
+  }
+  kinds <- NULL
+  if (length(msg$claim_kinds) > 0 || !is.null(msg$evidence_status)) {
+    bits <- character()
+    if (!is.null(msg$evidence_status) && nzchar(as.character(msg$evidence_status)[1])) {
+      bits <- c(bits, paste("Evidence:", msg$evidence_status))
+    }
+    if (length(msg$claim_kinds) > 0) {
+      bits <- c(bits, paste("Claim type:", paste(msg$claim_kinds, collapse = ", ")))
+    }
+    kinds <- shiny::p(class = "ra-muted ra-msg-kinds", paste(bits, collapse = " · "))
+  }
+  alt <- NULL
+  expl <- as.character(msg$possible_explanations %||% character())
+  if (length(expl) > 0) {
+    alt <- shiny::div(
+      class = "ra-msg-section",
+      shiny::tags$strong("Possible explanations"),
+      shiny::tags$ul(lapply(expl, function(x) shiny::tags$li(x)))
+    )
+  }
+  checks <- as.character(msg$suggested_checks %||% character())
+  inspect <- NULL
+  if (length(checks) > 0 || length(msg$nav_targets) > 0) {
+    inspect <- shiny::div(
+      class = "ra-msg-section",
+      shiny::tags$strong("What to inspect"),
+      if (length(checks) > 0) {
+        shiny::tags$ul(lapply(checks, function(x) shiny::tags$li(x)))
+      },
+      nav_btns
+    )
+    nav_btns <- NULL
+  }
+  caution <- NULL
+  if (!is.null(msg$limitations) && nzchar(as.character(msg$limitations)[1])) {
+    caution <- shiny::div(
+      class = "ra-msg-cautions",
+      shiny::tags$strong("Cautions"),
+      shiny::p(as.character(msg$limitations)[1])
+    )
+  }
+  known <- NULL
+  if (!is.null(msg$what_is_known) && nzchar(as.character(msg$what_is_known)[1])) {
+    known <- shiny::div(
+      class = "ra-msg-section",
+      shiny::tags$strong("What is known"),
+      shiny::p(as.character(msg$what_is_known)[1])
+    )
+  }
+  follow <- NULL
+  fq <- as.character(msg$follow_up_question %||% "")[1]
+  if (nzchar(fq)) {
+    follow <- shiny::div(
+      class = "ra-msg-followup",
+      shiny::tags$button(
+        type = "button",
+        class = "ra-example-q",
+        `data-ra-q` = fq,
+        fq
+      )
+    )
+  }
+  fail <- NULL
+  if (isTRUE(msg$failed)) {
+    fail <- shiny::p(
+      class = "ra-assistant-failure",
+      "The local model or index did not complete this answer. Existing tabs are unaffected."
+    )
+  }
+  shiny::tagList(
+    fail,
+    shiny::HTML(ra_ai_safe_html(msg$content)),
+    known, alt, inspect, caution, src, kinds, follow
+  )
 }
 
 ra_ai_open_tab <- function(title, parent_session) {

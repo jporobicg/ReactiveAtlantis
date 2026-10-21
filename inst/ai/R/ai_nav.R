@@ -43,7 +43,7 @@ ra_ai_nav_catalog <- function() {
         "structural nitrogen (numbers-weighted means), numbers, and biomass."
       ),
       keywords = c("ages", "age class", "cohort", "resn", "structn", "numbers",
-                   "weight", "age structure")
+                   "weight", "age structure", "condition")
     ),
     spatial = list(
       id = "spatial",
@@ -268,6 +268,7 @@ ra_ai_safe_ui_context <- function(input, project = NULL) {
   }
   fg_map <- c(
     Compare = "compare-fg_total",
+    Ages = "ages-fg",
     Spatial = "spatial-fg",
     Consumption = "consumption-fg",
     Predation = "predation-fg",
@@ -275,6 +276,7 @@ ra_ai_safe_ui_context <- function(input, project = NULL) {
     Growth = "growth-fg",
     Catch = "catch-fg",
     Mortality = "mortality-fg",
+    Feeding = "feeding-pred_group",
     `Multi-run` = "ensemble-fg",
     `Food web` = "foodweb-focal_fg"
   )
@@ -287,11 +289,19 @@ ra_ai_safe_ui_context <- function(input, project = NULL) {
     }
   }
   groups <- ra_ai_groups_from_project(project)
-  list(
+  out <- list(
     page = page,
     selected_group = selected_group,
     groups = groups
   )
+  if (exists("ra_ai_file_availability", mode = "function")) {
+    out$file_availability <- ra_ai_file_availability(project)
+    out$available_roles <- names(out$file_availability)[
+      vapply(out$file_availability, isTRUE, logical(1))
+    ]
+    out$run_labels <- ra_ai_run_labels(project)
+  }
+  out
 }
 
 ##' Extract the loaded groups table from a project snapshot or reactive.

@@ -96,8 +96,19 @@ ra_ai_test_transport <- function(method, url, path, body = NULL,
       )
     }
     payload <- jsonlite::toJSON(
-      list(answer = answer, claim_kinds = kinds,
-           citations = citations, nav_targets = nav),
+      list(
+        answer = answer,
+        what_is_known = "Retrieved local passages support the wording above.",
+        possible_explanations = list(),
+        suggested_checks = list(),
+        recommended_tool_ids = vapply(nav, function(x) x$id, character(1)),
+        citations = citations,
+        limitations = "Guidance only. Not a diagnosis of the loaded run.",
+        evidence_status = if ("hypothesis" %in% unlist(kinds)) "partial" else "supported",
+        follow_up_question = "",
+        claim_kinds = kinds,
+        nav_targets = nav
+      ),
       auto_unbox = TRUE
     )
     return(list(

@@ -110,15 +110,16 @@ Time axes use years from the NetCDF time units, not raw seconds or days. Plots
 share `theme_reactiveatlantis()`. Time series use plotly when the view is small
 enough to hover.
 
-## Ask Atlantis (optional)
+## Atlantis Scientific Guide (optional)
 
-An optional **Ask Atlantis** drawer can answer modelling questions from a local
-index and point you at the existing tools above. When enabled, a speech-bubble
+An optional **Atlantis Scientific Guide** drawer (the existing local
+Ask Atlantis stack) can answer modelling questions from a local index
+and point you at the existing tools above. When enabled, a speech-bubble
 button at the bottom-right opens a right-hand drawer from any tab. While a
 reply or index build is in progress the drawer shows **Thinking…**. It is off
 unless you set `RA_AI_ENABLED=true`, install [Ollama](https://ollama.com) on
-the same machine, and build the index. It never calls a cloud LLM. Setup, the
-sources manifest, and troubleshooting are in
+the same machine, and build the index. It never calls a cloud LLM. User and
+maintenance notes are in [`docs/ai/`](docs/ai/). Setup of the index is in
 [`inst/ai/README.md`](inst/ai/README.md). Tests use a clearly marked fixture
 corpus plus this package’s own help. CSIRO user-guide PDFs can be downloaded
 locally (they are not shipped in the package) and indexed with
