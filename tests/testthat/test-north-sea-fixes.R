@@ -1675,7 +1675,23 @@ test_that("Atlantis layer helper masks padded water and names surface/sediment",
   src <- paste(readLines(file.path(root, "inst", "shiny", "modules", "spatial_module.R")),
                collapse = "\n")
   expect_true(grepl("RA_BOX_OUTLINE", src, fixed = TRUE))
-  expect_true(grepl("#1B2833", src, fixed = TRUE))
+  expect_identical(RA_BOX_OUTLINE, "#0A1218")
+  expect_equal(RA_BOX_OUTLINE_WIDTH, 0.5)
+  expect_true(is.function(add_box_outlines))
+  poly <- data.frame(
+    boxid = rep(0:1, each = 4),
+    x = c(0, 1, 1, 0, 1, 2, 2, 1),
+    y = c(0, 0, 1, 1, 0, 0, 1, 1),
+    Biomass = 1
+  )
+  p <- ggplot2::ggplot(poly, ggplot2::aes(x = x, y = y, group = boxid, fill = Biomass)) +
+    ggplot2::geom_polygon(colour = NA)
+  p <- add_box_outlines(p, poly)
+  built <- ggplot2::ggplot_build(p)
+  cols <- toupper(unique(unlist(lapply(built$data, function(d) d$colour))))
+  expect_true("#0A1218" %in% cols)
+  widths <- unique(unlist(lapply(built$data, function(d) d$linewidth)))
+  expect_true(any(abs(widths - 0.5) < 1e-8))
 })
 
 test_that("North Sea and NESP fixtures expose water plus sediment layers", {
