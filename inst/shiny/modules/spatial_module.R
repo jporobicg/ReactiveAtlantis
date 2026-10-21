@@ -2,30 +2,9 @@
 ## ~              Spatial biomass map            ~ ##
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
 
-## Dark ink over a light halo so box edges stay readable on any fill
-## (ggplot linewidth is millimetres; 0.5 mm is about 0.4–0.6 mm).
+## Darker than the fill and the sand theme so box edges stay visible.
+## Line weight is unchanged (same as the previous hairline stroke).
 RA_BOX_OUTLINE <- "#0A1218"
-RA_BOX_OUTLINE_HALO <- "#F7F4EC"
-RA_BOX_OUTLINE_WIDTH <- 0.5
-
-add_box_outlines <- function(p, poly) {
-  p <- p + ggplot2::geom_polygon(
-    data = poly,
-    mapping = ggplot2::aes(x = x, y = y, group = boxid),
-    fill = NA,
-    colour = RA_BOX_OUTLINE_HALO,
-    linewidth = RA_BOX_OUTLINE_WIDTH + 0.2,
-    inherit.aes = FALSE
-  )
-  p + ggplot2::geom_polygon(
-    data = poly,
-    mapping = ggplot2::aes(x = x, y = y, group = boxid),
-    fill = NA,
-    colour = RA_BOX_OUTLINE,
-    linewidth = RA_BOX_OUTLINE_WIDTH,
-    inherit.aes = FALSE
-  )
-}
 
 spatial_ui <- function(id) {
   ns <- NS(id)
@@ -119,13 +98,12 @@ spatial_server <- function(id, project = NULL) {
       info <- layer_info()
       lay_lab <- layer_label(info, layer_d())
       p <- ggplot2::ggplot(poly, ggplot2::aes(x = x, y = y, group = boxid, fill = Biomass))
-      p <- p + ggplot2::geom_polygon(colour = NA)
+      p <- p + ggplot2::geom_polygon(colour = RA_BOX_OUTLINE, linewidth = 0.25)
       p <- p + ggplot2::coord_equal()
       fill_args <- list(low = "#F7F4EC", high = unname(pal[1]),
                         na.value = "#E6E2D6", name = "Biomass (t)")
       if (!is.null(fill_lim)) fill_args$limits <- fill_lim
       p <- p + do.call(ggplot2::scale_fill_gradient, fill_args)
-      p <- add_box_outlines(p, poly)
       if (isTRUE(input$highlight_boundary) && any(poly$boundary)) {
         bnd <- poly[poly$boundary, ]
         p <- p + ggplot2::geom_polygon(
