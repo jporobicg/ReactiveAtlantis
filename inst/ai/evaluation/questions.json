@@ -1202,6 +1202,60 @@
         ]
       },
       "rubric_notes": "Repeat of q01 for ranking stability."
+    },
+    {
+      "id": "q91",
+      "kind": "success",
+      "question": "Where is expected predation pressure shown?",
+      "expect": {
+        "in_scope": true,
+        "source_types": [
+          "reactive_code",
+          "manual"
+        ],
+        "must_cite": true,
+        "nav_ids": [
+          "feeding"
+        ],
+        "must_not_invent_numbers": true
+      },
+      "rubric_notes": "Feeding tab, Predation pressure view. pPREY-shaped matrix of implied prey loss at t0."
+    },
+    {
+      "id": "q92",
+      "kind": "success",
+      "question": "Which Atlantis equation does the Feeding predation pressure view use?",
+      "expect": {
+        "in_scope": true,
+        "source_types": [
+          "manual",
+          "atlantis_code"
+        ],
+        "must_cite": true,
+        "nav_ids": [
+          "feeding"
+        ],
+        "must_not_invent_numbers": true
+      },
+      "rubric_notes": "Modified Holling Type II: I = C A / (1 + C/mum sum(E B*)). Cite User Guide Part I 10.2 / Table 18 or fixture_holling_type_ii."
+    },
+    {
+      "id": "q93",
+      "kind": "success",
+      "question": "Is KDENR used when computing expected predation pressure?",
+      "expect": {
+        "in_scope": true,
+        "source_types": [
+          "manual"
+        ],
+        "must_cite": true,
+        "nav_ids": [
+          "feeding",
+          "recruitment"
+        ],
+        "must_not_invent_numbers": true
+      },
+      "rubric_notes": "KDENR is recruitment, not a feeding refuge. Pressure view does not apply it."
     }
   ]
 }

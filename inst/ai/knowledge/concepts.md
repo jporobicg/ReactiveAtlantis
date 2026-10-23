@@ -55,7 +55,16 @@ mum” as a universal fix.
 KDENR is a recruitment-related density parameter used with the
 stock-recruit relationship. If KDENR or Beverton-Holt alpha/beta
 starve the curve, YOY can fall after a lag. Inspect Recruitment.
-Do not treat a single KDENR direction as a rule.
+Do not treat a single KDENR direction as a rule. KDENR is not a
+feeding term in the current User Guide.
+
+## predcase and expected predation pressure
+
+predcase_XXX chooses Holling Type II (0), Type I (1) or Type III (2).
+The Feeding tab Predation pressure view fills a pPREY-shaped matrix
+with the implied prey-biomass loss rate at t0 from C, mum, E, gape
+and the initial-conditions NetCDF. That is not a DietCheck
+proportion.
 
 ## ResN and StructN
 

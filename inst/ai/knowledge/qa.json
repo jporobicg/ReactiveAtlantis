@@ -16,6 +16,13 @@
       "sources": ["fixture-manuals"]
     },
     {
+      "qa_id": "qa-predation-pressure",
+      "question": "Where is expected predation pressure?",
+      "status": "confirmed",
+      "tool_ids": ["feeding"],
+      "sources": ["fixture-manuals", "reactiveatlantis-local"]
+    },
+    {
       "qa_id": "qa-ml",
       "question": "Is mL fishing mortality?",
       "status": "confirmed",

@@ -156,12 +156,15 @@ ra_ai_nav_catalog <- function() {
         "Full pPREY matrix; hover a cell for value and group names with age;",
         "click to set predator and prey dropdowns and highlight the row/column;",
         "bar charts of the selected predator row and prey column.",
-        "Realised DietCheck proportion and consumed biomass for the same pair.",
-        "Diagnostics and compare stay as secondary views."
+        "Predation pressure view: the same matrix filled with expected prey",
+        "loss per day from the Atlantis Holling equations at t0 (C, mum, E,",
+        "predcase, KLP/KUP, init.nc). Realised DietCheck and consumed biomass",
+        "for the same pair. Diagnostics and compare stay as secondary views."
       ),
       keywords = c("feeding", "pprey", "gape", "availability", "preference",
                    "klp", "kup", "starv", "mum", "dietcheck", "diet",
-                   "realised diet", "consumed")
+                   "realised diet", "consumed", "predation pressure",
+                   "holling", "predcase")
     ),
     mortality = list(
       id = "mortality",

@@ -13,6 +13,7 @@ feeding_ui <- function(id) {
           ns("view_type"), "View",
           choices = c(
             "pPREY matrix" = "matrix",
+            "Predation pressure" = "pressure",
             "Diagnostics" = "diagnostics",
             "Compare edited vs original" = "compare"
           ),
@@ -32,7 +33,24 @@ feeding_ui <- function(id) {
                     selected = "1"),
         textOutput(ns("cell_info")),
         p(class = "ra-muted",
-          "The full pPREY matrix stays on screen. Hover a cell for the value and groups. Click a cell to set these dropdowns and highlight that row and column."),
+          "The full matrix stays on screen. Hover a cell for the value and groups. Click a cell to set these dropdowns and highlight that row and column."),
+        conditionalPanel(
+          "input.view_type == 'pressure'", ns = ns,
+          tags$hr(),
+          tags$strong("Expected pressure"),
+          selectInput(
+            ns("pressure_metric"), "Cell value",
+            choices = c(
+              "Prey loss fraction / day" = "frac_day",
+              "Consumption (t / day)" = "t_day",
+              "Prey loss fraction / year" = "frac_year"
+            ),
+            selected = "frac_day"
+          ),
+          selectInput(ns("pressure_box"), "Boxes", choices = c("All boxes" = "all")),
+          p(class = "ra-muted",
+            "Holling Type I/II/III from biology.prm (C, mum, E, predcase, KLP/KUP) and t0 biomass in the init NetCDF. System-wide sums per-box calculations.")
+        ),
         conditionalPanel(
           "input.view_type == 'diagnostics'", ns = ns,
           tags$hr(),
@@ -56,11 +74,14 @@ feeding_ui <- function(id) {
         )
       ),
       conditionalPanel(
-        "input.view_type == 'matrix'", ns = ns,
-        p(class = "ra-muted",
-          "Every predator x prey cell is drawn, including zeros. Scroll or zoom if the matrix is large."),
+        "input.view_type == 'matrix' || input.view_type == 'pressure'", ns = ns,
+        uiOutput(ns("matrix_caption")),
         div(class = "ra-scroll-plot",
             plotly::plotlyOutput(ns("feeding_plot_gg"), height = "720px")),
+        conditionalPanel(
+          "input.view_type == 'pressure'", ns = ns,
+          p(class = "ra-muted", textOutput(ns("pressure_note"), inline = TRUE))
+        ),
         fluidRow(
           column(6, plotOutput(ns("diet_prop_plot"), height = "280px")),
           column(6, plotOutput(ns("consumed_plot"), height = "280px"))
@@ -94,6 +115,16 @@ feeding_server <- function(id, project = NULL) {
     )
 
     output$banner <- renderUI(tool_banner(ps(), "feeding"))
+
+    output$matrix_caption <- renderUI({
+      if (identical(input$view_type, "pressure")) {
+        p(class = "ra-muted",
+          "Every predator x prey cell is the expected predation pressure from the Atlantis feeding equations at t0. Hover for consumption (t/day) and prey loss. Click to select.")
+      } else {
+        p(class = "ra-muted",
+          "Every predator x prey cell is drawn, including zeros. Scroll or zoom if the matrix is large.")
+      }
+    })
 
     pprey_mat <- reactive({
       dat <- ps()$data
@@ -133,6 +164,38 @@ feeding_server <- function(id, project = NULL) {
         rv$original_key <- key
         rv$edit_msg <- ""
       }
+    })
+
+    pressure_built <- reactive({
+      req(identical(input$view_type, "pressure"))
+      ava <- current_mat()
+      req(ava)
+      dat <- tryCatch(ensure_project_data(ps(), "nc_init"), error = function(e) NULL)
+      if (is.null(dat)) dat <- ps()$data
+      grp <- dat$grp
+      prm <- dat$prm_bio
+      paths <- tryCatch(normalize_paths(ps()$paths), error = function(e) empty_paths())
+      if (!is.null(dat$paths)) {
+        dp <- tryCatch(normalize_paths(dat$paths), error = function(e) NULL)
+        if (!is.null(dp) && path_ok(dp$init_nc)) paths$init_nc <- dp$init_nc
+      }
+      box <- if (is.null(input$pressure_box)) "all" else input$pressure_box
+      ra_progress("Expected predation pressure", {
+        expected_predation_pressure(
+          ava, grp, prm, paths$init_nc, box = box, time_i = 1L
+        )
+      })
+    })
+
+    observe({
+      press <- tryCatch(pressure_built(), error = function(e) NULL)
+      n_box <- if (is.null(press)) 0L else as.integer(press$n_box)
+      ch <- c("All boxes" = "all")
+      if (is.finite(n_box) && n_box > 0) {
+        ids <- as.character(seq_len(n_box) - 1L)
+        ch <- c(ch, stats::setNames(ids, paste("Box", ids)))
+      }
+      update_select_keep(session, "pressure_box", ch, input$pressure_box)
     })
 
     current_mat <- reactive({
@@ -218,9 +281,24 @@ feeding_server <- function(id, project = NULL) {
 
     output$cell_info <- renderText({
       ava <- current_mat()
-      if (is.null(ava)) return("Load biology.prm to show the pPREY matrix.")
+      if (is.null(ava)) return("Load biology.prm to show the matrix.")
       sel <- tryCatch(selected_cell(), error = function(e) NULL)
+      if (identical(input$view_type, "pressure")) {
+        press <- tryCatch(pressure_built(), error = function(e) NULL)
+        if (is.null(press) || is.null(press$prey_loss_frac_day)) {
+          return("Load initial conditions to compute expected predation pressure.")
+        }
+        return(pprey_cell_info_text(press$prey_loss_frac_day, sel, feed_grp(),
+                                   value_label = "Pressure / day"))
+      }
       pprey_cell_info_text(ava, sel, feed_grp())
+    })
+
+    output$pressure_note <- renderText({
+      if (!identical(input$view_type, "pressure")) return("")
+      press <- tryCatch(pressure_built(), error = function(e) NULL)
+      if (is.null(press)) return(pressure_equation_note())
+      paste(press$notes, pressure_equation_note())
     })
 
     observeEvent(plotly::event_data("plotly_click", source = ns("feed_mat")), {
@@ -264,6 +342,15 @@ feeding_server <- function(id, project = NULL) {
       msg
     })
 
+    display_mat <- reactive({
+      ava <- current_mat()
+      if (!identical(input$view_type, "pressure")) return(ava)
+      press <- tryCatch(pressure_built(), error = function(e) NULL)
+      metric <- if (is.null(input$pressure_metric)) "frac_day" else input$pressure_metric
+      mat <- pressure_metric_matrix(press, metric)
+      if (is.null(mat)) ava else mat
+    })
+
     output$feeding_plot_gg <- plotly::renderPlotly({
       ava <- current_mat()
       if (is.null(ava) || !is.matrix(ava) || nrow(ava) == 0) {
@@ -275,7 +362,24 @@ feeding_server <- function(id, project = NULL) {
         return(plt)
       }
       sel <- tryCatch(selected_cell(), error = function(e) NULL)
-      plt <- plot_feed_matrix_plotly(ava, sel, feed_grp())
+      if (identical(input$view_type, "pressure")) {
+        press <- tryCatch(pressure_built(), error = function(e) NULL)
+        metric <- if (is.null(input$pressure_metric)) "frac_day" else input$pressure_metric
+        z <- pressure_metric_matrix(press, metric)
+        if (is.null(z)) z <- ava * 0
+        hover <- if (is.null(press)) NULL else pressure_hover_text(ava, press, feed_grp())
+        plt <- plot_feed_matrix_plotly(
+          z, sel, feed_grp(), hover = hover,
+          title = paste0(pressure_metric_label(metric), " — ",
+                         nrow(z), " predators x ", ncol(z), " prey"),
+          colorbar = switch(as.character(metric),
+                            t_day = "t / day",
+                            frac_year = "/ year",
+                            "/ day")
+        )
+      } else {
+        plt <- plot_feed_matrix_plotly(ava, sel, feed_grp())
+      }
       if (ra_is_plotly(plt)) {
         plt$x$source <- ns("feed_mat")
         tryCatch(plotly::event_register(plt, "plotly_click"), error = function(e) plt)
@@ -285,31 +389,54 @@ feeding_server <- function(id, project = NULL) {
 
     output$pred_bars <- renderPlot({
       plot_or_message("Select a predator group and adult/juvenile", {
-        ava <- current_mat()
-        req(ava)
+        mat <- display_mat()
+        req(mat)
         if (pprey_is_none(input$pred_group)) {
           return(ggplot2::ggplot() +
                    ggplot2::labs(title = "Select a predator (or click a matrix cell)") +
                    theme_reactiveatlantis())
         }
-        df <- pprey_one_group(ava, "predator", input$pred_group, input$pred_stage,
+        df <- pprey_one_group(mat, "predator", input$pred_group, input$pred_stage,
                               feed_grp())
-        plot_pprey_one_group(df)
+        ylab <- if (identical(input$view_type, "pressure")) {
+          pressure_metric_label(input$pressure_metric)
+        } else {
+          "pPREY"
+        }
+        if (identical(input$view_type, "pressure")) {
+          ttl <- attr(df, "title")
+          if (is.null(ttl)) ttl <- ""
+          attr(df, "title") <- sub("Prey preferences", "Pressure from", ttl, fixed = TRUE)
+          if (!nzchar(attr(df, "title"))) {
+            attr(df, "title") <- "Pressure from the selected predator"
+          }
+        }
+        plot_pprey_one_group(df, ylab = ylab)
       })
     })
 
     output$prey_bars <- renderPlot({
       plot_or_message("Select a prey group and adult/juvenile", {
-        ava <- current_mat()
-        req(ava)
+        mat <- display_mat()
+        req(mat)
         if (pprey_is_none(input$prey_group)) {
           return(ggplot2::ggplot() +
                    ggplot2::labs(title = "Select a prey (or click a matrix cell)") +
                    theme_reactiveatlantis())
         }
-        df <- pprey_one_group(ava, "prey", input$prey_group, input$prey_stage,
+        df <- pprey_one_group(mat, "prey", input$prey_group, input$prey_stage,
                               feed_grp())
-        plot_pprey_one_group(df)
+        ylab <- if (identical(input$view_type, "pressure")) {
+          pressure_metric_label(input$pressure_metric)
+        } else {
+          "pPREY"
+        }
+        if (identical(input$view_type, "pressure")) {
+          ttl <- attr(df, "title")
+          if (is.null(ttl)) ttl <- ""
+          attr(df, "title") <- sub("Predators of", "Pressure on", ttl, fixed = TRUE)
+        }
+        plot_pprey_one_group(df, ylab = ylab)
       })
     })
 
@@ -439,6 +566,45 @@ feeding_server <- function(id, project = NULL) {
         }
         return(ra_datatable(ch, options = list(pageLength = 10, dom = "tip")))
       }
+      if (identical(input$view_type, "pressure")) {
+        press <- tryCatch(pressure_built(), error = function(e) NULL)
+        if (is.null(press) || is.null(press$cells)) {
+          return(ra_datatable(data.frame(
+            Note = "Load biology.prm, groups and init.nc to compute expected predation pressure."
+          )))
+        }
+        sel <- tryCatch(selected_cell(), error = function(e) NULL)
+        tab <- pressure_cell_detail(press, sel)
+        if (is.null(tab) || nrow(tab) == 0) {
+          tab <- pressure_flag_table(press)
+        }
+        cmp <- tryCatch({
+          dat <- ensure_diet(ps()$data, ps()$paths)
+          diet <- if (!is.null(dat$diet_full)) dat$diet_full else dat$diet_time
+          pressure_vs_dietcheck(press, diet, input$pred_group, input$prey_group)
+        }, error = function(e) NULL)
+        if (!is.null(cmp) && nrow(cmp) > 0 &&
+            !pprey_is_none(input$pred_group) && !pprey_is_none(input$prey_group)) {
+          extra <- data.frame(
+            Predator_row = cmp$Source,
+            Pred_code = input$pred_group,
+            Pred_stage = "",
+            Prey = input$prey_group,
+            Prey_stage = "",
+            pPREY = NA_real_,
+            Gape = NA_real_,
+            predcase = NA_integer_,
+            Consumption_t_day = NA_real_,
+            Prey_loss_frac_day = cmp$Value,
+            Prey_loss_frac_year = NA_real_,
+            Prey_tonnes = NA_real_,
+            Flag = cmp$Note,
+            stringsAsFactors = FALSE
+          )
+          tab <- rbind(tab, extra)
+        }
+        return(ra_datatable(tab, options = list(pageLength = 10, dom = "tip")))
+      }
       ra_datatable(data.frame(
         Note = "Hover a cell for pPREY and group names. Click to select that predator and prey."
       ))
@@ -446,6 +612,7 @@ feeding_server <- function(id, project = NULL) {
 
     keep_outputs_alive(output, "banner")
     keep_outputs_alive(output, "feeding_plot_gg")
+    keep_outputs_alive(output, "matrix_caption")
   })
 }
 
@@ -971,7 +1138,7 @@ pprey_axis_labels <- function(meta, grp = NULL) {
   )
 }
 
-pprey_hover_text <- function(mat, grp = NULL) {
+pprey_hover_text <- function(mat, grp = NULL, value_label = "pPREY") {
   if (is.null(mat) || !is.matrix(mat)) {
     return(matrix(character(), 0, 0))
   }
@@ -986,7 +1153,7 @@ pprey_hover_text <- function(mat, grp = NULL) {
       val <- mat[i, j]
       lab <- if (is.finite(val)) as.character(signif(val, 4)) else "NA"
       out[i, j] <- paste0(
-        "pPREY: ", lab,
+        value_label, ": ", lab,
         "<br>Predator: ", pred_lab[i], " - ", tolower(pred_st[i]),
         "<br>Prey: ", prey_lab[j], " - ", tolower(prey_st[i])
       )
@@ -1038,13 +1205,13 @@ pprey_selection_from_click <- function(mat, y_label, x_label, grp = NULL) {
   )
 }
 
-pprey_cell_info_text <- function(mat, sel, grp = NULL) {
+pprey_cell_info_text <- function(mat, sel, grp = NULL, value_label = "pPREY") {
   if (is.null(mat) || !is.matrix(mat)) return("Load biology.prm to show the pPREY matrix.")
   if (is.null(sel) || (length(sel$row_i) == 0 && length(sel$col_i) == 0)) {
     return("Hover a cell for its value. Click to select predator and prey.")
   }
   if (length(sel$row_i) == 1 && length(sel$col_i) >= 1) {
-    txt <- pprey_hover_text(mat, grp)[sel$row_i[1], sel$col_i[1]]
+    txt <- pprey_hover_text(mat, grp, value_label = value_label)[sel$row_i[1], sel$col_i[1]]
     return(gsub("<br>", " | ", txt, fixed = TRUE))
   }
   bits <- character()
@@ -1101,7 +1268,9 @@ read_pprey_matrix <- function(text) {
   mat
 }
 
-plot_feed_matrix_plotly <- function(mat, sel = NULL, grp = NULL) {
+plot_feed_matrix_plotly <- function(mat, sel = NULL, grp = NULL,
+                                    hover = NULL, title = NULL,
+                                    colorbar = "pPREY") {
   if (is.null(mat) || !is.matrix(mat) || !requireNamespace("plotly", quietly = TRUE)) {
     p <- ggplot2::ggplot() +
       ggplot2::labs(title = "pPREY matrix") +
@@ -1114,7 +1283,7 @@ plot_feed_matrix_plotly <- function(mat, sel = NULL, grp = NULL) {
   meta <- parse_pprey_rownames(rownames(mat))
   y_lab <- pprey_axis_labels(meta, grp)
   x_lab <- pprey_group_label(colnames(mat), grp)
-  hover <- pprey_hover_text(mat, grp)
+  if (is.null(hover)) hover <- pprey_hover_text(mat, grp)
   z <- mat
   z[!is.finite(z)] <- NA
   ## Keep zeros. First predator row at the top (heatmap otherwise starts at bottom).
@@ -1132,7 +1301,7 @@ plot_feed_matrix_plotly <- function(mat, sel = NULL, grp = NULL) {
     zmin = 0,
     hoverinfo = "text",
     text = h_ord,
-    colorbar = list(title = "pPREY"),
+    colorbar = list(title = colorbar),
     xgap = 1, ygap = 1,
     width = sz$width,
     height = sz$height
@@ -1179,8 +1348,12 @@ plot_feed_matrix_plotly <- function(mat, sel = NULL, grp = NULL) {
   plt <- plotly::layout(
     plt,
     title = list(
-      text = paste0("Availability matrix (pPREY) — ",
-                    nrow(mat), " predators x ", ncol(mat), " prey"),
+      text = if (!is.null(title) && nzchar(as.character(title)[1])) {
+        as.character(title)[1]
+      } else {
+        paste0("Availability matrix (pPREY) — ",
+               nrow(mat), " predators x ", ncol(mat), " prey")
+      },
       font = list(size = 14)
     ),
     xaxis = list(
@@ -1288,7 +1461,7 @@ pprey_one_group <- function(mat, direction, group, stage, grp = NULL) {
   df
 }
 
-plot_pprey_one_group <- function(df) {
+plot_pprey_one_group <- function(df, ylab = "pPREY") {
   if (is.null(df) || nrow(df) == 0) {
     return(ggplot2::ggplot() +
              ggplot2::labs(title = "No preferences for that group and stage") +
@@ -1303,7 +1476,8 @@ plot_pprey_one_group <- function(df) {
   ttl <- attr(df, "title")
   if (is.null(ttl) || !nzchar(as.character(ttl)[1])) ttl <- "One-group preferences"
   xl <- attr(df, "xlab")
-  p <- p + ggplot2::labs(title = ttl, x = xl, y = "pPREY")
+  if (is.null(ylab) || !nzchar(as.character(ylab)[1])) ylab <- "pPREY"
+  p <- p + ggplot2::labs(title = ttl, x = xl, y = ylab)
   p <- p + theme_reactiveatlantis()
   p
 }

@@ -15,6 +15,20 @@ Documented sequence in this fixture:
 3. Draw from the remaining prey biomass using clearance.
 4. Cap intake at the maximum daily ration.
 
+The Feeding tab Predation pressure view uses the modified Holling
+forms from User Guide Part I chapter 10.2 (Consumer feeding),
+section 10.2.2 (C and mum), Table 18 (predcase 0/1/2) and
+section 10.2.5 (size refuge). Those names also appear with
+`box_bio_process` in atecology/atbiology.c. The Type II term is
+
+    B*_j = pPREY * prey * gape
+    I = C * A / (1 + C/mum * sum(E * B*))
+    Gr_j = I * predator_scale * (B*_j / A)
+
+with predator_scale = numbers when flagfishrates = 0 and predator
+mg N when flagfishrates = 1. KDENR is a recruitment parameter in
+the current manuals and is not applied to feeding.
+
 Where this fixture disagrees with versioned code, report both and do not
 invent a reconciliation.
 

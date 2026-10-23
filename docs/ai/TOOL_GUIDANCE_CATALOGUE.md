@@ -144,16 +144,20 @@ runs before any language-model call.
 ## feeding
 
 - purpose: Full pPREY matrix with hover/click and row/column bars;
-  realised DietCheck and consumed biomass for the selected pair;
-  diagnostics; edited-vs-original compare.
-- views: `matrix`, `diagnostics`, `compare`.
-- example questions: What is pPREY? What does KLP mean?
+  expected predation pressure (Holling t0 matrix); realised DietCheck
+  and consumed biomass for the selected pair; diagnostics;
+  edited-vs-original compare.
+- views: `matrix`, `pressure`, `diagnostics`, `compare`.
+- example questions: What is pPREY? What does KLP mean? Where is
+  expected predation pressure?
 - preconditions: Groups, biology prm, initial-conditions NetCDF.
 - navigation_target: Feeding
 - look for: pPREY > 0 with zero gape overlap; uneaten prey; DietCheck
-  mismatch.
-- limitations: pPREY is availability, not realised diet. In-session
-  edits are not written to the prm file by the Guide.
+  mismatch; pressure cells where implied prey loss exceeds 5% per day.
+- limitations: pPREY is availability, not realised diet. Expected
+  pressure is a t0 diagnostic (User Guide Part I §10.2), not DietCheck.
+  KDENR is recruitment, not feeding. In-session edits are not written
+  to the prm file by the Guide.
 
 ## mortality
 

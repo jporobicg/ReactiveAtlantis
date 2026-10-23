@@ -19,6 +19,13 @@ stock is zero. Status: confirmed against `spatial_module.R` and
 Availability, not a diet proportion. See Feeding for the matrix and
 Predation for DietCheck. Status: confirmed (fixture parameters.md).
 
+## Where is expected predation pressure? (confirmed)
+
+Feeding tab, view Predation pressure. The heatmap is the same
+pPREY layout; cells are implied prey-biomass loss per day from
+the Holling equations at t0 (C, mum, E, predcase, KLP/KUP, init.nc).
+KDENR is not used. Status: confirmed against `predation_pressure.R`.
+
 ## Is mL fishing mortality? (confirmed)
 
 No. mL is linear natural mortality. Use the Mortality tab for

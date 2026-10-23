@@ -111,8 +111,8 @@ Expected: Feeding diagnostics flag mismatch or uneaten prey;
 Predation shows a different top prey. Counter: both views agree and
 the surprise is ecological.
 
-Checks: Feeding (matrix, diagnostics); Predation; Food web;
-Consumption.
+Checks: Feeding (matrix, predation pressure, diagnostics); Predation;
+Food web; Consumption.
 
 What not to conclude: that pPREY is a diet proportion, or that one
 cell should be raised as a rule.
@@ -133,7 +133,7 @@ Counter: predation stack is small and fishing or recruitment
 explains the prey drop.
 
 Checks: Predation (predator and prey views); Mortality; Compare for
-the predator; Feeding; Spatial.
+the predator; Feeding (predation pressure matrix); Spatial.
 
 What not to conclude: that pPREY must be reduced. Check overlap and
 biomass first.

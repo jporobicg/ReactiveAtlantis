@@ -77,7 +77,7 @@
       "hypotheses": [
         {"id": "availability", "expected": "Feeding diagnostics show mismatch or zero overlap.", "counter": "Feeding and Predation agree."}
       ],
-      "checks": ["Feeding matrix and diagnostics", "Predation", "Food web", "Consumption"],
+      "checks": ["Feeding matrix, predation pressure and diagnostics", "Predation", "Food web", "Consumption"],
       "interpretation": "pPREY is availability, not realised diet.",
       "what_not_to_conclude": "That a single pPREY cell should be raised as a rule.",
       "tool_ids": ["feeding", "predation", "foodweb", "consumption"],
@@ -92,7 +92,7 @@
       "hypotheses": [
         {"id": "predators", "expected": "Predation and the predation mortality stack rise together.", "counter": "Predation stack is small."}
       ],
-      "checks": ["Predation", "Mortality", "Compare for the predator", "Feeding", "Spatial"],
+      "checks": ["Predation", "Mortality", "Compare for the predator", "Feeding predation pressure", "Spatial"],
       "interpretation": "High predation can be predator biomass, overlap, or pPREY.",
       "what_not_to_conclude": "That pPREY must be reduced.",
       "tool_ids": ["predation", "mortality", "compare", "feeding", "spatial"],

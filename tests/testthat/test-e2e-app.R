@@ -177,6 +177,15 @@ test_that("folder load fills every tab with a bound plot or table", {
                 nchar(app$get_html("#feeding-consumed_plot")) > 20)
   save_shot(app, shot_dir, "13b_feeding_realised")
 
+  try(app$set_inputs(`feeding-view_type` = "pressure",
+                     `feeding-pressure_metric` = "frac_day",
+                     `feeding-pred_group` = "COD", `feeding-prey_group` = "PHY",
+                     wait_ = FALSE), silent = TRUE)
+  app$wait_for_idle(timeout = 40000)
+  expect_true(has_bound_output(app$get_html("#feeding-feeding_plot_gg")) ||
+                nchar(app$get_html("#feeding-feeding_plot_gg")) > 40)
+  save_shot(app, shot_dir, "13c_feeding_pressure")
+
   expect_true(click_nav(app, "Spatial"))
   app$set_inputs(`spatial-view` = "overlap", `spatial-fg` = "COD",
                  `spatial-prey` = "PHY", `spatial-ts_scope` = "system",
@@ -361,6 +370,13 @@ test_that("North Sea real names load COD into every group tab", {
   expect_true(plot_is_real(app$get_html("#feeding-feeding_plot_gg")) ||
                 nchar(app$get_html("#feeding-pred_bars")) > 20)
   save_shot(app, shot_dir, "ns_11_feeding_matrix")
+
+  try(app$set_inputs(`feeding-view_type` = "pressure",
+                     `feeding-pressure_metric` = "frac_day",
+                     `feeding-pred_group` = "COD", `feeding-prey_group` = "PHD",
+                     wait_ = FALSE), silent = TRUE)
+  app$wait_for_idle(timeout = 60000)
+  save_shot(app, shot_dir, "ns_11_feeding_pressure")
 
   try(app$set_inputs(`feeding-view_type` = "diagnostics", wait_ = FALSE), silent = TRUE)
   app$wait_for_idle(timeout = 40000)
@@ -674,6 +690,13 @@ test_that("fresh install draws Spatial map and full pPREY for a NESP-style pair"
                      wait_ = FALSE), silent = TRUE)
   app$wait_for_idle(timeout = 40000)
   save_shot(app, shot_dir, "fresh_install_feeding_realised")
+
+  try(app$set_inputs(`feeding-view_type` = "pressure",
+                     `feeding-pressure_metric` = "frac_day",
+                     `feeding-pred_group` = "COD", `feeding-prey_group` = "PHD",
+                     wait_ = FALSE), silent = TRUE)
+  app$wait_for_idle(timeout = 60000)
+  save_shot(app, shot_dir, "fresh_install_feeding_pressure")
 
   expect_true(click_nav(app, "Spatial"))
   app$set_inputs(`spatial-view` = "overlap", `spatial-fg` = "COD",

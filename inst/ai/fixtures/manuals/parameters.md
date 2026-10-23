@@ -48,5 +48,13 @@ Feeding before changing mum.
 ## KDENR
 
 KDENR is a recruitment-related density parameter used with the stock-recruit
-relationship. If KDENR or the Beverton-Holt alpha/beta settings starve the
-curve, YOY can crash after a lag. Inspect the Recruitment tab.
+relationship (User Guide Part I, recruitment chapter: arriving recruits or
+offspring per individual). It is not a feeding refuge. If KDENR or the
+Beverton-Holt alpha/beta settings starve the curve, YOY can crash after a
+lag. Inspect the Recruitment tab.
+
+## predcase
+
+predcase selects the feeding functional response. 0 is modified Holling
+Type II, 1 is Type I (bilinear), 2 is Type III (squared prey). The Feeding
+Predation pressure view reads predcase_XXX from the biology prm.

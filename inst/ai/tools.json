@@ -230,21 +230,23 @@
     {
       "tool_id": "feeding",
       "title": "Feeding",
-      "purpose": "Full pPREY matrix, realised DietCheck and consumed biomass for the selected pair, diagnostics, edited-versus-original compare.",
+      "purpose": "Full pPREY matrix; expected predation pressure (Holling t0 matrix); realised DietCheck and consumed biomass for the selected pair; diagnostics; edited-versus-original compare.",
       "example_questions": [
         "What is pPREY?",
         "What does KLP represent?",
-        "How does realised diet compare to pPREY?"
+        "How does realised diet compare to pPREY?",
+        "Where is expected predation pressure?",
+        "Which equation does the pressure view use?"
       ],
       "preconditions": ["groups", "bio_prm", "init_nc"],
-      "function_refs": ["feeding_ui", "feeding_server", "parse_pprey_rownames", "dietcheck_pair_series", "consumed_pair_series"],
+      "function_refs": ["feeding_ui", "feeding_server", "parse_pprey_rownames", "dietcheck_pair_series", "consumed_pair_series", "expected_predation_pressure", "holling_ingest_mgn_day"],
       "navigation_target": "Feeding",
-      "what_to_look_for": "pPREY>0 with zero gape overlap; uneaten prey; DietCheck mismatch; DietCheck proportion and consumed tonnes for the clicked predator/prey.",
-      "limitations": "pPREY is availability, not realised diet. In-session edits are not prm writes. Consumed biomass needs outputPROD.nc.",
-      "keywords": ["feeding", "pprey", "gape", "availability", "preference", "klp", "kup", "mum", "dietcheck", "realised diet", "consumed"],
+      "what_to_look_for": "pPREY>0 with zero gape overlap; uneaten prey; DietCheck mismatch; DietCheck proportion and consumed tonnes for the clicked predator/prey. Predation pressure view: pPREY-shaped matrix of implied prey loss per day from C, mum, E, predcase, KLP/KUP and t0 biomass.",
+      "limitations": "pPREY is availability, not realised diet. Expected pressure is a t0 diagnostic, not output DietCheck. Habitat refuge is 1. KDENR is recruitment, not feeding. In-session edits are not prm writes. Consumed biomass needs outputPROD.nc.",
+      "keywords": ["feeding", "pprey", "gape", "availability", "preference", "klp", "kup", "mum", "dietcheck", "realised diet", "consumed", "predation pressure", "holling", "predcase", "clearance"],
       "module": "feeding",
-      "inputs": ["view_type", "pred_group", "pred_stage", "prey_group", "prey_stage"],
-      "views": ["matrix", "diagnostics", "compare"]
+      "inputs": ["view_type", "pred_group", "pred_stage", "prey_group", "prey_stage", "pressure_metric", "pressure_box"],
+      "views": ["matrix", "pressure", "diagnostics", "compare"]
     },
     {
       "tool_id": "mortality",

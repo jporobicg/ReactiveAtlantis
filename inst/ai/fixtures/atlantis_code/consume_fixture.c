@@ -40,3 +40,27 @@ double fixture_consume(double prey_biomass,
     }
     return intake;
 }
+
+/* fixture_holling_type_ii
+ * Stand-in of the modified Holling Type II grazing term used by
+ * Atlantis predcase = 0 (User Guide Part I section 10.2 / Table 18;
+ * Murray and Parslow 1997). avail is B* = pPREY * prey * gape.
+ * I = C * A / (1 + C/mum * sum(E * avail)); Gr = I * pred_scale * (avail/A).
+ */
+double fixture_holling_type_ii(double C, double mum, double avail,
+                               double E, double pred_scale)
+{
+    double A;
+    double ingest_unit;
+
+    if (avail <= 0.0 || C <= 0.0 || pred_scale <= 0.0) {
+        return 0.0;
+    }
+    A = avail;
+    if (mum <= 0.0) {
+        ingest_unit = C * A;
+    } else {
+        ingest_unit = C * A / (1.0 + C * E * A / mum);
+    }
+    return ingest_unit * pred_scale;
+}

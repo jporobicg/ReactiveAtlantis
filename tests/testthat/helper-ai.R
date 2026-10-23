@@ -77,7 +77,7 @@ ra_ai_test_transport <- function(method, url, path, body = NULL,
     if (grepl("recruit", qtxt, ignore.case = TRUE)) {
       nav <- c(nav, list(list(id = "recruitment")))
     }
-    if (grepl("feeding|pPREY|KLP", qtxt, ignore.case = TRUE)) {
+    if (grepl("feeding|pPREY|KLP|predation pressure|holling", qtxt, ignore.case = TRUE)) {
       nav <- c(nav, list(list(id = "feeding")))
     }
     if (grepl("SuperCalibrator", qtxt, ignore.case = TRUE)) {
