@@ -137,3 +137,87 @@ test_that("hover and flags stay on the full matrix", {
   expect_equal(dim(hover), dim(ava))
   expect_equal(pressure_metric_matrix(press, "t_day")[1, 2], 1.6)
 })
+
+test_that("pair-by-box sums to the system-wide Holling cell", {
+  tmp <- tempfile("press_box_")
+  dir.create(tmp)
+  on.exit(unlink(tmp, recursive = TRUE), add = TRUE)
+  write_synthetic_atlantis_run(tmp)
+  grp <- utils::read.csv(file.path(tmp, "groups.csv"), stringsAsFactors = FALSE)
+  names(grp) <- tolower(names(grp))
+  prm <- readLines(file.path(tmp, "bio.prm"))
+  ava <- read_pprey_matrix(prm)
+  colnames(ava) <- as.character(grp$code)
+  nc <- ncdf4::nc_open(file.path(tmp, "init.nc"))
+  on.exit(ncdf4::nc_close(nc), add = TRUE)
+  press <- expected_predation_pressure(ava, grp, prm, nc, box = NULL)
+  by_box <- pressure_pair_by_box(
+    ava, grp, prm, nc, "COD", "PHY",
+    pred_stage = 1, prey_stage = 1, time_i = 1L,
+    stocks = press$stocks
+  )
+  expect_equal(nrow(by_box), press$n_box)
+  expect_equal(
+    sum(by_box$Consumption_t_day),
+    unname(press$consumption_t_day["pPREY1COD1", "PHY"]),
+    tolerance = 1e-10
+  )
+  expect_true(all(by_box$Box == seq_len(nrow(by_box)) - 1L))
+})
+
+test_that("output time step changes expected consumption", {
+  tmp <- tempfile("press_t_")
+  dir.create(tmp)
+  on.exit(unlink(tmp, recursive = TRUE), add = TRUE)
+  write_synthetic_atlantis_run(tmp)
+  grp <- utils::read.csv(file.path(tmp, "groups.csv"), stringsAsFactors = FALSE)
+  names(grp) <- tolower(names(grp))
+  prm <- readLines(file.path(tmp, "bio.prm"))
+  ava <- read_pprey_matrix(prm)
+  colnames(ava) <- as.character(grp$code)
+  nc <- ncdf4::nc_open(file.path(tmp, "output.nc"))
+  on.exit(ncdf4::nc_close(nc), add = TRUE)
+  expect_equal(nc_n_times(nc), 3L)
+  p1 <- expected_predation_pressure(ava, grp, prm, nc, time_i = 1L)
+  p3 <- expected_predation_pressure(ava, grp, prm, nc, time_i = 3L)
+  expect_true(p3$consumption_t_day["pPREY1COD1", "PHY"] !=
+                p1$consumption_t_day["pPREY1COD1", "PHY"])
+})
+
+test_that("realised compare and production flags use DietCheck and SpecificPredMort", {
+  tmp <- tempfile("press_real_")
+  dir.create(tmp)
+  on.exit(unlink(tmp, recursive = TRUE), add = TRUE)
+  write_synthetic_atlantis_run(tmp)
+  grp <- utils::read.csv(file.path(tmp, "groups.csv"), stringsAsFactors = FALSE)
+  names(grp) <- tolower(names(grp))
+  prm <- readLines(file.path(tmp, "bio.prm"))
+  ava <- read_pprey_matrix(prm)
+  colnames(ava) <- as.character(grp$code)
+  nc <- ncdf4::nc_open(file.path(tmp, "init.nc"))
+  on.exit(ncdf4::nc_close(nc), add = TRUE)
+  press <- expected_predation_pressure(ava, grp, prm, nc)
+  diet <- utils::read.table(file.path(tmp, "DietCheck.txt"), header = TRUE)
+  pred_mort <- utils::read.table(file.path(tmp, "SpecificPredMort.txt"),
+                                 header = TRUE)
+  nc_prod <- ncdf4::nc_open(file.path(tmp, "outputPROD.nc"))
+  on.exit(ncdf4::nc_close(nc_prod), add = TRUE)
+  prod <- prey_production_t_day(nc_prod, nc, grp, "PHY", time_i = 1L)
+  expect_true(is.finite(prod) && prod > 0)
+  cmp <- pressure_vs_realised(press, diet, pred_mort, "COD", "PHY", prod)
+  expect_true("DietCheck mean proportion" %in% cmp$Source)
+  expect_true("SpecificPredMort mean" %in% cmp$Source)
+  expect_true(is.finite(cmp$Value[cmp$Source == "DietCheck mean proportion"]))
+  expect_true(is.finite(cmp$Value[cmp$Source == "SpecificPredMort mean"]))
+  expect_equal(cmp$Value[cmp$Source == "Prey production (t/day)"], prod)
+  flagged <- pressure_flag_vs_production(press$cells, "PHY", 0)
+  expect_true(any(flagged$Flag == "loss > prey production / day"))
+  poly <- read_bgm_polygons(file.path(tmp, "geo.bgm"))
+  by_box <- pressure_pair_by_box(
+    ava, grp, prm, nc, "COD", "PHY", pred_stage = 1, prey_stage = 1,
+    stocks = press$stocks
+  )
+  mapped <- pressure_map_polygons(poly, by_box, "frac_day")
+  expect_true("Value" %in% names(mapped))
+  expect_true(any(is.finite(mapped$Value)))
+})

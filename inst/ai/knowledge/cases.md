@@ -133,7 +133,8 @@ Counter: predation stack is small and fishing or recruitment
 explains the prey drop.
 
 Checks: Predation (predator and prey views); Mortality; Compare for
-the predator; Feeding (predation pressure matrix); Spatial.
+the predator; Feeding (predation pressure matrix, per-box map,
+production flags); Spatial.
 
 What not to conclude: that pPREY must be reduced. Check overlap and
 biomass first.

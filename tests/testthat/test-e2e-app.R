@@ -179,12 +179,18 @@ test_that("folder load fills every tab with a bound plot or table", {
 
   try(app$set_inputs(`feeding-view_type` = "pressure",
                      `feeding-pressure_metric` = "frac_day",
+                     `feeding-pressure_source` = "init",
                      `feeding-pred_group` = "COD", `feeding-prey_group` = "PHY",
                      wait_ = FALSE), silent = TRUE)
   app$wait_for_idle(timeout = 40000)
   expect_true(has_bound_output(app$get_html("#feeding-feeding_plot_gg")) ||
                 nchar(app$get_html("#feeding-feeding_plot_gg")) > 40)
   save_shot(app, shot_dir, "13c_feeding_pressure")
+  expect_true(nchar(app$get_html("#feeding-pressure_map")) > 20)
+  try(app$run_js("var el=document.getElementById('feeding-pressure_map'); if(el) el.scrollIntoView(); true;"),
+      silent = TRUE)
+  app$wait_for_idle(timeout = 10000)
+  save_shot(app, shot_dir, "13d_feeding_pressure_map")
 
   expect_true(click_nav(app, "Spatial"))
   app$set_inputs(`spatial-view` = "overlap", `spatial-fg` = "COD",
@@ -373,10 +379,15 @@ test_that("North Sea real names load COD into every group tab", {
 
   try(app$set_inputs(`feeding-view_type` = "pressure",
                      `feeding-pressure_metric` = "frac_day",
+                     `feeding-pressure_source` = "init",
                      `feeding-pred_group` = "COD", `feeding-prey_group` = "PHD",
                      wait_ = FALSE), silent = TRUE)
   app$wait_for_idle(timeout = 60000)
   save_shot(app, shot_dir, "ns_11_feeding_pressure")
+  try(app$run_js("var el=document.getElementById('feeding-pressure_map'); if(el) el.scrollIntoView(); true;"),
+      silent = TRUE)
+  app$wait_for_idle(timeout = 15000)
+  save_shot(app, shot_dir, "ns_11_feeding_pressure_map")
 
   try(app$set_inputs(`feeding-view_type` = "diagnostics", wait_ = FALSE), silent = TRUE)
   app$wait_for_idle(timeout = 40000)
@@ -693,10 +704,15 @@ test_that("fresh install draws Spatial map and full pPREY for a NESP-style pair"
 
   try(app$set_inputs(`feeding-view_type` = "pressure",
                      `feeding-pressure_metric` = "frac_day",
+                     `feeding-pressure_source` = "init",
                      `feeding-pred_group` = "COD", `feeding-prey_group` = "PHD",
                      wait_ = FALSE), silent = TRUE)
   app$wait_for_idle(timeout = 60000)
   save_shot(app, shot_dir, "fresh_install_feeding_pressure")
+  try(app$run_js("var el=document.getElementById('feeding-pressure_map'); if(el) el.scrollIntoView(); true;"),
+      silent = TRUE)
+  app$wait_for_idle(timeout = 15000)
+  save_shot(app, shot_dir, "fresh_install_feeding_pressure_map")
 
   expect_true(click_nav(app, "Spatial"))
   app$set_inputs(`spatial-view` = "overlap", `spatial-fg` = "COD",

@@ -23,8 +23,19 @@ Predation for DietCheck. Status: confirmed (fixture parameters.md).
 
 Feeding tab, view Predation pressure. The heatmap is the same
 pPREY layout; cells are implied prey-biomass loss per day from
-the Holling equations at t0 (C, mum, E, predcase, KLP/KUP, init.nc).
-KDENR is not used. Status: confirmed against `predation_pressure.R`.
+the Holling equations (C, mum, E, predcase, KLP/KUP) using init.nc
+or output.nc at a chosen time. The selected pair has a per-box map
+and a DietCheck / SpecificPredMort / production compare. Flags mark
+loss above standing stock, 5% per day, or prey production. KDENR
+is not used. Status: confirmed against `predation_pressure.R`.
+
+## Can predation pressure use output biomass and map it per box? (confirmed)
+
+Yes. Feeding tab, view Predation pressure: choose Initial conditions
+or Output biomass, pick a time step, then select a predator–prey
+pair. The heatmap is system-wide; the map is that pair per box.
+DietCheck, SpecificPredMort and prey production (outputPROD.nc) sit
+in the table. Status: confirmed against `predation_pressure.R`.
 
 ## Is mL fishing mortality? (confirmed)
 

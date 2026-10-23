@@ -511,15 +511,17 @@ empty_pressure_result <- function(pprey) {
   )
 }
 
-##' Expected predation pressure for every pPREY cell at t0.
+##' Expected predation pressure for every pPREY cell.
 ##'
 ##' System-wide is the sum of per-box calculations (true spatial
 ##' overlap: predator and prey must share a box). Set `box` to a
-##' 0-based box id to restrict the sum.
+##' 0-based box id to restrict the sum. Pass `stocks` from
+##' `init_stage_stocks` to reuse biomass when only the box changes.
+##' `init_nc` may be init.nc or output.nc; `time_i` selects the step.
 expected_predation_pressure <- function(pprey, grp, prm, init_nc,
                                         box = NULL, time_i = 1L,
                                         mg2t = MG2T_DEFAULT, x.cn = XCN_DEFAULT,
-                                        habitat_refuge = 1) {
+                                        habitat_refuge = 1, stocks = NULL) {
   if (is.null(pprey) || !is.matrix(pprey) || nrow(pprey) == 0) {
     return(empty_pressure_result(pprey))
   }
@@ -528,14 +530,16 @@ expected_predation_pressure <- function(pprey, grp, prm, init_nc,
   notes <- character()
 
   nc <- init_nc
-  if (!inherits(nc, "ncdf4")) {
+  if (!inherits(nc, "ncdf4") && !is.null(init_nc)) {
     nc <- tryCatch(nc_handle(init_nc), error = function(e) NULL)
   }
-  stocks <- if (is.null(nc)) {
-    notes <- c(notes, "Initial-conditions NetCDF could not be opened; pressure is zero.")
-    list(n_box = 1L, volume = NA_real_, groups = list(), notes = notes)
-  } else {
-    init_stage_stocks(nc, grp, prm, time_i = time_i, mg2t = mg2t, x.cn = x.cn)
+  if (is.null(stocks)) {
+    stocks <- if (is.null(nc)) {
+      notes <- c(notes, "Biomass NetCDF could not be opened; pressure is zero.")
+      list(n_box = 1L, volume = NA_real_, groups = list(), notes = notes)
+    } else {
+      init_stage_stocks(nc, grp, prm, time_i = time_i, mg2t = mg2t, x.cn = x.cn)
+    }
   }
   if (length(stocks$notes)) {
     notes <- c(notes, paste0(
@@ -685,7 +689,8 @@ expected_predation_pressure <- function(pprey, grp, prm, init_nc,
   flag_n <- sum(cells$Flag != "OK", na.rm = TRUE)
   notes <- c(notes, paste0(
     "Modified Holling from User Guide Part I §10.2 / Table 18; ",
-    "gape knife-edge §10.2.5 (KLP, KUP). Boxes used: ",
+    "gape knife-edge §10.2.5 (KLP, KUP). Time step ", time_i,
+    ". Boxes used: ",
     paste(boxes - 1L, collapse = ","), "."
   ))
   if (flag_n) {
@@ -857,12 +862,281 @@ pressure_vs_dietcheck <- function(press, diet, pred, prey) {
 pressure_equation_note <- function() {
   paste(
     "Expected predation pressure is the implied prey-biomass loss rate",
-    "from the Atlantis feeding equations at t0, not a DietCheck proportion.",
-    "Availability: B* = pPREY x prey concentration x gape (KLP/KUP knife-edge).",
-    "Type II (predcase 0): I = C A / (1 + C/mum x sum(E B*)), then",
-    "Gr = I x predator scale x (B*_j / A).",
+    "from the Atlantis feeding equations, not a DietCheck proportion.",
+    "Availability: B* = pPREY x prey concentration x gape (KLP/KUP knife-edge)",
+    "x spatial overlap (same box). Type II (predcase 0):",
+    "I = C A / (1 + C/mum x sum(E B*)), then Gr = I x predator scale x (B*_j / A).",
+    "Gr is the predation-mortality flux on the prey (mg N d-1, reported as t/day).",
+    "Biomass may come from init.nc or output.nc at a chosen time step.",
     "Cited: User Guide Part I §10.2, §10.2.2, Table 18, §10.2.5;",
     "atecology/atbiology.c box_bio_process; Murray and Parslow 1997.",
     "KDENR is recruitment in the current manuals and is not used here."
   )
+}
+
+##' Flag cells whose expected consumption exceeds prey production (t/day).
+pressure_flag_vs_production <- function(cells, prey, production_t_day) {
+  if (is.null(cells) || !is.data.frame(cells) || nrow(cells) == 0) {
+    return(cells)
+  }
+  if (!is.finite(production_t_day) || pprey_is_none(prey)) return(cells)
+  if (!"Flag" %in% names(cells)) cells$Flag <- "OK"
+  hit <- cells$Prey == as.character(prey)[1] &
+    is.finite(cells$Consumption_t_day) &
+    cells$Consumption_t_day > production_t_day
+  cells$Flag[hit] <- "loss > prey production / day"
+  cells
+}
+
+nc_n_times <- function(nc) {
+  if (is.null(nc)) return(1L)
+  if (inherits(nc, "ncdf4") && !is.null(nc$dim$t)) {
+    n <- as.integer(nc$dim$t$len)
+    if (is.finite(n) && n > 0) return(n)
+  }
+  1L
+}
+
+##' Per-box expected pressure for one predator–prey (adult/juvenile) pair.
+##'
+##' Uses the same Holling split as the full matrix: all prey of that
+##' predator row enter the denominator; only the selected prey is reported.
+pressure_pair_by_box <- function(pprey, grp, prm, nc,
+                                 pred, prey,
+                                 pred_stage = 1, prey_stage = 1,
+                                 time_i = 1L,
+                                 stocks = NULL,
+                                 mg2t = MG2T_DEFAULT, x.cn = XCN_DEFAULT,
+                                 habitat_refuge = 1) {
+  empty <- data.frame(
+    Box = integer(), Consumption_t_day = numeric(),
+    Prey_loss_frac_day = numeric(), Prey_loss_frac_year = numeric(),
+    Prey_tonnes = numeric(), Pred_tonnes = numeric(),
+    Gape = numeric(), stringsAsFactors = FALSE
+  )
+  if (is.null(pprey) || !is.matrix(pprey)) return(empty)
+  if (pprey_is_none(pred) || pprey_is_none(prey)) return(empty)
+  prm <- prm_with_index(prm)
+  if (!is.null(grp)) names(grp) <- tolower(names(grp))
+  if (is.null(stocks)) {
+    handle <- nc
+    if (!inherits(handle, "ncdf4")) {
+      handle <- tryCatch(nc_handle(nc), error = function(e) NULL)
+    }
+    if (is.null(handle)) return(empty)
+    stocks <- init_stage_stocks(handle, grp, prm, time_i = time_i,
+                                mg2t = mg2t, x.cn = x.cn)
+  }
+  meta <- parse_pprey_rownames(rownames(pprey))
+  rows <- pprey_match_rows(meta, pred, pred_stage)
+  if (!identical(pprey_stage_wanted(prey_stage), "all")) {
+    rows <- intersect(rows, pprey_match_prey_stage(meta, prey_stage))
+  }
+  if (!length(rows) || !prey %in% colnames(pprey)) return(empty)
+  ri <- rows[1]
+  pj <- which(colnames(pprey) == as.character(prey))[1]
+  params <- read_predator_feed_params(prm, grp)
+  par <- params[[as.character(pred)]]
+  if (is.null(par)) return(empty)
+  pred_g <- stocks$groups[[as.character(pred)]]
+  if (is.null(pred_g)) return(empty)
+  n_box <- max(1L, as.integer(stocks$n_box))
+  vol <- stocks$volume
+  if (length(vol) < n_box) vol <- c(vol, rep(NA_real_, n_box - length(vol)))
+  use_conc <- any(is.finite(vol) & vol > 0)
+  prey_codes <- colnames(pprey)
+  prey_type <- if (!is.null(grp) && "code" %in% names(grp)) {
+    as.character(grp$grouptype[match(prey_codes, as.character(grp$code))])
+  } else {
+    rep("", length(prey_codes))
+  }
+  prey_type[is.na(prey_type)] <- ""
+  n_coh <- pred_g$n_coh
+  age_mat <- pred_g$age_mat
+  absolute <- identical(as.integer(par$flagfishrates), 0L) && n_coh > 1L
+  cohs <- if (n_coh > 1L && !pred_g$grouptype %in% AGE_SPECIAL) seq_len(n_coh) else 1L
+  cohs <- cohs[vapply(cohs, function(c) {
+    cohort_in_stage(c, age_mat, meta$pred_stage[ri], n_coh)
+  }, logical(1))]
+  if (!length(cohs)) cohs <- 1L
+  habitat_refuge <- as.numeric(habitat_refuge)[1]
+  if (!is.finite(habitat_refuge)) habitat_refuge <- 1
+
+  out <- lapply(seq_len(n_box), function(b) {
+    pred_st <- stock_stage(stocks, pred, meta$pred_stage[ri])
+    pred_scale <- if (is.null(pred_st)) {
+      0
+    } else if (absolute) {
+      pred_st$nums[b]
+    } else {
+      pred_st$mass_mgn[b]
+    }
+    pred_t <- if (is.null(pred_st)) 0 else pred_st$tonnes[b]
+    C_use <- if (length(par$C)) mean(par$C[pmin(cohs, length(par$C))]) else NA_real_
+    mum_use <- if (length(par$mum)) mean(par$mum[pmin(cohs, length(par$mum))]) else NA_real_
+    sn_pred <- if (is.null(pred_st)) NA_real_ else pred_st$sn
+    avail <- rep(0, ncol(pprey))
+    e_av <- rep(0, ncol(pprey))
+    prey_mass <- 0
+    gape_sel <- 0
+    for (j in seq_len(ncol(pprey))) {
+      pval <- as.numeric(pprey[ri, j])
+      if (!is.finite(pval) || pval <= 0) next
+      pry <- stock_stage(stocks, prey_codes[j], meta$prey_stage[ri])
+      if (is.null(pry)) next
+      mass <- pry$mass_mgn[b]
+      if (!is.finite(mass) || mass <= 0) next
+      if (j == pj) prey_mass <- mass
+      conc <- if (use_conc && is.finite(vol[b]) && vol[b] > 0) mass / vol[b] else mass
+      gape <- gape_size_scalar(sn_pred, pry$sn, par$klp, par$kup)
+      if (j == pj) gape_sel <- gape
+      avail[j] <- pval * conc * gape * habitat_refuge
+      e_av[j] <- e_for_prey(par, prey_codes[j], prey_type[j]) * avail[j]
+    }
+    eaten <- holling_ingest_mgn_day(
+      C_use, mum_use, avail, e_av, pred_scale, par$predcase
+    )
+    cons <- if (length(eaten) >= pj) eaten[pj] else 0
+    frac <- if (prey_mass > 0) cons / prey_mass else 0
+    data.frame(
+      Box = b - 1L,
+      Consumption_t_day = cons * mg2t * x.cn,
+      Prey_loss_frac_day = frac,
+      Prey_loss_frac_year = frac * 365,
+      Prey_tonnes = prey_mass * mg2t * x.cn,
+      Pred_tonnes = pred_t,
+      Gape = gape_sel,
+      stringsAsFactors = FALSE
+    )
+  })
+  do.call(rbind, out)
+}
+
+##' Prey production (t/day) from outputPROD.nc Growth / Prodn.
+prey_production_t_day <- function(nc_prod, nc_out, grp, prey_code,
+                                  time_i = 1L, mg2t = MG2T_DEFAULT,
+                                  x.cn = XCN_DEFAULT) {
+  if (is.null(nc_prod) || is.null(grp) || pprey_is_none(prey_code)) {
+    return(NA_real_)
+  }
+  if (!is.null(grp)) names(grp) <- tolower(names(grp))
+  row <- grp[as.character(grp$code) == as.character(prey_code)[1], , drop = FALSE]
+  if (nrow(row) == 0) return(NA_real_)
+  name <- as.character(row$name[1])
+  n.coh <- as.integer(row$numcohorts[1])
+  gtype <- as.character(row$grouptype[1])
+  vns <- tryCatch(
+    prod_growth_vars(names(nc_prod$var), name, n.coh, gtype),
+    error = function(e) character()
+  )
+  if (!length(vns)) return(NA_real_)
+  acc <- NULL
+  for (vn in vns) {
+    arr <- tryCatch(nc_get(nc_prod, vn), error = function(e) NULL)
+    acc <- add_nc_arrays(acc, arr)
+  }
+  if (is.null(acc)) return(NA_real_)
+  sl <- box_slice_t0(acc, time_i)
+  vol <- tryCatch(nc_volume(nc_prod), error = function(e) NULL)
+  if (is.null(vol) && !is.null(nc_out)) {
+    vol <- tryCatch(nc_volume(nc_out), error = function(e) NULL)
+  }
+  vol_sl <- box_slice_t0(vol, time_i)
+  if (!is.null(sl) && !is.null(vol_sl) && !is.null(dim(sl)) &&
+      length(dim(sl)) == 2L && length(dim(vol_sl)) == 2L &&
+      all(dim(sl) == dim(vol_sl))) {
+    mass <- sum(sl * vol_sl, na.rm = TRUE)
+  } else {
+    mass <- sum(as.numeric(sl), na.rm = TRUE)
+  }
+  mass * mg2t * x.cn
+}
+
+##' DietCheck, SpecificPredMort and production next to expected pressure.
+pressure_vs_realised <- function(press, diet, pred_mort, pred, prey,
+                                 production_t_day = NA_real_) {
+  empty <- data.frame(
+    Source = character(), Value = numeric(), Note = character(),
+    stringsAsFactors = FALSE
+  )
+  if (is.null(press) || pprey_is_none(pred) || pprey_is_none(prey)) return(empty)
+  cons <- press$consumption_t_day
+  frac <- press$prey_loss_frac_day
+  meta <- parse_pprey_rownames(rownames(cons))
+  rows <- which(meta$pred_code == as.character(pred))
+  if (!length(rows) || !prey %in% colnames(cons)) return(empty)
+  pred_tot <- sum(cons[rows, , drop = FALSE], na.rm = TRUE)
+  pair_t <- sum(cons[rows, prey, drop = FALSE], na.rm = TRUE)
+  pair_f <- mean(frac[rows, prey], na.rm = TRUE)
+  share <- if (pred_tot > 0) pair_t / pred_tot else 0
+  diet_val <- NA_real_
+  diet_note <- "DietCheck not loaded."
+  if (!is.null(diet) && NROW(diet) > 0) {
+    ser <- tryCatch(dietcheck_pair_series(diet, pred, prey), error = function(e) NULL)
+    if (!is.null(ser) && nrow(ser) > 0) {
+      diet_val <- mean(ser$Proportion, na.rm = TRUE)
+      diet_note <- "DietCheck mean diet proportion (all times)."
+    }
+  }
+  mort_val <- NA_real_
+  mort_note <- "SpecificPredMort.txt not loaded."
+  if (!is.null(pred_mort) && NROW(pred_mort) > 0) {
+    pm <- tryCatch(
+      parse_pred_mort_by_predator(pred_mort, prey, pred),
+      error = function(e) NULL
+    )
+    if (!is.null(pm) && nrow(pm) > 0) {
+      mort_val <- mean(pm$Value, na.rm = TRUE)
+      mort_note <- "SpecificPredMort mean predation mortality on this prey from this predator."
+    } else {
+      mort_note <- attr(pm, "reason")
+      if (is.null(mort_note) || !nzchar(mort_note)) {
+        mort_note <- "No SpecificPredMort rows for this pair."
+      }
+    }
+  }
+  prod_note <- if (is.finite(production_t_day)) {
+    if (is.finite(pair_t) && pair_t > production_t_day) {
+      "Expected consumption exceeds prey production at this time step."
+    } else {
+      "Prey production (Growth/Prodn) at this time step."
+    }
+  } else {
+    "outputPROD.nc production tracer not available."
+  }
+  data.frame(
+    Source = c(
+      "Expected consumption (t/day)",
+      "Expected prey loss / day",
+      "Expected share of predator consumption",
+      "DietCheck mean proportion",
+      "SpecificPredMort mean",
+      "Prey production (t/day)"
+    ),
+    Value = c(pair_t, pair_f, share, diet_val, mort_val, production_t_day),
+    Note = c(
+      "Holling Gr_j, system-wide.",
+      "Gr_j / prey biomass.",
+      "Gr_prey / sum Gr.",
+      diet_note,
+      mort_note,
+      prod_note
+    ),
+    stringsAsFactors = FALSE
+  )
+}
+
+pressure_map_polygons <- function(poly, by_box, metric = "frac_day") {
+  if (is.null(poly) || nrow(poly) == 0 || is.null(by_box) || nrow(by_box) == 0) {
+    return(poly)
+  }
+  val <- switch(
+    as.character(metric)[1],
+    t_day = by_box$Consumption_t_day,
+    frac_year = by_box$Prey_loss_frac_year,
+    by_box$Prey_loss_frac_day
+  )
+  map <- stats::setNames(val, as.character(by_box$Box))
+  poly$Value <- unname(map[as.character(poly$boxid)])
+  poly
 }

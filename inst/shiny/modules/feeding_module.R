@@ -47,9 +47,21 @@ feeding_ui <- function(id) {
             ),
             selected = "frac_day"
           ),
+          selectInput(
+            ns("pressure_source"), "Biomass source",
+            choices = c(
+              "Initial conditions (init.nc)" = "init",
+              "Output biomass (output.nc)" = "output"
+            ),
+            selected = "init"
+          ),
+          sliderInput(ns("pressure_time_i"), "Time step",
+                      min = 1, max = 1, value = 1, step = 1),
+          textOutput(ns("pressure_time_lab")),
           selectInput(ns("pressure_box"), "Boxes", choices = c("All boxes" = "all")),
           p(class = "ra-muted",
-            "Holling Type I/II/III from biology.prm (C, mum, E, predcase, KLP/KUP) and t0 biomass in the init NetCDF. System-wide sums per-box calculations.")
+            "Holling Type I/II/III from biology.prm (C, mum, E, predcase, KLP/KUP).",
+            "System-wide sums per-box calculations. Output uses biomass at the selected time step.")
         ),
         conditionalPanel(
           "input.view_type == 'diagnostics'", ns = ns,
@@ -89,6 +101,13 @@ feeding_ui <- function(id) {
         fluidRow(
           column(6, plotOutput(ns("pred_bars"), height = "280px")),
           column(6, plotOutput(ns("prey_bars"), height = "280px"))
+        ),
+        conditionalPanel(
+          "input.view_type == 'pressure'", ns = ns,
+          h5("Pressure per box"),
+          p(class = "ra-muted",
+            "Selected predator–prey pair. Colour matches the heatmap metric. Flags in the table mark loss above standing stock, 5% per day, or prey production."),
+          plotly::plotlyOutput(ns("pressure_map"), height = "420px")
         )
       ),
       conditionalPanel(
@@ -119,7 +138,7 @@ feeding_server <- function(id, project = NULL) {
     output$matrix_caption <- renderUI({
       if (identical(input$view_type, "pressure")) {
         p(class = "ra-muted",
-          "Every predator x prey cell is the expected predation pressure from the Atlantis feeding equations at t0. Hover for consumption (t/day) and prey loss. Click to select.")
+          "Every predator x prey cell is the expected predation pressure from the Atlantis feeding equations at the selected biomass time. Hover for consumption (t/day) and prey loss. Click to select. The map below is that pair per box.")
       } else {
         p(class = "ra-muted",
           "Every predator x prey cell is drawn, including zeros. Scroll or zoom if the matrix is large.")
@@ -166,23 +185,95 @@ feeding_server <- function(id, project = NULL) {
       }
     })
 
+    pressure_nc_info <- reactive({
+      req(identical(input$view_type, "pressure"))
+      src <- if (is.null(input$pressure_source)) "init" else as.character(input$pressure_source)[1]
+      need <- if (identical(src, "output")) "nc_out" else "nc_init"
+      dat <- tryCatch(ensure_project_data(ps(), need), error = function(e) NULL)
+      if (is.null(dat)) dat <- ps()$data
+      paths <- tryCatch(normalize_paths(ps()$paths), error = function(e) empty_paths())
+      if (!is.null(dat$paths)) {
+        dp <- tryCatch(normalize_paths(dat$paths), error = function(e) NULL)
+        if (!is.null(dp)) {
+          if (path_ok(dp$init_nc)) paths$init_nc <- dp$init_nc
+          if (path_ok(dp$output_nc)) paths$output_nc <- dp$output_nc
+        }
+      }
+      nc <- NULL
+      if (identical(src, "output")) {
+        if (!is.null(dat$nc_out) && inherits(dat$nc_out, "ncdf4")) {
+          nc <- dat$nc_out
+        } else if (path_ok(paths$output_nc)) {
+          nc <- tryCatch(nc_handle(paths$output_nc), error = function(e) NULL)
+        }
+      }
+      if (is.null(nc)) {
+        if (!is.null(dat$nc_init) && inherits(dat$nc_init, "ncdf4")) {
+          nc <- dat$nc_init
+        } else if (path_ok(paths$init_nc)) {
+          nc <- tryCatch(nc_handle(paths$init_nc), error = function(e) NULL)
+        }
+        if (identical(src, "output") && !is.null(nc)) {
+          src <- "init"
+        }
+      }
+      list(nc = nc, src = src, paths = paths, dat = dat)
+    })
+
+    observe({
+      info <- tryCatch(pressure_nc_info(), error = function(e) NULL)
+      n_t <- if (is.null(info) || is.null(info$nc)) 1L else nc_n_times(info$nc)
+      shiny::updateSliderInput(session, "pressure_time_i",
+                               min = 1, max = max(1L, as.integer(n_t)))
+    })
+
+    output$pressure_time_lab <- renderText({
+      if (!identical(input$view_type, "pressure")) return("")
+      info <- tryCatch(pressure_nc_info(), error = function(e) NULL)
+      src <- if (!is.null(info) && !is.null(info$src)) info$src else "init"
+      ti <- if (is.null(input$pressure_time_i)) 1L else as.integer(input$pressure_time_i)[1]
+      paste0(
+        if (identical(src, "output")) "Output biomass" else "Initial conditions",
+        ", time step ", ti
+      )
+    })
+
+    pressure_stocks <- reactive({
+      req(identical(input$view_type, "pressure"))
+      ava <- current_mat()
+      req(ava)
+      info <- pressure_nc_info()
+      dat <- info$dat
+      grp <- dat$grp
+      if (is.null(grp)) grp <- ps()$data$grp
+      prm <- dat$prm_bio
+      if (is.null(prm)) prm <- ps()$data$prm_bio
+      time_i <- if (is.null(input$pressure_time_i)) 1L else as.integer(input$pressure_time_i)[1]
+      if (!is.finite(time_i) || time_i < 1) time_i <- 1L
+      if (is.null(info$nc)) return(NULL)
+      ra_progress("Reading biomass for predation pressure", {
+        init_stage_stocks(info$nc, grp, prm, time_i = time_i)
+      })
+    })
+
     pressure_built <- reactive({
       req(identical(input$view_type, "pressure"))
       ava <- current_mat()
       req(ava)
-      dat <- tryCatch(ensure_project_data(ps(), "nc_init"), error = function(e) NULL)
-      if (is.null(dat)) dat <- ps()$data
+      info <- pressure_nc_info()
+      dat <- info$dat
       grp <- dat$grp
+      if (is.null(grp)) grp <- ps()$data$grp
       prm <- dat$prm_bio
-      paths <- tryCatch(normalize_paths(ps()$paths), error = function(e) empty_paths())
-      if (!is.null(dat$paths)) {
-        dp <- tryCatch(normalize_paths(dat$paths), error = function(e) NULL)
-        if (!is.null(dp) && path_ok(dp$init_nc)) paths$init_nc <- dp$init_nc
-      }
+      if (is.null(prm)) prm <- ps()$data$prm_bio
+      time_i <- if (is.null(input$pressure_time_i)) 1L else as.integer(input$pressure_time_i)[1]
+      if (!is.finite(time_i) || time_i < 1) time_i <- 1L
       box <- if (is.null(input$pressure_box)) "all" else input$pressure_box
+      stocks <- tryCatch(pressure_stocks(), error = function(e) NULL)
       ra_progress("Expected predation pressure", {
         expected_predation_pressure(
-          ava, grp, prm, paths$init_nc, box = box, time_i = 1L
+          ava, grp, prm, info$nc, box = box, time_i = time_i,
+          stocks = stocks
         )
       })
     })
@@ -286,7 +377,7 @@ feeding_server <- function(id, project = NULL) {
       if (identical(input$view_type, "pressure")) {
         press <- tryCatch(pressure_built(), error = function(e) NULL)
         if (is.null(press) || is.null(press$prey_loss_frac_day)) {
-          return("Load initial conditions to compute expected predation pressure.")
+          return("Load biology.prm, groups and a biomass NetCDF to compute expected predation pressure.")
         }
         return(pprey_cell_info_text(press$prey_loss_frac_day, sel, feed_grp(),
                                    value_label = "Pressure / day"))
@@ -541,6 +632,96 @@ feeding_server <- function(id, project = NULL) {
       })
     })
 
+    pressure_by_box <- reactive({
+      req(identical(input$view_type, "pressure"))
+      pred <- input$pred_group
+      prey <- input$prey_group
+      if (pprey_is_none(pred) || pprey_is_none(prey)) {
+        return(NULL)
+      }
+      press <- tryCatch(pressure_built(), error = function(e) NULL)
+      ava <- current_mat()
+      req(ava)
+      info <- tryCatch(pressure_nc_info(), error = function(e) NULL)
+      dat <- if (!is.null(info)) info$dat else ps()$data
+      time_i <- if (is.null(input$pressure_time_i)) 1L else as.integer(input$pressure_time_i)[1]
+      if (!is.finite(time_i) || time_i < 1) time_i <- 1L
+      pressure_pair_by_box(
+        ava, dat$grp, dat$prm_bio,
+        if (is.null(info)) NULL else info$nc,
+        pred, prey,
+        pred_stage = input$pred_stage,
+        prey_stage = input$prey_stage,
+        time_i = time_i,
+        stocks = if (is.null(press)) NULL else press$stocks
+      )
+    })
+
+    bgm_poly <- reactive({
+      snap <- ps()
+      dat <- snap$data
+      path <- find_bgm_path(
+        explicit = c(
+          if (!is.null(dat)) dat$bgm_path else NA_character_,
+          snap$paths$bgm
+        ),
+        config_dir = snap$config_dir,
+        output_dir = snap$output_dir,
+        prm_paths = c(snap$paths$run_prm, snap$paths$bio_prm, snap$paths$force_prm)
+      )
+      if (!path_ok(path)) return(NULL)
+      read_bgm_polygons(path)
+    })
+
+    output$pressure_map <- plotly::renderPlotly({
+      if (!identical(input$view_type, "pressure")) {
+        return(spatial_empty_plotly("Switch to Predation pressure to map per-box loss."))
+      }
+      if (pprey_is_none(input$pred_group) || pprey_is_none(input$prey_group)) {
+        return(spatial_empty_plotly(
+          "Select a predator and prey (or click a matrix cell) to map pressure per box."
+        ))
+      }
+      poly <- tryCatch(bgm_poly(), error = function(e) NULL)
+      by_box <- tryCatch(pressure_by_box(), error = function(e) NULL)
+      if (is.null(poly) || nrow(poly) == 0) {
+        return(spatial_empty_plotly("Load a BGM file to map predation pressure per box."))
+      }
+      metric <- if (is.null(input$pressure_metric)) "frac_day" else input$pressure_metric
+      poly <- pressure_map_polygons(poly, by_box, metric)
+      sel <- input$pressure_box
+      sel_box <- if (is.null(sel) || identical(as.character(sel)[1], "all")) {
+        NULL
+      } else {
+        suppressWarnings(as.integer(sel)[1])
+      }
+      vals <- if ("Value" %in% names(poly)) poly$Value else numeric()
+      fill_lim <- suppressWarnings(range(vals, na.rm = TRUE))
+      if (!all(is.finite(fill_lim)) || !is.finite(diff(fill_lim)) ||
+          diff(fill_lim) == 0) {
+        mx <- if (length(vals) && any(is.finite(vals))) {
+          max(vals[is.finite(vals)], na.rm = TRUE)
+        } else {
+          0
+        }
+        fill_lim <- c(0, if (is.finite(mx) && mx > 0) mx else 1)
+      }
+      plot_spatial_map_plotly(
+        poly,
+        fill_lim = fill_lim,
+        fill_high = "#A33B20",
+        selected_box = sel_box,
+        title = paste0(
+          pressure_metric_label(metric), " — ",
+          input$pred_group, " on ", input$prey_group
+        ),
+        legend = switch(as.character(metric),
+                        t_day = "t / day",
+                        frac_year = "/ year",
+                        "/ day")
+      )
+    })
+
     output$bug_table <- DT::renderDataTable({
       if (identical(input$view_type, "diagnostics")) {
         ava <- current_mat()
@@ -570,7 +751,7 @@ feeding_server <- function(id, project = NULL) {
         press <- tryCatch(pressure_built(), error = function(e) NULL)
         if (is.null(press) || is.null(press$cells)) {
           return(ra_datatable(data.frame(
-            Note = "Load biology.prm, groups and init.nc to compute expected predation pressure."
+            Note = "Load biology.prm, groups and a biomass NetCDF to compute expected predation pressure."
           )))
         }
         sel <- tryCatch(selected_cell(), error = function(e) NULL)
@@ -579,9 +760,32 @@ feeding_server <- function(id, project = NULL) {
           tab <- pressure_flag_table(press)
         }
         cmp <- tryCatch({
-          dat <- ensure_diet(ps()$data, ps()$paths)
+          dat <- tryCatch(
+            ensure_project_data(ps(), c("diet", "nc_prod", "nc_out")),
+            error = function(e) NULL
+          )
+          if (is.null(dat)) dat <- tryCatch(ensure_diet(ps()$data, ps()$paths),
+                                           error = function(e) ps()$data)
           diet <- if (!is.null(dat$diet_full)) dat$diet_full else dat$diet_time
-          pressure_vs_dietcheck(press, diet, input$pred_group, input$prey_group)
+          pred_mort <- dat$pred_mort
+          if (is.null(pred_mort)) {
+            pred_mort <- tryCatch(ps()$data$pred_mort, error = function(e) NULL)
+          }
+          time_i <- if (is.null(input$pressure_time_i)) 1L else {
+            as.integer(input$pressure_time_i)[1]
+          }
+          if (!is.finite(time_i) || time_i < 1) time_i <- 1L
+          prod <- tryCatch(
+            prey_production_t_day(dat$nc_prod, dat$nc_out, dat$grp,
+                                  input$prey_group, time_i),
+            error = function(e) NA_real_
+          )
+          if (is.finite(prod) && is.data.frame(tab) && "Prey" %in% names(tab)) {
+            tab <- pressure_flag_vs_production(tab, input$prey_group, prod)
+          }
+          pressure_vs_realised(
+            press, diet, pred_mort, input$pred_group, input$prey_group, prod
+          )
         }, error = function(e) NULL)
         if (!is.null(cmp) && nrow(cmp) > 0 &&
             !pprey_is_none(input$pred_group) && !pprey_is_none(input$prey_group)) {
@@ -601,7 +805,13 @@ feeding_server <- function(id, project = NULL) {
             Flag = cmp$Note,
             stringsAsFactors = FALSE
           )
-          tab <- rbind(tab, extra)
+          extra <- extra[, intersect(names(tab), names(extra)), drop = FALSE]
+          if (ncol(extra) && ncol(tab)) {
+            missing <- setdiff(names(tab), names(extra))
+            for (nm in missing) extra[[nm]] <- NA
+            extra <- extra[, names(tab), drop = FALSE]
+            tab <- rbind(tab, extra)
+          }
         }
         return(ra_datatable(tab, options = list(pageLength = 10, dom = "tip")))
       }
@@ -613,6 +823,7 @@ feeding_server <- function(id, project = NULL) {
     keep_outputs_alive(output, "banner")
     keep_outputs_alive(output, "feeding_plot_gg")
     keep_outputs_alive(output, "matrix_caption")
+    keep_outputs_alive(output, "pressure_map")
   })
 }
 

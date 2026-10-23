@@ -62,9 +62,10 @@ feeding term in the current User Guide.
 
 predcase_XXX chooses Holling Type II (0), Type I (1) or Type III (2).
 The Feeding tab Predation pressure view fills a pPREY-shaped matrix
-with the implied prey-biomass loss rate at t0 from C, mum, E, gape
-and the initial-conditions NetCDF. That is not a DietCheck
-proportion.
+with the implied prey-biomass loss rate from C, mum, E, gape and
+biomass in init.nc or output.nc at a chosen time. The selected pair
+also has a per-box map and a compare to DietCheck, SpecificPredMort
+and prey production. That is not a DietCheck proportion.
 
 ## ResN and StructN
 

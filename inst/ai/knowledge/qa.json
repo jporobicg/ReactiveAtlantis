@@ -23,6 +23,13 @@
       "sources": ["fixture-manuals", "reactiveatlantis-local"]
     },
     {
+      "qa_id": "qa-predation-pressure-map",
+      "question": "Can predation pressure use output biomass and map it per box?",
+      "status": "confirmed",
+      "tool_ids": ["feeding"],
+      "sources": ["fixture-manuals", "reactiveatlantis-local"]
+    },
+    {
       "qa_id": "qa-ml",
       "question": "Is mL fishing mortality?",
       "status": "confirmed",

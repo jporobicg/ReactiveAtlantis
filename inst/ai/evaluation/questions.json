@@ -1219,7 +1219,7 @@
         ],
         "must_not_invent_numbers": true
       },
-      "rubric_notes": "Feeding tab, Predation pressure view. pPREY-shaped matrix of implied prey loss at t0."
+      "rubric_notes": "Feeding tab, Predation pressure view. pPREY-shaped matrix of implied prey loss from init or output biomass; map and realised compare for the selected pair."
     },
     {
       "id": "q92",
@@ -1256,6 +1256,24 @@
         "must_not_invent_numbers": true
       },
       "rubric_notes": "KDENR is recruitment, not a feeding refuge. Pressure view does not apply it."
+    },
+    {
+      "id": "q94",
+      "kind": "success",
+      "question": "Can predation pressure use output biomass and map it per box?",
+      "expect": {
+        "in_scope": true,
+        "source_types": [
+          "reactive_code",
+          "manual"
+        ],
+        "must_cite": true,
+        "nav_ids": [
+          "feeding"
+        ],
+        "must_not_invent_numbers": true
+      },
+      "rubric_notes": "Feeding Predation pressure view: biomass source init.nc or output.nc, time step, per-box map for the selected pair, DietCheck/SpecificPredMort/production compare."
     }
   ]
 }

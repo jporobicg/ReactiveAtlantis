@@ -26,7 +26,9 @@ section 10.2.5 (size refuge). Those names also appear with
     Gr_j = I * predator_scale * (B*_j / A)
 
 with predator_scale = numbers when flagfishrates = 0 and predator
-mg N when flagfishrates = 1. KDENR is a recruitment parameter in
+mg N when flagfishrates = 1. Biomass may be taken from init.nc or
+output.nc at a chosen time step; Gr_j is the predation-mortality
+flux on the prey in that box. KDENR is a recruitment parameter in
 the current manuals and is not applied to feeding.
 
 Where this fixture disagrees with versioned code, report both and do not

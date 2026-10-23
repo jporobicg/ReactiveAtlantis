@@ -92,7 +92,7 @@
       "hypotheses": [
         {"id": "predators", "expected": "Predation and the predation mortality stack rise together.", "counter": "Predation stack is small."}
       ],
-      "checks": ["Predation", "Mortality", "Compare for the predator", "Feeding predation pressure", "Spatial"],
+      "checks": ["Predation", "Mortality", "Compare for the predator", "Feeding predation pressure matrix, map and production flags", "Spatial"],
       "interpretation": "High predation can be predator biomass, overlap, or pPREY.",
       "what_not_to_conclude": "That pPREY must be reduced.",
       "tool_ids": ["predation", "mortality", "compare", "feeding", "spatial"],

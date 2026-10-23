@@ -157,9 +157,10 @@ ra_ai_nav_catalog <- function() {
         "click to set predator and prey dropdowns and highlight the row/column;",
         "bar charts of the selected predator row and prey column.",
         "Predation pressure view: the same matrix filled with expected prey",
-        "loss per day from the Atlantis Holling equations at t0 (C, mum, E,",
-        "predcase, KLP/KUP, init.nc). Realised DietCheck and consumed biomass",
-        "for the same pair. Diagnostics and compare stay as secondary views."
+        "loss per day from the Atlantis Holling equations (C, mum, E,",
+        "predcase, KLP/KUP) using init.nc or output.nc at a chosen time.",
+        "Per-box map for the selected pair; DietCheck, SpecificPredMort and",
+        "production compare. Diagnostics and compare stay as secondary views."
       ),
       keywords = c("feeding", "pprey", "gape", "availability", "preference",
                    "klp", "kup", "starv", "mum", "dietcheck", "diet",
