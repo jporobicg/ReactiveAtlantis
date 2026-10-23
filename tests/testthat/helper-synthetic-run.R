@@ -210,7 +210,23 @@ write_synthetic_atlantis_run <- function(dir) {
     COD.0.S0.M2 = 0.3, COD.1.S0.M2 = 0.28
   )
   utils::write.table(mort, file.path(dir, "SpecificMort.txt"), row.names = FALSE, quote = FALSE)
-  utils::write.table(mort, file.path(dir, "SpecificPredMort.txt"), row.names = FALSE, quote = FALSE)
+  pred_mort <- data.frame(
+    Time = rep(c(0, 365, 730), each = 2),
+    Group = "COD",
+    Cohort = rep(0:1, times = 3),
+    Stock = 0,
+    COD = c(0.05, 0.02, 0.06, 0.03, 0.04, 0.02),
+    PHY = c(0.25, 0.26, 0.22, 0.24, 0.20, 0.21),
+    stringsAsFactors = FALSE
+  )
+  utils::write.table(pred_mort, file.path(dir, "SpecificPredMort.txt"),
+                     row.names = FALSE, quote = FALSE)
+  utils::write.table(
+    data.frame(Time = c(0, 365, 730), COD.M = c(0.4, 0.42, 0.38),
+               COD.F = c(0.1, 0.11, 0.12), PHY.M = c(0.2, 0.21, 0.19),
+               PHY.F = c(0, 0, 0)),
+    file.path(dir, "Mort.txt"), row.names = FALSE, quote = FALSE
+  )
   writeLines(c(
     "flagnut 0",
     "KN_PHY 0.5",
@@ -269,7 +285,7 @@ split_atlantis_pair <- function(src, dest = NULL) {
          grepl("catch|obs", bn, ignore.case = TRUE))
   }
   is_output <- function(bn) {
-    grepl("BiomIndx|DietCheck|SSB\\.txt|YOY\\.txt|SpecificMort|SpecificPred",
+    grepl("BiomIndx|DietCheck|SSB\\.txt|YOY\\.txt|SpecificMort|SpecificPred|Mort\\.txt",
           bn, ignore.case = TRUE) ||
       grepl("CATCH|PROD", bn, ignore.case = TRUE) ||
       (grepl("\\.nc$", bn, ignore.case = TRUE) &&

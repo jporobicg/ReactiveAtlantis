@@ -80,7 +80,7 @@ Confirmed `nav_panel()` titles and module ids in `inst/shiny/app.R`:
 - growth: `groups`, `output_nc`, `bio_prm`
 - catch: `groups`, `fisheries`, `catch_nc`
 - feeding: `groups`, `bio_prm`, `init_nc`
-- mortality: `groups`, `specific_mort`, `specific_pred_mort`
+- mortality: `groups`, `specific_mort` (SpecificPredMort and Mort.txt optional)
 
 ### What does **not** exist as a unified-app tab
 
@@ -110,10 +110,10 @@ Pipeline (all in `project_store.R`):
 5. `ensure_project_data()` / `ensure_diet()` / `ensure_inf_box()` —
    lazy open on demand.
 
-`FILE_ROLES` (20): `groups`, `fisheries`, `output_nc`, `output_nc_old`,
+`FILE_ROLES` (21): `groups`, `fisheries`, `output_nc`, `output_nc_old`,
 `catch_nc`, `init_nc`, `prod_nc`, `biomindx`, `dietcheck`, `diet_bypol`,
 `ssb`, `yoy`, `bio_prm`, `run_prm`, `force_prm`, `bgm`, `specific_mort`,
-`specific_pred_mort`, `ext_catch`, `obs_csv`.
+`specific_pred_mort`, `mort`, `ext_catch`, `obs_csv`.
 
 Eager `load_project()` fields: `paths`, `grp`, `fish`, `biomindx`,
 `yoy`, `ssb`, `spe_mort`, `pred_mort`, `prm_bio`, `prm_run`, `bgm_path`,

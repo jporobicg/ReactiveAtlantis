@@ -6,7 +6,7 @@ FILE_ROLES <- c(
   "groups", "fisheries", "output_nc", "output_nc_old", "catch_nc", "init_nc",
   "prod_nc", "biomindx", "dietcheck", "diet_bypol", "ssb", "yoy",
   "bio_prm", "run_prm", "force_prm", "bgm", "specific_mort", "specific_pred_mort",
-  "ext_catch", "obs_csv"
+  "mort", "ext_catch", "obs_csv"
 )
 
 FILE_LABELS <- c(
@@ -28,6 +28,7 @@ FILE_LABELS <- c(
   prod_nc = "Production NetCDF (PROD)",
   specific_mort = "SpecificMort.txt",
   specific_pred_mort = "SpecificPredMort.txt",
+  mort = "Mort.txt",
   ext_catch = "External catch CSV",
   obs_csv = "Observations CSV"
 )
@@ -42,7 +43,7 @@ CONFIG_ROLES <- c(
 OUTPUT_ROLES <- c(
   "output_nc", "output_nc_old", "catch_nc", "prod_nc",
   "biomindx", "dietcheck", "diet_bypol", "ssb", "yoy",
-  "specific_mort", "specific_pred_mort"
+  "specific_mort", "specific_pred_mort", "mort"
 )
 
 TOOL_REQUIREMENTS <- list(
@@ -54,7 +55,7 @@ TOOL_REQUIREMENTS <- list(
   growth = c("groups", "output_nc", "bio_prm"),
   catch = c("groups", "fisheries", "catch_nc"),
   feeding = c("groups", "bio_prm", "init_nc"),
-  mortality = c("groups", "specific_mort", "specific_pred_mort"),
+  mortality = c("groups", "specific_mort"),
   spatial = c("groups", "output_nc", "bgm"),
   consumption = c("groups", "prod_nc"),
   physics = c("output_nc"),
@@ -259,6 +260,7 @@ role_is_loaded <- function(project, role) {
     bgm = path_ok(dat$bgm_path) || !is.null(dat$inf_box),
     specific_mort = !is.null(dat$spe_mort) && NROW(dat$spe_mort) > 0,
     specific_pred_mort = !is.null(dat$pred_mort) && NROW(dat$pred_mort) > 0,
+    mort = !is.null(dat$mort) && NROW(dat$mort) > 0,
     ext_catch = !is.null(dat$ext_catch),
     obs_csv = !is.null(dat$observations),
     FALSE
@@ -398,6 +400,7 @@ detect_project_files <- function(folder) {
   paths$yoy <- pick_first(files, "YOY\\.txt$")
   paths$specific_pred_mort <- pick_first(files, "SpecificPredMort\\.txt$")
   paths$specific_mort <- pick_first(files, "SpecificMort\\.txt$", exclude = "Pred")
+  paths$mort <- pick_first(files, "Mort\\.txt$", exclude = "Specific|Pred")
   paths$bgm <- pick_first(files, "\\.bgm$")
   paths$catch_nc <- pick_first(files, "CATCH.*\\.nc$|Catch.*\\.nc$")
   paths$prod_nc <- pick_first(files, "PROD.*\\.nc$|Prod.*\\.nc$")
@@ -665,6 +668,7 @@ load_project <- function(paths) {
     ssb = NULL,
     spe_mort = NULL,
     pred_mort = NULL,
+    mort = NULL,
     prm_bio = NULL,
     prm_run = NULL,
     bgm_path = NULL,
@@ -729,6 +733,9 @@ load_project <- function(paths) {
   }
   if (path_ok(paths$specific_pred_mort)) {
     out$pred_mort <- tryCatch(read_mort_table(paths$specific_pred_mort), error = function(e) NULL)
+  }
+  if (path_ok(paths$mort)) {
+    out$mort <- tryCatch(read_mort_table(paths$mort), error = function(e) NULL)
   }
   if (path_ok(paths$bio_prm)) {
     out$prm_bio <- tryCatch(readLines(paths$bio_prm, warn = FALSE), error = function(e) NULL)
@@ -826,6 +833,7 @@ project_sidebar_ui <- function(id) {
         shiny::fileInput(ns("up_bgm"), "BGM", accept = ".bgm"),
         shiny::fileInput(ns("up_smort"), "SpecificMort.txt", accept = ".txt"),
         shiny::fileInput(ns("up_pmort"), "SpecificPredMort.txt", accept = ".txt"),
+        shiny::fileInput(ns("up_mort"), "Mort.txt", accept = ".txt"),
         shiny::fileInput(ns("up_ext_catch"), "External catch CSV", accept = ".csv"),
         shiny::fileInput(ns("up_obs"), "Observations CSV", accept = ".csv")
       )
@@ -873,6 +881,7 @@ project_server <- function(id) {
         bgm = upload_path(input$up_bgm),
         specific_mort = upload_path(input$up_smort),
         specific_pred_mort = upload_path(input$up_pmort),
+        mort = upload_path(input$up_mort),
         ext_catch = upload_path(input$up_ext_catch),
         obs_csv = upload_path(input$up_obs)
       )

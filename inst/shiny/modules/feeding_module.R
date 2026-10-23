@@ -62,6 +62,10 @@ feeding_ui <- function(id) {
         div(class = "ra-scroll-plot",
             plotly::plotlyOutput(ns("feeding_plot_gg"), height = "720px")),
         fluidRow(
+          column(6, plotOutput(ns("diet_prop_plot"), height = "280px")),
+          column(6, plotOutput(ns("consumed_plot"), height = "280px"))
+        ),
+        fluidRow(
           column(6, plotOutput(ns("pred_bars"), height = "280px")),
           column(6, plotOutput(ns("prey_bars"), height = "280px"))
         )
@@ -323,6 +327,90 @@ feeding_server <- function(id, project = NULL) {
         ed <- current_mat()
         req(orig, ed)
         plot_pprey_compare(orig, ed)
+      })
+    })
+
+    diet_pair <- reactive({
+      pred <- input$pred_group
+      prey <- input$prey_group
+      if (pprey_is_none(pred) || pprey_is_none(prey)) {
+        out <- data.frame(Time = numeric(), Proportion = numeric(),
+                          stringsAsFactors = FALSE)
+        attr(out, "reason") <- "Select a predator and prey (or click a matrix cell)."
+        return(out)
+      }
+      dat <- tryCatch(ensure_project_data(ps(), "diet"), error = function(e) NULL)
+      diet <- if (!is.null(dat$diet_time)) dat$diet_time else dat$diet_full
+      dietcheck_pair_series(diet, pred, prey)
+    })
+
+    consumed_pair <- reactive({
+      pred <- input$pred_group
+      prey <- input$prey_group
+      if (pprey_is_none(pred) || pprey_is_none(prey)) {
+        out <- data.frame(Time = numeric(), Tonnes = numeric(),
+                          stringsAsFactors = FALSE)
+        attr(out, "reason") <- "Select a predator and prey (or click a matrix cell)."
+        return(out)
+      }
+      dat <- tryCatch(ensure_project_data(ps(), c("nc_prod", "nc_out", "diet")),
+                      error = function(e) NULL)
+      if (is.null(dat) || is.null(dat$nc_prod)) {
+        out <- data.frame(Time = numeric(), Tonnes = numeric(),
+                          stringsAsFactors = FALSE)
+        attr(out, "reason") <- "Load outputPROD.nc to plot consumed biomass."
+        return(out)
+      }
+      tot <- tryCatch(consumed_tonnes(dat$nc_prod, dat$nc_out, dat$grp, pred),
+                      error = function(e) NULL)
+      diet <- if (!is.null(dat$diet_time)) dat$diet_time else dat$diet_full
+      consumed_pair_series(if (is.null(tot)) NULL else tot$tonnes, diet, pred, prey)
+    })
+
+    output$diet_prop_plot <- renderPlot({
+      plot_or_message("Load DietCheck.txt to plot realised diet", {
+        df <- diet_pair()
+        if (is.null(df) || nrow(df) == 0) {
+          plot_message(attr(df, "reason") %||% "Load DietCheck.txt to plot realised diet")
+          return(invisible(NULL))
+        }
+        origin <- tryCatch(ensure_project_data(ps(), "nc_out")$origin,
+                           error = function(e) ps()$data$origin)
+        df$Date <- days_as_date(df$Time, origin)
+        p <- ggplot2::ggplot(df, ggplot2::aes(x = Date, y = Proportion))
+        p <- p + ggplot2::geom_line(linewidth = 0.9, colour = "#0B3C5D", na.rm = TRUE)
+        p <- p + ggplot2::geom_point(size = 1.6, colour = "#0B3C5D", na.rm = TRUE)
+        p <- p + ggplot2::labs(
+          title = paste("DietCheck —", input$pred_group, "eating", input$prey_group),
+          x = "Year", y = "Diet proportion"
+        )
+        p <- p + theme_reactiveatlantis()
+        ra_scale_x_year(p, df$Date)
+      })
+    })
+
+    output$consumed_plot <- renderPlot({
+      plot_or_message("Load outputPROD.nc to plot consumed biomass", {
+        df <- consumed_pair()
+        if (is.null(df) || nrow(df) == 0) {
+          plot_message(attr(df, "reason") %||% "Load outputPROD.nc to plot consumed biomass")
+          return(invisible(NULL))
+        }
+        origin <- tryCatch(ensure_project_data(ps(), "nc_out")$origin,
+                           error = function(e) ps()$data$origin)
+        df$Date <- days_as_date(df$Time, origin)
+        pal <- tryCatch(get_fg_colors(input$prey_group, ps()$data$fg_palette),
+                        error = function(e) c("#A33B20"))
+        col <- if (length(pal)) unname(pal[1]) else "#A33B20"
+        p <- ggplot2::ggplot(df, ggplot2::aes(x = Date, y = Tonnes))
+        p <- p + ggplot2::geom_line(linewidth = 0.9, colour = col, na.rm = TRUE)
+        p <- p + ggplot2::geom_point(size = 1.6, colour = col, na.rm = TRUE)
+        p <- p + ggplot2::labs(
+          title = paste("Consumed biomass —", input$pred_group, "on", input$prey_group),
+          x = "Year", y = "Tonnes"
+        )
+        p <- p + theme_reactiveatlantis()
+        ra_scale_x_year(p, df$Date)
       })
     })
 

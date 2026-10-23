@@ -126,10 +126,10 @@ test_that("folder load fills every tab with a bound plot or table", {
     list(title = "Multi-run", ids = c("#ensemble-empty_state", "#ensemble-ens_plot"), shot = "07_multirun"),
     list(title = "Predation", ids = c("#predation-plot_pred_gg"), shot = "08_predation"),
     list(title = "Food web", ids = c("#foodweb-network_gg", "#foodweb-trophic_table"), shot = "09_foodweb"),
-    list(title = "Recruitment", ids = c("#recruitment-plot_yoy"), shot = "10_recruitment"),
+    list(title = "Recruitment", ids = c("#recruitment-plot_yoy", "#recruitment-plot_sr_series"), shot = "10_recruitment"),
     list(title = "Growth", ids = c("#growth-growth_plot"), shot = "11_growth"),
     list(title = "Catch", ids = c("#catch-catch_plot_gg"), shot = "12_catch"),
-    list(title = "Feeding", ids = c("#feeding-feeding_plot_gg"), shot = "13_feeding"),
+    list(title = "Feeding", ids = c("#feeding-feeding_plot_gg", "#feeding-diet_prop_plot"), shot = "13_feeding"),
     list(title = "Mortality", ids = c("#mortality-mortality_plot_gg"), shot = "14_mortality")
   )
 
@@ -149,6 +149,42 @@ test_that("folder load fills every tab with a bound plot or table", {
     expect_true(found, info = paste(tab$title, "empty:", substr(last_html, 1, 400)))
     save_shot(app, shot_dir, tab$shot)
   }
+
+  expect_true(click_nav(app, "Mortality"))
+  app$set_inputs(`mortality-view` = "predator", `mortality-fg` = "COD", wait_ = FALSE)
+  app$wait_for_idle(timeout = 20000)
+  expect_true(has_bound_output(app$get_html("#mortality-mortality_plot_gg")))
+  save_shot(app, shot_dir, "14b_mortality_predator")
+  app$set_inputs(`mortality-view` = "mort", wait_ = FALSE)
+  app$wait_for_idle(timeout = 20000)
+  expect_true(has_bound_output(app$get_html("#mortality-mortality_plot_gg")))
+  save_shot(app, shot_dir, "14c_mortality_morttxt")
+
+  expect_true(click_nav(app, "Recruitment"))
+  app$set_inputs(`recruitment-analysis_type` = "sr", `recruitment-fg_yoy` = "COD",
+                 wait_ = FALSE)
+  app$wait_for_idle(timeout = 20000)
+  expect_true(has_bound_output(app$get_html("#recruitment-plot_sr_series")) ||
+                has_bound_output(app$get_html("#recruitment-plot_sr_scatter")))
+  save_shot(app, shot_dir, "10b_recruitment_sr")
+
+  expect_true(click_nav(app, "Feeding"))
+  try(app$set_inputs(`feeding-view_type` = "matrix",
+                     `feeding-pred_group` = "COD", `feeding-prey_group` = "PHY",
+                     wait_ = FALSE), silent = TRUE)
+  app$wait_for_idle(timeout = 20000)
+  expect_true(has_bound_output(app$get_html("#feeding-diet_prop_plot")) ||
+                nchar(app$get_html("#feeding-consumed_plot")) > 20)
+  save_shot(app, shot_dir, "13b_feeding_realised")
+
+  expect_true(click_nav(app, "Spatial"))
+  app$set_inputs(`spatial-view` = "overlap", `spatial-fg` = "COD",
+                 `spatial-prey` = "PHY", `spatial-ts_scope` = "system",
+                 wait_ = FALSE)
+  app$wait_for_idle(timeout = 30000)
+  expect_true(has_bound_output(app$get_html("#spatial-map_plot")) ||
+                has_bound_output(app$get_html("#spatial-box_ts")))
+  save_shot(app, shot_dir, "04b_spatial_overlap")
 
   click_nav(app, "Compare")
   app$wait_for_idle(timeout = 15000)
@@ -611,6 +647,42 @@ test_that("fresh install draws Spatial map and full pPREY for a NESP-style pair"
   feed <- app$get_html("#feeding-feeding_plot_gg")
   expect_true(plot_is_real(feed) || nchar(feed) > 40)
   save_shot(app, shot_dir, "fresh_install_feeding_northsea")
+
+  expect_true(click_nav(app, "Mortality"))
+  app$set_inputs(`mortality-fg` = "COD", `mortality-view` = "source", wait_ = FALSE)
+  app$wait_for_idle(timeout = 40000)
+  expect_true(plot_is_real(app$get_html("#mortality-mortality_plot_gg")))
+  save_shot(app, shot_dir, "fresh_install_mortality_source")
+  app$set_inputs(`mortality-view` = "predator", wait_ = FALSE)
+  app$wait_for_idle(timeout = 40000)
+  save_shot(app, shot_dir, "fresh_install_mortality_predator")
+  app$set_inputs(`mortality-view` = "mort", wait_ = FALSE)
+  app$wait_for_idle(timeout = 40000)
+  save_shot(app, shot_dir, "fresh_install_mortality_morttxt")
+
+  expect_true(click_nav(app, "Recruitment"))
+  app$set_inputs(`recruitment-analysis_type` = "sr", `recruitment-fg_yoy` = "COD",
+                 wait_ = FALSE)
+  app$wait_for_idle(timeout = 40000)
+  expect_true(plot_is_real(app$get_html("#recruitment-plot_sr_series")) ||
+                plot_is_real(app$get_html("#recruitment-plot_sr_scatter")) ||
+                nchar(app$get_html("#recruitment-plot_sr_series")) > 20)
+  save_shot(app, shot_dir, "fresh_install_recruitment_sr")
+
+  expect_true(click_nav(app, "Feeding"))
+  try(app$set_inputs(`feeding-pred_group` = "COD", `feeding-prey_group` = "PHD",
+                     wait_ = FALSE), silent = TRUE)
+  app$wait_for_idle(timeout = 40000)
+  save_shot(app, shot_dir, "fresh_install_feeding_realised")
+
+  expect_true(click_nav(app, "Spatial"))
+  app$set_inputs(`spatial-view` = "overlap", `spatial-fg` = "COD",
+                 `spatial-prey` = "PHD", `spatial-ts_scope` = "system",
+                 wait_ = FALSE)
+  app$wait_for_idle(timeout = 60000)
+  expect_true(plot_is_real(app$get_html("#spatial-map_plot")) ||
+                nchar(app$get_html("#spatial-box_ts")) > 20)
+  save_shot(app, shot_dir, "fresh_install_spatial_overlap")
 })
 
 

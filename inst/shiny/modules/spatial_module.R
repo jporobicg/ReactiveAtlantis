@@ -10,22 +10,33 @@ spatial_ui <- function(id) {
       sidebar = sidebar(
         width = 300, open = "open",
         selectInput(ns("view"), "View",
-                    choices = c("Map" = "map", "By age class" = "age"),
+                    choices = c("Map" = "map",
+                                "By age class" = "age",
+                                "Predator-prey overlap" = "overlap"),
                     selected = "map"),
-        selectInput(ns("kind"), "Variable",
-                    choices = c("Biomass" = "biomass",
-                                "Numbers" = "numbers",
-                                "Tracer" = "tracer"),
-                    selected = "biomass"),
+        conditionalPanel(
+          "input.view != 'overlap'", ns = ns,
+          selectInput(ns("kind"), "Variable",
+                      choices = c("Biomass" = "biomass",
+                                  "Numbers" = "numbers",
+                                  "Tracer" = "tracer"),
+                      selected = "biomass")
+        ),
         selectInput(ns("fg"), "Functional group", choices = character()),
         conditionalPanel(
-          "input.kind == 'tracer'", ns = ns,
+          "input.view == 'overlap'", ns = ns,
+          selectInput(ns("prey"), "Prey group", choices = character()),
+          p(class = "ra-muted",
+            "Per-box overlap is 2 min(Bpred, Bprey) / (Bpred + Bprey). The series is Schoener's D across boxes.")
+        ),
+        conditionalPanel(
+          "input.kind == 'tracer' && input.view != 'overlap'", ns = ns,
           selectInput(ns("tracer"), "Tracer", choices = character())
         ),
         selectInput(ns("layer"), "Depth layer",
                     choices = c("All layers (integrated)" = "integrated")),
         conditionalPanel(
-          "input.view == 'map'", ns = ns,
+          "input.view == 'map' || input.view == 'overlap'", ns = ns,
           sliderInput(ns("time_i"), "Time step", min = 1, max = 1, value = 1, step = 1),
           textOutput(ns("time_lab")),
           fluidRow(
@@ -53,7 +64,7 @@ spatial_ui <- function(id) {
         )
       ),
       conditionalPanel(
-        "input.view == 'map'", ns = ns,
+        "input.view == 'map' || input.view == 'overlap'", ns = ns,
         uiOutput(ns("map_status")),
         plotly::plotlyOutput(ns("map_plot"), height = "560px"),
         plotOutput(ns("box_ts"), height = "280px")
@@ -104,6 +115,7 @@ spatial_server <- function(id, project = NULL) {
       } else {
         update_select_keep(session, "fg", fg_select_choices(ps()$data$grp), input$fg)
       }
+      update_select_keep(session, "prey", fg_select_choices(ps()$data$grp), input$prey)
       tr <- tracers()
       if (length(tr) > 0) {
         labs <- names(tr)
@@ -120,6 +132,7 @@ spatial_server <- function(id, project = NULL) {
     })
 
     fg_d <- ra_debounce(shiny::reactive(input$fg), 250)
+    prey_d <- ra_debounce(shiny::reactive(input$prey), 250)
     layer_d <- ra_debounce(shiny::reactive(input$layer), 250)
 
     bgm_lookup <- reactive({
@@ -145,7 +158,46 @@ spatial_server <- function(id, project = NULL) {
       read_bgm_polygons(hit$path)
     })
 
+    overlap_data <- reactive({
+      dat <- tryCatch(ensure_project_data(ps(), c("nc_out", "inf_box")),
+                      error = function(e) NULL)
+      if (is.null(dat) || is.null(dat$nc_out) || is.null(dat$grp) ||
+          is.null(fg_d()) || is.null(prey_d())) {
+        return(spatial_overlap_index(NULL, NULL))
+      }
+      info <- atlantis_layer_info(dat$nc_out, dat$inf_box)
+      key <- layer_d()
+      if (is.null(key) || !nzchar(as.character(key))) key <- "integrated"
+      pred <- spatial_box_values(
+        dat$nc_out, dat$grp, kind = "biomass", fg_code = fg_d(),
+        layer_key = key, info = info
+      )
+      prey <- spatial_box_values(
+        dat$nc_out, dat$grp, kind = "biomass", fg_code = prey_d(),
+        layer_key = key, info = info
+      )
+      ov <- spatial_overlap_index(pred, prey)
+      if (nrow(ov$by_box) == 0) {
+        miss <- c(
+          if (is.null(pred) || nrow(pred) == 0) fg_d(),
+          if (is.null(prey) || nrow(prey) == 0) prey_d()
+        )
+        attr(ov$by_box, "reason") <- paste(
+          "No box biomass for", paste(unique(miss), collapse = " and "),
+          "in output.nc (need Nums/ResN/StructN or _N)."
+        )
+      }
+      ov
+    })
+
     box_vals <- reactive({
+      if (identical(input$view, "overlap")) {
+        ov <- overlap_data()
+        vals <- ov$by_box
+        n_t <- if (!is.null(vals) && nrow(vals) > 0) max(vals$Time) else 1
+        shiny::updateSliderInput(session, "time_i", min = 1, max = max(1, n_t))
+        return(vals)
+      }
       dat <- tryCatch(ensure_project_data(ps(), c("nc_out", "inf_box")),
                       error = function(e) NULL)
       if (is.null(dat) || is.null(dat$nc_out) || is.null(dat$grp)) {
@@ -206,6 +258,9 @@ spatial_server <- function(id, project = NULL) {
     }, ignoreNULL = TRUE)
 
     map_title <- function() {
+      if (identical(input$view, "overlap")) {
+        return(paste("Overlap", fg_d(), "×", prey_d()))
+      }
       info <- layer_info()
       lay_lab <- layer_label(info, layer_d())
       kind <- if (is.null(input$kind)) "biomass" else input$kind
@@ -263,7 +318,9 @@ spatial_server <- function(id, project = NULL) {
       }
       pal <- tryCatch(get_fg_colors(fg_d(), ps()$data$fg_palette),
                       error = function(e) c("#0B3C5D"))
-      fill_high <- if (identical(input$kind, "biomass") && length(pal)) {
+      fill_high <- if (identical(input$view, "overlap")) {
+        "#1D7874"
+      } else if (identical(input$kind, "biomass") && length(pal)) {
         unname(pal[1])
       } else {
         "#0B3C5D"
@@ -279,9 +336,7 @@ spatial_server <- function(id, project = NULL) {
       fl <- map_fill()
       plot_spatial_map(poly, fill_lim = fl$lim, fill_high = fl$high,
                        selected_box = input$box, title = map_title(),
-                       legend = if (identical(input$kind, "biomass")) "Biomass (t)"
-                       else if (identical(input$kind, "numbers")) "Numbers"
-                       else as.character(input$tracer))
+                       legend = spatial_legend_lab(input$view, input$kind, input$tracer))
     })
 
     output$map_plot <- plotly::renderPlotly({
@@ -299,9 +354,7 @@ spatial_server <- function(id, project = NULL) {
         plt <- plot_spatial_map_plotly(
           poly, fill_lim = fl$lim, fill_high = fl$high,
           selected_box = input$box, title = map_title(),
-          legend = if (identical(input$kind, "biomass")) "Biomass (t)"
-          else if (identical(input$kind, "numbers")) "Numbers"
-          else as.character(input$tracer)
+          legend = spatial_legend_lab(input$view, input$kind, input$tracer)
         )
       }
       if (ra_is_plotly(plt)) {
@@ -315,19 +368,36 @@ spatial_server <- function(id, project = NULL) {
 
     output$box_ts <- renderPlot({
       plot_or_message("Load a run to plot the selected box or the whole system", {
-      vals <- box_vals()
-      req(nrow(vals) > 0)
-      dat <- ensure_project_data(ps(), "nc_out")
-      scope <- if (is.null(input$ts_scope)) "box" else input$ts_scope
-      box <- as.integer(input$box)[1]
-      if (!is.finite(box)) box <- 0L
-      df <- spatial_ts_values(vals, scope = scope, box = box,
-                              boxes = unique(vals$Box))
-      ylab <- if (identical(input$kind, "biomass")) "Biomass (t)"
-      else if (identical(input$kind, "numbers")) "Numbers"
-      else as.character(input$tracer)
-      plot_spatial_ts(df, dat$time_dates, time_i = input$time_i,
-                      title = map_title(), ylab = ylab)
+      if (identical(input$view, "overlap") &&
+          identical(if (is.null(input$ts_scope)) "box" else input$ts_scope, "system")) {
+        ov <- overlap_data()
+        ts <- ov$by_time
+        if (is.null(ts) || nrow(ts) == 0) {
+          plot_message(attr(ov$by_box, "reason") %||%
+                         "Need biomass by box for both predator and prey.")
+          return(invisible(NULL))
+        }
+        dat <- ensure_project_data(ps(), "nc_out")
+        df <- data.frame(Time = ts$Time, Box = -1L, Value = ts$Schoener,
+                         Variable = "Schoener", stringsAsFactors = FALSE)
+        plot_spatial_ts(df, dat$time_dates, time_i = input$time_i,
+                        title = map_title(), ylab = "Schoener overlap")
+      } else {
+        vals <- box_vals()
+        req(nrow(vals) > 0)
+        dat <- ensure_project_data(ps(), "nc_out")
+        scope <- if (is.null(input$ts_scope)) "box" else input$ts_scope
+        box <- as.integer(input$box)[1]
+        if (!is.finite(box)) box <- 0L
+        df <- spatial_ts_values(vals, scope = scope, box = box,
+                                boxes = unique(vals$Box))
+        ylab <- if (identical(input$view, "overlap")) "Overlap"
+        else if (identical(input$kind, "biomass")) "Biomass (t)"
+        else if (identical(input$kind, "numbers")) "Numbers"
+        else as.character(input$tracer)
+        plot_spatial_ts(df, dat$time_dates, time_i = input$time_i,
+                        title = map_title(), ylab = ylab)
+      }
       })
     })
 
@@ -394,4 +464,11 @@ spatial_server <- function(id, project = NULL) {
     keep_outputs_alive(output, "map_status")
     keep_outputs_alive(output, "map_plot")
   })
+}
+
+spatial_legend_lab <- function(view, kind, tracer) {
+  if (identical(view, "overlap")) return("Overlap")
+  if (identical(kind, "biomass")) return("Biomass (t)")
+  if (identical(kind, "numbers")) return("Numbers")
+  as.character(tracer)
 }

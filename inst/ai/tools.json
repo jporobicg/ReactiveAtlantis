@@ -72,20 +72,21 @@
     {
       "tool_id": "spatial",
       "title": "Spatial",
-      "purpose": "Box map by layer and time; series; by-age in one box.",
+      "purpose": "Box map by layer and time; series; by-age; predator-prey overlap.",
       "example_questions": [
         "Where is the biomass in space?",
-        "Did the stock move into poor boxes?"
+        "Did the stock move into poor boxes?",
+        "Where do predator and prey overlap?"
       ],
       "preconditions": ["groups", "output_nc", "bgm"],
-      "function_refs": ["spatial_ui", "spatial_server", "plot_spatial_map"],
+      "function_refs": ["spatial_ui", "spatial_server", "plot_spatial_map", "spatial_overlap_index"],
       "navigation_target": "Spatial",
-      "what_to_look_for": "Per-box water layers, sediment last, unused boxes, time slider.",
-      "limitations": "Needs a parseable BGM. Map is empty without polygons.",
-      "keywords": ["spatial", "map", "box", "polygon", "bgm", "distribution", "layer", "depth", "sediment"],
+      "what_to_look_for": "Per-box water layers, sediment last, unused boxes, time slider. Overlap view: local 2 min(Bp,Bq)/(Bp+Bq) on the map; Schoener D in the series.",
+      "limitations": "Needs a parseable BGM. Map is empty without polygons. Overlap uses box biomass, not layers.",
+      "keywords": ["spatial", "map", "box", "polygon", "bgm", "distribution", "layer", "depth", "sediment", "overlap", "schoener"],
       "module": "spatial",
-      "inputs": ["view", "kind", "fg", "tracer", "layer", "time_i", "play", "ts_scope", "box"],
-      "views": ["map", "age"]
+      "inputs": ["view", "kind", "fg", "prey", "tracer", "layer", "time_i", "play", "ts_scope", "box"],
+      "views": ["map", "age", "overlap"]
     },
     {
       "tool_id": "consumption",
@@ -177,19 +178,20 @@
     {
       "tool_id": "recruitment",
       "title": "Recruitment",
-      "purpose": "YOY, SSB, Beverton-Holt side panel.",
+      "purpose": "YOY, SSB, recruits vs spawning stock, Beverton-Holt side panel.",
       "example_questions": [
-        "What should I check when recruitment is low?"
+        "What should I check when recruitment is low?",
+        "Where do I plot recruits against SSB?"
       ],
       "preconditions": ["groups", "output_nc", "yoy", "bio_prm"],
-      "function_refs": ["recruitment_ui", "recruitment_server"],
+      "function_refs": ["recruitment_ui", "recruitment_server", "join_recruits_ssb"],
       "navigation_target": "Recruitment",
-      "what_to_look_for": "YOY.txt CODE.0, SSB, larvae from the curve.",
-      "limitations": "Recalculate is a curve what-if, not a saved official run.",
-      "keywords": ["recruit", "yoy", "ssb", "beverton", "alpha", "beta", "larvae", "kdenr"],
+      "what_to_look_for": "YOY.txt CODE.0, SSB, recruits vs SSB scatter, larvae from the curve.",
+      "limitations": "Recalculate is a curve what-if, not a saved official run. Recruits vs SSB uses loaded YOY and SSB tables.",
+      "keywords": ["recruit", "yoy", "ssb", "beverton", "alpha", "beta", "larvae", "kdenr", "stock recruit", "spawning stock"],
       "module": "recruitment",
       "inputs": ["analysis_type", "fg_yoy", "new_alpha", "new_beta", "recalc"],
-      "views": ["yoy", "ssb", "growth"]
+      "views": ["yoy", "ssb", "sr", "growth"]
     },
     {
       "tool_id": "growth",
@@ -228,17 +230,18 @@
     {
       "tool_id": "feeding",
       "title": "Feeding",
-      "purpose": "Full pPREY matrix, diagnostics, edited-versus-original compare.",
+      "purpose": "Full pPREY matrix, realised DietCheck and consumed biomass for the selected pair, diagnostics, edited-versus-original compare.",
       "example_questions": [
         "What is pPREY?",
-        "What does KLP represent?"
+        "What does KLP represent?",
+        "How does realised diet compare to pPREY?"
       ],
       "preconditions": ["groups", "bio_prm", "init_nc"],
-      "function_refs": ["feeding_ui", "feeding_server", "parse_pprey_rownames"],
+      "function_refs": ["feeding_ui", "feeding_server", "parse_pprey_rownames", "dietcheck_pair_series", "consumed_pair_series"],
       "navigation_target": "Feeding",
-      "what_to_look_for": "pPREY>0 with zero gape overlap; uneaten prey; DietCheck mismatch.",
-      "limitations": "pPREY is availability, not realised diet. In-session edits are not prm writes.",
-      "keywords": ["feeding", "pprey", "gape", "availability", "preference", "klp", "kup", "mum"],
+      "what_to_look_for": "pPREY>0 with zero gape overlap; uneaten prey; DietCheck mismatch; DietCheck proportion and consumed tonnes for the clicked predator/prey.",
+      "limitations": "pPREY is availability, not realised diet. In-session edits are not prm writes. Consumed biomass needs outputPROD.nc.",
+      "keywords": ["feeding", "pprey", "gape", "availability", "preference", "klp", "kup", "mum", "dietcheck", "realised diet", "consumed"],
       "module": "feeding",
       "inputs": ["view_type", "pred_group", "pred_stage", "prey_group", "prey_stage"],
       "views": ["matrix", "diagnostics", "compare"]
@@ -246,20 +249,21 @@
     {
       "tool_id": "mortality",
       "title": "Mortality",
-      "purpose": "Fishing, natural and predation mortality by age.",
+      "purpose": "Fishing, natural and predation mortality by age; predation by predator; Mort.txt F vs M.",
       "example_questions": [
         "What does mL represent?",
-        "Has fishing mortality increased?"
+        "Has fishing mortality increased?",
+        "Which predators drive predation mortality?"
       ],
-      "preconditions": ["groups", "specific_mort", "specific_pred_mort"],
-      "function_refs": ["mortality_ui", "mortality_server"],
+      "preconditions": ["groups", "specific_mort"],
+      "function_refs": ["mortality_ui", "mortality_server", "calc_mort", "parse_pred_mort_by_predator", "parse_mort_txt"],
       "navigation_target": "Mortality",
-      "what_to_look_for": "Stacked fishing, natural and predation mortality.",
-      "limitations": "mL is linear natural mortality, not fishing.",
-      "keywords": ["mortality", "fishing mortality", "natural mortality", "predation mortality", "specificmort", "ml"],
+      "what_to_look_for": "Stacked F / M1 / M2 by age; SpecificPredMort by predator; missing-file notes for Mort.txt, SpecificMort.txt, SpecificPredMort.txt.",
+      "limitations": "mL is linear natural mortality, not fishing. Mort.txt is relative F vs M only.",
+      "keywords": ["mortality", "fishing mortality", "natural mortality", "predation mortality", "specificmort", "specificpredmort", "mort.txt", "ml"],
       "module": "mortality",
-      "inputs": ["fg"],
-      "views": []
+      "inputs": ["view", "fg", "age"],
+      "views": ["source", "predator", "mort"]
     }
   ]
 }

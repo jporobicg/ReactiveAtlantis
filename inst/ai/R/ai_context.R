@@ -10,7 +10,7 @@ ra_ai_role_names <- function() {
   c("groups", "fisheries", "output_nc", "output_nc_old", "catch_nc",
     "init_nc", "prod_nc", "biomindx", "dietcheck", "diet_bypol",
     "ssb", "yoy", "bio_prm", "run_prm", "force_prm", "bgm",
-    "specific_mort", "specific_pred_mort", "ext_catch", "obs_csv")
+    "specific_mort", "specific_pred_mort", "mort", "ext_catch", "obs_csv")
 }
 
 ra_ai_path_exists <- function(p) {

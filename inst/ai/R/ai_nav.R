@@ -54,10 +54,12 @@ ra_ai_nav_catalog <- function() {
         "layers, sediment, or integrated) with a time slider and play control.",
         "Time series for the selected box, all boxes, or the whole system.",
         "Click a box to select it. By-age view plots ResN, StructN, numbers",
-        "and biomass for one box and layer."
+        "and biomass for one box and layer. Predator-prey overlap maps the",
+        "local biomass overlap and plots Schoener's D through time."
       ),
       keywords = c("spatial", "map", "box", "polygon", "bgm", "distribution",
-                   "layer", "depth", "sediment", "collapse", "crash", "age class")
+                   "layer", "depth", "sediment", "collapse", "crash", "age class",
+                   "overlap", "schoener")
     ),
     consumption = list(
       id = "consumption",
@@ -118,10 +120,11 @@ ra_ai_nav_catalog <- function() {
       module = "recruitment",
       summary = paste(
         "Beverton-Holt alpha/beta in a side panel; SSB view; observed",
-        "Recruitment / SSB ribbons. YOY.txt CODE.0 plus larvae from the curve."
+        "Recruitment / SSB ribbons. Recruits vs SSB from YOY.txt CODE.0 and",
+        "SSB.txt. YOY plus larvae from the curve."
       ),
       keywords = c("recruit", "yoy", "ssb", "beverton", "alpha", "beta", "larvae",
-                   "kdenr", "collapse", "crash")
+                   "kdenr", "collapse", "crash", "stock recruit", "spawning stock")
     ),
     growth = list(
       id = "growth",
@@ -153,20 +156,26 @@ ra_ai_nav_catalog <- function() {
         "Full pPREY matrix; hover a cell for value and group names with age;",
         "click to set predator and prey dropdowns and highlight the row/column;",
         "bar charts of the selected predator row and prey column.",
+        "Realised DietCheck proportion and consumed biomass for the same pair.",
         "Diagnostics and compare stay as secondary views."
       ),
       keywords = c("feeding", "pprey", "gape", "availability", "preference",
-                   "klp", "kup", "starv", "mum", "dietcheck", "diet")
+                   "klp", "kup", "starv", "mum", "dietcheck", "diet",
+                   "realised diet", "consumed")
     ),
     mortality = list(
       id = "mortality",
       title = "Mortality",
       module = "mortality",
       summary = paste(
-        "Fishing, natural and predation mortality stacked per age (Age01-Age10)."
+        "Fishing, natural and predation mortality stacked per age (Age01-Age10).",
+        "Predation mortality by predator from SpecificPredMort.txt. Optional",
+        "Mort.txt relative F versus M. Missing-file notes list Mort.txt,",
+        "SpecificMort.txt and SpecificPredMort.txt."
       ),
       keywords = c("mortality", "fishing mortality", "natural mortality",
-                   "predation mortality", "specificmort", "collapse", "crash")
+                   "predation mortality", "specificmort", "specificpredmort",
+                   "mort.txt", "collapse", "crash")
     )
   )
 }

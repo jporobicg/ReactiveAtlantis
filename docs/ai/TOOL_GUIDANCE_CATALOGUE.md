@@ -54,8 +54,8 @@ runs before any language-model call.
 ## spatial
 
 - purpose: Box map by layer and time; series for one box, all boxes,
-  or the system; by-age in one box/layer.
-- views: `map`, `age`.
+  or the system; by-age in one box/layer; predator-prey overlap.
+- views: `map`, `age`, `overlap`.
 - example questions: Where is the biomass? Did it move into poor
   boxes? What does one layer look like?
 - preconditions: Groups CSV, output NetCDF, BGM.
@@ -112,9 +112,9 @@ runs before any language-model call.
 
 ## recruitment
 
-- purpose: YOY, SSB, Beverton-Holt alpha/beta side panel; PP growth
-  view.
-- views: `yoy`, `ssb`, `growth`.
+- purpose: YOY, SSB, recruits vs spawning stock, Beverton-Holt
+  alpha/beta side panel; PP growth view.
+- views: `yoy`, `ssb`, `sr`, `growth`.
 - example questions: What should I check when recruitment is low?
 - preconditions: Groups, output NetCDF, YOY, biology prm.
 - navigation_target: Recruitment
@@ -144,6 +144,7 @@ runs before any language-model call.
 ## feeding
 
 - purpose: Full pPREY matrix with hover/click and row/column bars;
+  realised DietCheck and consumed biomass for the selected pair;
   diagnostics; edited-vs-original compare.
 - views: `matrix`, `diagnostics`, `compare`.
 - example questions: What is pPREY? What does KLP mean?
@@ -156,8 +157,13 @@ runs before any language-model call.
 
 ## mortality
 
-- purpose: Fishing, natural, and predation mortality stacked by age.
+- purpose: Fishing, natural, and predation mortality stacked by age;
+  predation mortality by predator; Mort.txt relative F vs M.
+- views: `source`, `predator`, `mort`.
 - example questions: What does mL represent? Has fishing risen?
-- preconditions: Groups, SpecificMort, SpecificPredMort.
+  Which predators drive predation mortality?
+- preconditions: Groups and SpecificMort. SpecificPredMort and Mort.txt
+  are optional and reported when missing.
 - navigation_target: Mortality
-- limitations: mL is linear natural mortality, not fishing.
+- limitations: mL is linear natural mortality, not fishing. Mort.txt is
+  relative only.
