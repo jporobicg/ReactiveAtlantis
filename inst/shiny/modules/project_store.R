@@ -6,7 +6,7 @@ FILE_ROLES <- c(
   "groups", "fisheries", "output_nc", "output_nc_old", "catch_nc", "init_nc",
   "prod_nc", "biomindx", "dietcheck", "diet_bypol", "ssb", "yoy",
   "bio_prm", "run_prm", "force_prm", "bgm", "specific_mort", "specific_pred_mort",
-  "ext_catch", "obs_csv"
+  "mort", "ext_catch", "obs_csv"
 )
 
 FILE_LABELS <- c(
@@ -28,8 +28,22 @@ FILE_LABELS <- c(
   prod_nc = "Production NetCDF (PROD)",
   specific_mort = "SpecificMort.txt",
   specific_pred_mort = "SpecificPredMort.txt",
+  mort = "Mort.txt",
   ext_catch = "External catch CSV",
   obs_csv = "Observations CSV"
+)
+
+##' Roles that usually live in the Atlantis configuration folder
+CONFIG_ROLES <- c(
+  "groups", "fisheries", "init_nc", "bio_prm", "run_prm", "force_prm",
+  "bgm", "obs_csv", "ext_catch"
+)
+
+##' Roles that usually live in the Atlantis output folder
+OUTPUT_ROLES <- c(
+  "output_nc", "output_nc_old", "catch_nc", "prod_nc",
+  "biomindx", "dietcheck", "diet_bypol", "ssb", "yoy",
+  "specific_mort", "specific_pred_mort", "mort"
 )
 
 TOOL_REQUIREMENTS <- list(
@@ -41,15 +55,38 @@ TOOL_REQUIREMENTS <- list(
   growth = c("groups", "output_nc", "bio_prm"),
   catch = c("groups", "fisheries", "catch_nc"),
   feeding = c("groups", "bio_prm", "init_nc"),
-  mortality = c("groups", "specific_mort", "specific_pred_mort"),
+  mortality = c("groups", "specific_mort"),
   spatial = c("groups", "output_nc", "bgm"),
   consumption = c("groups", "prod_nc"),
   physics = c("output_nc"),
+  ages = c("groups", "output_nc"),
   ensemble = c("groups")
 )
 
 empty_paths <- function() {
   setNames(as.list(rep(NA_character_, length(FILE_ROLES))), FILE_ROLES)
+}
+
+`%||%` <- function(a, b) {
+  if (is.null(a) || (length(a) == 1 && is.na(a))) b else a
+}
+
+ra_nz <- function(x) {
+  x <- as.character(x)[1]
+  if (length(x) == 0 || is.na(x)) return("")
+  trimws(x)
+}
+
+same_dir <- function(a, b) {
+  a <- ra_nz(a)
+  b <- ra_nz(b)
+  if (!nzchar(a) || !nzchar(b)) return(FALSE)
+  if (!dir.exists(a) || !dir.exists(b)) {
+    return(identical(normalizePath(a, winslash = "/", mustWork = FALSE),
+                     normalizePath(b, winslash = "/", mustWork = FALSE)))
+  }
+  identical(normalizePath(a, winslash = "/", mustWork = TRUE),
+            normalizePath(b, winslash = "/", mustWork = TRUE))
 }
 
 empty_state <- function() {
@@ -59,7 +96,11 @@ empty_state <- function() {
     data = NULL,
     ensemble = NULL,
     scan_note = NULL,
-    gen = 0L
+    gen = 0L,
+    fallback_roles = character(),
+    config_dir = NA_character_,
+    output_dir = NA_character_,
+    run_pairs = list()
   )
 }
 
@@ -156,6 +197,7 @@ project_snapshot <- function(project) {
       st$paths <- normalize_paths(st$paths)
       st$ready <- isTRUE(st$ready)
       if (is.null(st$gen)) st$gen <- 0L
+      if (is.null(st$fallback_roles)) st$fallback_roles <- character()
       return(st)
     }
     return(list(
@@ -164,7 +206,11 @@ project_snapshot <- function(project) {
       data = project$data,
       ensemble = project$ensemble,
       scan_note = project$scan_note,
-      gen = 0L
+      gen = 0L,
+      fallback_roles = project$fallback_roles %||% character(),
+      config_dir = project$config_dir,
+      output_dir = project$output_dir,
+      run_pairs = project$run_pairs %||% list()
     ))
   }
   if (is.list(project)) {
@@ -176,7 +222,11 @@ project_snapshot <- function(project) {
       data = dat,
       ensemble = project$ensemble,
       scan_note = project$scan_note,
-      gen = if (is.null(project$gen)) 0L else project$gen
+      gen = if (is.null(project$gen)) 0L else project$gen,
+      fallback_roles = project$fallback_roles %||% character(),
+      config_dir = project$config_dir,
+      output_dir = project$output_dir,
+      run_pairs = project$run_pairs %||% list()
     ))
   }
   empty_state()
@@ -210,6 +260,7 @@ role_is_loaded <- function(project, role) {
     bgm = path_ok(dat$bgm_path) || !is.null(dat$inf_box),
     specific_mort = !is.null(dat$spe_mort) && NROW(dat$spe_mort) > 0,
     specific_pred_mort = !is.null(dat$pred_mort) && NROW(dat$pred_mort) > 0,
+    mort = !is.null(dat$mort) && NROW(dat$mort) > 0,
     ext_catch = !is.null(dat$ext_catch),
     obs_csv = !is.null(dat$observations),
     FALSE
@@ -223,15 +274,32 @@ role_checklist_ui <- function(project) {
     role <- FILE_ROLES[[i]]
     ok <- isTRUE(role_is_loaded(snap, role))
     p <- snap$paths[[role]]
+    fb <- role %in% as.character(snap$fallback_roles %||% character())
+    status <- if (!ok) {
+      "not-provided"
+    } else if (isTRUE(fb)) {
+      "fallback"
+    } else {
+      "loaded"
+    }
+    have <- if (!ok) {
+      "not provided"
+    } else if (isTRUE(fb)) {
+      "loaded (other folder)"
+    } else {
+      "loaded"
+    }
     rows[[i]] <- shiny::div(
-      class = paste("ra-check-row", if (ok) "is-loaded" else "is-missing"),
+      class = paste("ra-check-row", if (ok) "is-loaded" else "is-missing",
+                    if (isTRUE(fb)) "is-fallback"),
       `data-role` = role,
-      `data-status` = if (ok) "loaded" else "not-provided",
-      title = if (ok && path_ok(p)) p else unname(FILE_LABELS[[role]]),
+      `data-status` = status,
+      title = if (ok && path_ok(p)) {
+        if (isTRUE(fb)) paste0(p, " (found in the other folder)") else p
+      } else unname(FILE_LABELS[[role]]),
       shiny::span(class = "ra-dot"),
       shiny::span(class = "ra-check-label", unname(FILE_LABELS[[role]])),
-      shiny::span(class = if (ok) "ra-have" else "ra-need",
-                  if (ok) "loaded" else "not provided")
+      shiny::span(class = if (ok) "ra-have" else "ra-need", have)
     )
   }
   shiny::div(class = "ra-check", rows)
@@ -259,6 +327,63 @@ tool_checklist_ui <- function(project) {
   shiny::div(class = "ra-check", rows)
 }
 
+##' List .bgm / .BGM files under a folder (case-insensitive).
+list_bgm_files <- function(folder, recursive = TRUE) {
+  if (is.null(folder) || !dir.exists(as.character(folder)[1])) return(character())
+  files <- list.files(folder, pattern = "\\.bgm$", full.names = TRUE,
+                      recursive = isTRUE(recursive), ignore.case = TRUE)
+  files <- files[!dir.exists(files)]
+  files <- files[!grepl("(^|/)\\.", basename(dirname(files)))]
+  files <- files[!vapply(basename(files), is_os_duplicate, logical(1))]
+  unique(files)
+}
+
+##' Geometry filenames mentioned in a run / biology .prm
+bgm_name_from_prm <- function(paths) {
+  names <- character()
+  for (p in paths) {
+    if (!path_ok(p)) next
+    lines <- tryCatch(readLines(p, warn = FALSE, n = 8000),
+                      error = function(e) character())
+    if (!length(lines)) next
+    hits <- grep("\\.bgm\\b", lines, ignore.case = TRUE, value = TRUE)
+    hits <- hits[!grepl("^[[:space:]]*#", hits)]
+    toks <- unlist(strsplit(hits, "[[:space:]=,'\"]+"), use.names = FALSE)
+    names <- c(names, toks[grepl("\\.bgm$", toks, ignore.case = TRUE)])
+  }
+  unique(basename(names))
+}
+
+##' Find a BGM on disk: explicit path, config/output (and parents / geometry).
+##'
+##' Does not drop a file just because a parent folder is named "output".
+find_bgm_path <- function(explicit = NULL, config_dir = NULL, output_dir = NULL,
+                          prm_paths = NULL) {
+  for (p in explicit) {
+    got <- as_path(p)
+    if (path_ok(got)) return(got)
+  }
+  roots <- unique(c(ra_nz(config_dir), ra_nz(output_dir)))
+  roots <- roots[nzchar(roots)]
+  parents <- unique(dirname(roots[dir.exists(roots)]))
+  extra <- character()
+  for (r in unique(c(roots[dir.exists(roots)], parents[dir.exists(parents)]))) {
+    extra <- c(extra, file.path(r, c("geometry", "bgm", "gis", "spatial",
+                                     "boxes", "input", "grid")))
+  }
+  search <- unique(c(roots, extra, parents))
+  found <- character()
+  for (s in search) found <- c(found, list_bgm_files(s, recursive = TRUE))
+  found <- unique(found[file.exists(found)])
+  wanted <- bgm_name_from_prm(prm_paths)
+  if (length(wanted) && length(found)) {
+    hit <- found[tolower(basename(found)) %in% tolower(wanted)]
+    if (length(hit)) return(as_path(hit))
+  }
+  if (length(found)) return(as_path(found))
+  NA_character_
+}
+
 ##' Detect Atlantis files in a folder by suffix and header
 ##' @param folder Directory path
 ##' @return Named list of file paths (NA if missing)
@@ -267,7 +392,6 @@ detect_project_files <- function(folder) {
   if (is.null(folder) || !dir.exists(folder)) return(paths)
   files <- list.files(folder, full.names = TRUE, recursive = FALSE)
   files <- files[!dir.exists(files)]
-  if (length(files) == 0) return(paths)
 
   paths$biomindx <- pick_first(files, "BiomIndx\\.txt$")
   paths$dietcheck <- pick_first(files, "DietCheck\\.txt$")
@@ -276,6 +400,7 @@ detect_project_files <- function(folder) {
   paths$yoy <- pick_first(files, "YOY\\.txt$")
   paths$specific_pred_mort <- pick_first(files, "SpecificPredMort\\.txt$")
   paths$specific_mort <- pick_first(files, "SpecificMort\\.txt$", exclude = "Pred")
+  paths$mort <- pick_first(files, "Mort\\.txt$", exclude = "Specific|Pred")
   paths$bgm <- pick_first(files, "\\.bgm$")
   paths$catch_nc <- pick_first(files, "CATCH.*\\.nc$|Catch.*\\.nc$")
   paths$prod_nc <- pick_first(files, "PROD.*\\.nc$|Prod.*\\.nc$")
@@ -307,7 +432,83 @@ detect_project_files <- function(folder) {
     paths$force_prm <- pick_first(files, "force.*\\.prm$|forcing.*\\.prm$")
   }
 
+  if (!path_ok(paths$bgm)) {
+    paths$bgm <- find_bgm_path(
+      explicit = paths$bgm,
+      config_dir = folder,
+      output_dir = folder,
+      prm_paths = c(paths$run_prm, paths$bio_prm, paths$force_prm)
+    )
+  }
+
   normalize_paths(paths)
+}
+
+##' Detect a run from a configuration folder plus an output folder.
+##'
+##' Config roles are taken from \code{config_dir} first, output roles from
+##' \code{output_dir}. A file found only in the other folder is kept and
+##' listed in \code{fallback}. The same path for both folders is the
+##' single-folder (backward compatible) case.
+detect_run_pair <- function(config_dir = NULL, output_dir = NULL) {
+  cfg_dir <- ra_nz(config_dir)
+  out_dir <- ra_nz(output_dir)
+  if (!nzchar(cfg_dir) && nzchar(out_dir)) cfg_dir <- out_dir
+  if (!nzchar(out_dir) && nzchar(cfg_dir)) out_dir <- cfg_dir
+  cfg <- if (nzchar(cfg_dir) && dir.exists(cfg_dir)) {
+    detect_project_files(cfg_dir)
+  } else empty_paths()
+  out <- if (nzchar(out_dir) && dir.exists(out_dir)) {
+    detect_project_files(out_dir)
+  } else empty_paths()
+  same <- same_dir(cfg_dir, out_dir)
+  paths <- empty_paths()
+  fallback <- character()
+  take <- function(role, preferred, other) {
+    if (path_ok(preferred[[role]])) {
+      paths[[role]] <<- preferred[[role]]
+    } else if (path_ok(other[[role]])) {
+      paths[[role]] <<- other[[role]]
+      if (!isTRUE(same)) fallback <<- c(fallback, role)
+    }
+  }
+  for (role in CONFIG_ROLES) take(role, cfg, out)
+  for (role in OUTPUT_ROLES) take(role, out, cfg)
+  if (!path_ok(paths$bgm)) {
+    found <- find_bgm_path(
+      config_dir = cfg_dir,
+      output_dir = out_dir,
+      prm_paths = c(paths$run_prm, paths$bio_prm, paths$force_prm,
+                    cfg$run_prm, cfg$bio_prm, out$run_prm, out$bio_prm)
+    )
+    if (path_ok(found)) {
+      paths$bgm <- found
+      if (!isTRUE(same) && !path_ok(cfg$bgm)) fallback <- c(fallback, "bgm")
+    }
+  }
+  list(
+    paths = normalize_paths(paths),
+    fallback = unique(fallback),
+    same_folder = isTRUE(same),
+    config_dir = if (nzchar(cfg_dir)) cfg_dir else NA_character_,
+    output_dir = if (nzchar(out_dir)) out_dir else NA_character_
+  )
+}
+
+scan_note_text <- function(det, verb = "Found") {
+  n_found <- sum(vapply(det$paths, path_ok, logical(1)))
+  note <- paste0(verb, " ", n_found, " of ", length(FILE_ROLES), " file roles")
+  if (isTRUE(det$same_folder)) {
+    return(paste0(note, " in one folder."))
+  }
+  if (length(det$fallback) > 0) {
+    labs <- unname(as.character(FILE_LABELS[det$fallback]))
+    note <- paste0(note, ". Taken from the other folder: ",
+                   paste(labs, collapse = ", "), ".")
+  } else {
+    note <- paste0(note, " (config + output folders).")
+  }
+  note
 }
 
 read_space_table <- function(path) {
@@ -467,6 +668,7 @@ load_project <- function(paths) {
     ssb = NULL,
     spe_mort = NULL,
     pred_mort = NULL,
+    mort = NULL,
     prm_bio = NULL,
     prm_run = NULL,
     bgm_path = NULL,
@@ -532,6 +734,9 @@ load_project <- function(paths) {
   if (path_ok(paths$specific_pred_mort)) {
     out$pred_mort <- tryCatch(read_mort_table(paths$specific_pred_mort), error = function(e) NULL)
   }
+  if (path_ok(paths$mort)) {
+    out$mort <- tryCatch(read_mort_table(paths$mort), error = function(e) NULL)
+  }
   if (path_ok(paths$bio_prm)) {
     out$prm_bio <- tryCatch(readLines(paths$bio_prm, warn = FALSE), error = function(e) NULL)
   }
@@ -541,21 +746,66 @@ load_project <- function(paths) {
   out
 }
 
+run_pair_defaults <- function() {
+  one <- getOption("reactiveatlantis.project_dir", "")
+  list(
+    name = getOption("reactiveatlantis.run_name", ""),
+    config_dir = getOption("reactiveatlantis.config_dir", one),
+    output_dir = getOption("reactiveatlantis.output_dir", one)
+  )
+}
+
+run_pair_fields_ui <- function(ns, prefix, title, values = list()) {
+  shiny::div(
+    class = "ra-run-pair",
+    `data-run-prefix` = prefix,
+    shiny::h6(title),
+    shiny::textInput(
+      ns(paste0(prefix, "name")), "Name (optional)",
+      value = values$name %||% "",
+      placeholder = "e.g. Base, F0.8, NESP"
+    ),
+    shiny::textInput(
+      ns(paste0(prefix, "config_dir")), "Configuration folder",
+      value = values$config_dir %||% "",
+      placeholder = "/path/to/Atlantis/config"
+    ),
+    shiny::textInput(
+      ns(paste0(prefix, "output_dir")), "Output folder",
+      value = values$output_dir %||% "",
+      placeholder = "/path/to/Atlantis/output"
+    )
+  )
+}
+
 project_sidebar_ui <- function(id) {
   ns <- shiny::NS(id)
+  defaults <- run_pair_defaults()
   shiny::tagList(
-    shiny::textInput(ns("folder_path"), "Local run folder",
-                     value = getOption("reactiveatlantis.project_dir", ""),
-                     placeholder = "/path/to/Atlantis/output"),
+    run_pair_fields_ui(ns, "run1_", "Run 1", defaults),
+    shiny::uiOutput(ns("extra_runs")),
     shiny::div(
       class = "ra-btn-row",
-      shiny::actionButton(ns("scan_folder"), "Scan folder", class = "btn btn-outline-primary btn-sm"),
-      shiny::actionButton(ns("load_project"), "Load run", class = "btn btn-primary btn-sm")
+      shiny::actionButton(ns("add_run"), "Add another run",
+                          class = "btn btn-outline-secondary btn-sm")
     ),
-    shiny::p(class = "ra-muted",
-             "Prefer a local folder. Uploads are optional and some browsers stop around 500 MB; a North Sea output.nc is larger than that."),
-    shiny::textAreaInput(ns("extra_folders"), "Other run folders (one per line)",
-                         rows = 3, placeholder = "/path/to/run2\n/path/to/run3"),
+    shiny::div(
+      class = "ra-btn-row",
+      shiny::actionButton(ns("scan_folder"), "Scan folders",
+                          class = "btn btn-outline-primary btn-sm"),
+      shiny::actionButton(ns("load_project"), "Load run",
+                          class = "btn btn-primary btn-sm")
+    ),
+    shiny::p(
+      class = "ra-muted",
+      "Each run is a configuration folder (groups, prm, init, bgm) plus an output folder (NetCDF, BiomIndx, DietCheck). Leave one blank to use the other as a single folder."
+    ),
+    shiny::div(
+      class = "ra-compat-hidden",
+      shiny::textInput(ns("folder_path"), NULL,
+                       value = getOption("reactiveatlantis.project_dir", "")),
+      shiny::textAreaInput(ns("extra_folders"), NULL, rows = 1, value = "")
+    ),
     shiny::uiOutput(ns("scan_note")),
     shiny::h6("Loaded files"),
     shiny::uiOutput(ns("file_checklist")),
@@ -566,7 +816,7 @@ project_sidebar_ui <- function(id) {
       bslib::accordion_panel(
         "Attach individual files",
         shiny::p(class = "ra-muted",
-                 "Optional. Skip this when the folder path above already has the run. Large NetCDF files should be loaded from disk, not uploaded."),
+                 "Optional. Skip this when the folders above already have the run. Large NetCDF files should be loaded from disk, not uploaded."),
         shiny::fileInput(ns("up_groups"), "Groups CSV", accept = ".csv"),
         shiny::fileInput(ns("up_fish"), "Fisheries CSV", accept = ".csv"),
         shiny::fileInput(ns("up_output"), "Output .nc", accept = ".nc"),
@@ -583,6 +833,7 @@ project_sidebar_ui <- function(id) {
         shiny::fileInput(ns("up_bgm"), "BGM", accept = ".bgm"),
         shiny::fileInput(ns("up_smort"), "SpecificMort.txt", accept = ".txt"),
         shiny::fileInput(ns("up_pmort"), "SpecificPredMort.txt", accept = ".txt"),
+        shiny::fileInput(ns("up_mort"), "Mort.txt", accept = ".txt"),
         shiny::fileInput(ns("up_ext_catch"), "External catch CSV", accept = ".csv"),
         shiny::fileInput(ns("up_obs"), "Observations CSV", accept = ".csv")
       )
@@ -600,6 +851,17 @@ project_server <- function(id) {
       ensemble = NULL,
       scan_note = NULL
     )
+    n_extra <- shiny::reactiveVal(0L)
+
+    input_nz <- function(id) {
+      ra_nz(input[[id]])
+    }
+
+    existing_val <- function(id, default = "") {
+      v <- shiny::isolate(input[[id]])
+      x <- ra_nz(v)
+      if (nzchar(x)) x else default
+    }
 
     collect_uploads <- function() {
       list(
@@ -619,32 +881,98 @@ project_server <- function(id) {
         bgm = upload_path(input$up_bgm),
         specific_mort = upload_path(input$up_smort),
         specific_pred_mort = upload_path(input$up_pmort),
+        mort = upload_path(input$up_mort),
         ext_catch = upload_path(input$up_ext_catch),
         obs_csv = upload_path(input$up_obs)
       )
     }
 
-    build_ensemble <- function(loaded, folder) {
+    collect_run_pairs <- function() {
+      pairs <- list()
+      hidden <- input_nz("folder_path")
+      cfg1 <- input_nz("run1_config_dir")
+      out1 <- input_nz("run1_output_dir")
+      if (!nzchar(cfg1) && !nzchar(out1) && nzchar(hidden)) {
+        cfg1 <- hidden
+        out1 <- hidden
+      }
+      if (nzchar(cfg1) || nzchar(out1)) {
+        pairs[[length(pairs) + 1]] <- list(
+          name = input_nz("run1_name"),
+          config_dir = cfg1,
+          output_dir = out1
+        )
+      }
+      n <- shiny::isolate(n_extra())
+      if (n > 0) {
+        for (i in seq_len(n)) {
+          idx <- i + 1L
+          cdir <- input_nz(paste0("extra_config_", idx))
+          odir <- input_nz(paste0("extra_output_", idx))
+          if (!nzchar(cdir) && !nzchar(odir)) next
+          pairs[[length(pairs) + 1]] <- list(
+            name = input_nz(paste0("extra_name_", idx)),
+            config_dir = cdir,
+            output_dir = odir
+          )
+        }
+      }
+      extra <- trimws(unlist(strsplit(as.character(input$extra_folders %||% ""), "\n")))
+      extra <- extra[nzchar(extra)]
+      for (f in extra) {
+        pairs[[length(pairs) + 1]] <- list(
+          name = basename(f),
+          config_dir = f,
+          output_dir = f
+        )
+      }
+      pairs
+    }
+
+    pair_label <- function(pair, fallback = "Current") {
+      nm <- ra_nz(pair$name)
+      if (nzchar(nm)) return(nm)
+      fallback
+    }
+
+    pair_folder <- function(pair) {
+      outd <- ra_nz(pair$output_dir)
+      if (nzchar(outd)) return(outd)
+      ra_nz(pair$config_dir)
+    }
+
+    build_ensemble <- function(loaded, pairs) {
       runs <- list()
+      p1 <- if (length(pairs) >= 1) pairs[[1]] else list(name = "Current")
       runs[[1]] <- list(
-        label = "Current",
-        folder = folder,
+        label = pair_label(p1, "Current"),
+        folder = pair_folder(p1),
+        config_dir = p1$config_dir,
+        output_dir = p1$output_dir,
         paths = loaded$paths,
         biomindx = loaded$biomindx,
         yoy = loaded$yoy,
         ssb = loaded$ssb,
         catch_nc = loaded$nc_catch
       )
-      extra <- trimws(unlist(strsplit(as.character(input$extra_folders), "\n")))
-      extra <- extra[nzchar(extra) & dir.exists(extra)]
-      for (f in extra) {
-        runs[[length(runs) + 1]] <- load_run_lite(f)
+      if (length(pairs) > 1) {
+        for (i in 2:length(pairs)) {
+          p <- pairs[[i]]
+          runs[[length(runs) + 1]] <- load_run_lite(
+            folder = pair_folder(p),
+            label = p$name,
+            config_dir = p$config_dir,
+            output_dir = p$output_dir
+          )
+        }
       }
       runs
     }
 
     commit <- function(paths = NULL, data = NULL, ensemble = NULL, note = NULL,
-                       ready = NULL, touch_data = FALSE) {
+                       ready = NULL, touch_data = FALSE,
+                       fallback_roles = NULL, config_dir = NULL,
+                       output_dir = NULL, run_pairs = NULL) {
       prev <- shiny::isolate(rv$state)
       if (is.null(prev) || !is.list(prev)) prev <- empty_state()
       if (!is.null(paths)) prev$paths <- normalize_paths(paths)
@@ -654,6 +982,10 @@ project_server <- function(id) {
       }
       if (!is.null(note)) prev$scan_note <- note
       if (!is.null(ready)) prev$ready <- isTRUE(ready)
+      if (!is.null(fallback_roles)) prev$fallback_roles <- as.character(fallback_roles)
+      if (!is.null(config_dir)) prev$config_dir <- config_dir
+      if (!is.null(output_dir)) prev$output_dir <- output_dir
+      if (!is.null(run_pairs)) prev$run_pairs <- run_pairs
       prev$gen <- prev$gen + 1L
       ## One list assignment so every module sees paths, data and ready together.
       rv$state <- prev
@@ -665,67 +997,160 @@ project_server <- function(id) {
       prev
     }
 
+    apply_detection <- function(det, verb = "Found", extra_n = 0L) {
+      paths <- normalize_paths(merge_paths(det$paths, collect_uploads()))
+      note <- scan_note_text(det, verb)
+      if (extra_n > 0) {
+        note <- paste0(note, " Plus ", extra_n, " extra run",
+                       if (extra_n == 1L) "." else "s.")
+      }
+      commit(
+        paths = paths,
+        note = note,
+        fallback_roles = det$fallback,
+        config_dir = det$config_dir,
+        output_dir = det$output_dir
+      )
+      list(paths = paths, note = note, det = det)
+    }
+
+    shiny::observeEvent(input$add_run, {
+      n_extra(n_extra() + 1L)
+    }, ignoreInit = TRUE)
+
+    output$extra_runs <- shiny::renderUI({
+      n <- n_extra()
+      if (n < 1) return(NULL)
+      ns <- session$ns
+      lapply(seq_len(n), function(i) {
+        idx <- i + 1L
+        shiny::div(
+          class = "ra-run-pair",
+          `data-run-index` = idx,
+          shiny::h6(paste("Run", idx)),
+          shiny::textInput(
+            ns(paste0("extra_name_", idx)), "Name (optional)",
+            value = existing_val(paste0("extra_name_", idx)),
+            placeholder = "e.g. F0.8"
+          ),
+          shiny::textInput(
+            ns(paste0("extra_config_", idx)), "Configuration folder",
+            value = existing_val(paste0("extra_config_", idx)),
+            placeholder = "/path/to/run/config"
+          ),
+          shiny::textInput(
+            ns(paste0("extra_output_", idx)), "Output folder",
+            value = existing_val(paste0("extra_output_", idx)),
+            placeholder = "/path/to/run/output"
+          )
+        )
+      })
+    })
+
     shiny::observeEvent(input$folder_path, {
-      folder <- trimws(input$folder_path)
+      folder <- ra_nz(input$folder_path)
       if (!nzchar(folder) || !dir.exists(folder)) return()
       if (isTRUE(shiny::isolate(rv$state$ready))) return()
-      detected <- detect_project_files(folder)
-      n_found <- sum(vapply(detected, path_ok, logical(1)))
-      commit(
-        paths = normalize_paths(merge_paths(detected, collect_uploads())),
-        note = paste0("Found ", n_found, " of ", length(FILE_ROLES),
-                      " file roles. Click Load run to open them.")
-      )
+      cfg <- input_nz("run1_config_dir")
+      out <- input_nz("run1_output_dir")
+      if (!nzchar(cfg) && !nzchar(out)) {
+        shiny::updateTextInput(session, "run1_config_dir", value = folder)
+        shiny::updateTextInput(session, "run1_output_dir", value = folder)
+      }
+      det <- detect_run_pair(folder, folder)
+      apply_detection(det, verb = "Found")
     }, ignoreInit = FALSE)
 
     shiny::observeEvent(input$scan_folder, {
-      folder <- trimws(input$folder_path)
-      if (!nzchar(folder) || !dir.exists(folder)) {
-        shiny::showNotification("Folder not found. Enter a local path that this machine can read.",
-                                type = "error", duration = 8)
+      pairs <- collect_run_pairs()
+      if (length(pairs) == 0) {
+        shiny::showNotification(
+          "Enter a configuration folder and/or an output folder.",
+          type = "error", duration = 8
+        )
         return()
       }
-      detected <- detect_project_files(folder)
-      n_found <- sum(vapply(detected, path_ok, logical(1)))
-      commit(
-        paths = normalize_paths(merge_paths(detected, collect_uploads())),
-        note = paste0("Scan: ", n_found, " of ", length(FILE_ROLES),
-                      " file roles found. Click Load run to open them.")
+      p1 <- pairs[[1]]
+      cfg <- ra_nz(p1$config_dir)
+      outd <- ra_nz(p1$output_dir)
+      if ((!nzchar(cfg) || !dir.exists(cfg)) && (!nzchar(outd) || !dir.exists(outd))) {
+        shiny::showNotification(
+          "Folder not found. Enter a local path that this machine can read.",
+          type = "error", duration = 8
+        )
+        return()
+      }
+      scanned <- ra_progress("Scanning folders…", {
+        ra_inc(0.25, detail = "Detecting Atlantis files")
+        det <- detect_run_pair(p1$config_dir, p1$output_dir)
+        ra_inc(0.55, detail = "Updating checklist")
+        apply_detection(det, verb = "Scan:", extra_n = max(0L, length(pairs) - 1L))
+      })
+      n_found <- sum(vapply(scanned$paths, path_ok, logical(1)))
+      shiny::showNotification(
+        paste("Found", n_found, "Atlantis file roles."),
+        type = "message", duration = 5
       )
-      shiny::showNotification(paste("Found", n_found, "Atlantis files in the folder."),
-                              type = "message", duration = 5)
     }, ignoreInit = TRUE)
 
     shiny::observeEvent(input$load_project, {
-      shiny::showNotification("Loading run…", type = "message", id = "load_run", duration = NULL)
-      detected <- empty_paths()
-      folder <- trimws(input$folder_path)
-      if (nzchar(folder) && dir.exists(folder)) {
-        detected <- detect_project_files(folder)
-      }
-      paths <- normalize_paths(merge_paths(detected, collect_uploads()))
-      loaded <- tryCatch(load_project(paths), error = function(e) {
-        shiny::removeNotification("load_run")
-        shiny::showNotification(paste("Could not load run:", e$message), type = "error", duration = 12)
-        NULL
+      shiny::showNotification("Loading run…", type = "message", id = "load_run",
+                              duration = NULL)
+      pairs <- collect_run_pairs()
+      loaded <- ra_progress("Loading run…", {
+        ra_inc(0.1, detail = "Scanning folders")
+        det <- if (length(pairs) >= 1) {
+          detect_run_pair(pairs[[1]]$config_dir, pairs[[1]]$output_dir)
+        } else {
+          detect_run_pair(NULL, NULL)
+        }
+        paths <- normalize_paths(merge_paths(det$paths, collect_uploads()))
+        ra_inc(0.25, detail = "Reading tables")
+        out <- tryCatch(load_project(paths), error = function(e) e)
+        if (inherits(out, "error")) {
+          return(list(error = out, paths = paths, det = det, pairs = pairs))
+        }
+        ra_inc(0.55, detail = "Loading extra runs")
+        ens <- build_ensemble(out, pairs)
+        ra_inc(0.85, detail = "Updating tools")
+        list(data = out, paths = paths, det = det, pairs = pairs, ensemble = ens)
       })
       shiny::removeNotification("load_run")
-      if (is.null(loaded)) return()
-      n_found <- sum(vapply(paths, path_ok, logical(1)))
+      if (!is.null(loaded$error)) {
+        shiny::showNotification(paste("Could not load run:", loaded$error$message),
+                                type = "error", duration = 12)
+        return()
+      }
+      if (is.null(loaded$data)) return()
+      n_found <- sum(vapply(loaded$paths, path_ok, logical(1)))
+      extra_n <- max(0L, length(loaded$pairs) - 1L)
+      note <- scan_note_text(loaded$det, "Loaded")
+      if (extra_n > 0) {
+        note <- paste0(note, " Plus ", extra_n, " extra run",
+                       if (extra_n == 1L) "." else "s.")
+      }
       commit(
-        paths = paths,
-        data = loaded,
-        ensemble = build_ensemble(loaded, folder),
-        note = paste0("Loaded ", n_found, " of ", length(FILE_ROLES), " file roles."),
-        ready = !is.null(loaded$grp),
-        touch_data = TRUE
+        paths = loaded$paths,
+        data = loaded$data,
+        ensemble = loaded$ensemble,
+        note = note,
+        ready = !is.null(loaded$data$grp),
+        touch_data = TRUE,
+        fallback_roles = loaded$det$fallback,
+        config_dir = loaded$det$config_dir,
+        output_dir = loaded$det$output_dir,
+        run_pairs = loaded$pairs
       )
-      msg <- if (length(loaded$errors)) {
-        paste("Loaded with notes:", paste(loaded$errors, collapse = "; "))
+      msg <- if (length(loaded$data$errors)) {
+        paste("Loaded with notes:", paste(loaded$data$errors, collapse = "; "))
       } else {
         "Run loaded. Tools with the required files are ready."
       }
-      shiny::showNotification(msg, type = if (length(loaded$errors)) "warning" else "message", duration = 6)
+      shiny::showNotification(
+        msg,
+        type = if (length(loaded$data$errors)) "warning" else "message",
+        duration = 6
+      )
     }, ignoreInit = TRUE, ignoreNULL = TRUE)
 
     output$scan_note <- shiny::renderUI({
@@ -742,7 +1167,8 @@ project_server <- function(id) {
       tool_checklist_ui(rv$state)
     })
 
-    keep_outputs_alive(output, c("scan_note", "file_checklist", "tool_checklist"))
+    keep_outputs_alive(output, c("scan_note", "file_checklist", "tool_checklist",
+                                 "extra_runs"))
 
     rv
   })

@@ -1,0 +1,164 @@
+{
+  "version": 1,
+  "review_note": "Never one-symptom-one-cause. Never a universal parameter direction.",
+  "cases": [
+    {
+      "case_id": "declining-biomass",
+      "title": "Declining biomass",
+      "keywords": ["declin", "collaps", "crash", "biomass drop", "went to zero", "extinct"],
+      "observation": "Biomass of a group falls through time or ends far below initial.",
+      "hypotheses": [
+        {"id": "predation", "expected": "Predator diet share or predation mortality rises.", "counter": "Diet and predation mortality stable while YOY or condition collapse."},
+        {"id": "food", "expected": "Consumption falls; gape or pPREY ineffective; ResN drops.", "counter": "Intake and condition healthy while catch rises."},
+        {"id": "recruitment", "expected": "YOY or SSB fall, perhaps lagged.", "counter": "Adults fall first while YOY stays high."},
+        {"id": "fishing", "expected": "Catch and fishing mortality rise.", "counter": "Fishing stack is flat."},
+        {"id": "spatial", "expected": "Biomass leaves productive boxes or layers.", "counter": "Spatial pattern is stable."}
+      ],
+      "checks": ["Overview health flags", "Compare Bt/B0", "Predation", "Mortality", "Recruitment", "Consumption", "Feeding", "Spatial", "Physics"],
+      "interpretation": "Several processes can produce the same biomass plot.",
+      "what_not_to_conclude": "A single cause, or a universal mum/mL/pPREY edit, from the biomass series alone.",
+      "tool_ids": ["overview", "compare", "predation", "mortality", "recruitment", "consumption", "feeding", "spatial", "physics", "ages"],
+      "sources": ["pethybridge-2019", "fixture-manuals", "ra-knowledge"],
+      "review_status": "reviewed"
+    },
+    {
+      "case_id": "poor-growth-condition",
+      "title": "Poor growth or condition",
+      "keywords": ["condition", "resn", "structn", "thin", "weight-at-age", "starv"],
+      "observation": "ResN or StructN outside 0.5-1.5 of initial, or thin weight-at-age.",
+      "hypotheses": [
+        {"id": "intake", "expected": "Consumption or Feeding shows a constraint.", "counter": "Intake adequate; mortality explains biomass loss."},
+        {"id": "physics", "expected": "Temperature or other tracer is extreme.", "counter": "Physics looks ordinary."}
+      ],
+      "checks": ["Overview problem cohorts", "Ages", "Spatial by-age", "Consumption", "Feeding", "Physics"],
+      "interpretation": "Condition and biomass can disagree.",
+      "what_not_to_conclude": "That the Growth tab is vertebrate weight. No universal mum direction.",
+      "tool_ids": ["overview", "ages", "spatial", "consumption", "feeding", "physics", "compare"],
+      "sources": ["fixture-manuals", "ra-knowledge"],
+      "review_status": "reviewed"
+    },
+    {
+      "case_id": "unexpected-increase",
+      "title": "Unexpected abundance increase",
+      "keywords": ["explod", "increase", "tenfold", "too high", "bloom"],
+      "observation": "Biomass grows far above initial (Overview exploding).",
+      "hypotheses": [
+        {"id": "release", "expected": "Predation on the group is small; YOY high; catch low.", "counter": "Predators and catch are high while biomass still explodes."},
+        {"id": "error", "expected": "Units or initial conditions look inconsistent.", "counter": "All files look consistent."}
+      ],
+      "checks": ["Overview", "Compare", "Predation as prey", "Recruitment", "Catch", "Mortality"],
+      "interpretation": "An explosion can be ecology or a parameter error.",
+      "what_not_to_conclude": "That the group is healthy.",
+      "tool_ids": ["overview", "compare", "predation", "recruitment", "catch", "mortality"],
+      "sources": ["ra-knowledge"],
+      "review_status": "reviewed"
+    },
+    {
+      "case_id": "poor-recruitment",
+      "title": "Poor recruitment",
+      "keywords": ["recruit", "yoy", "ssb", "kdenr", "beverton", "larvae"],
+      "observation": "YOY is low, missing, or lags SSB.",
+      "hypotheses": [
+        {"id": "ssb", "expected": "SSB is low.", "counter": "SSB is healthy while YOY is not."},
+        {"id": "curve", "expected": "Alpha/beta or KDENR starve the curve.", "counter": "The curve can produce YOY but Spatial is wrong."}
+      ],
+      "checks": ["Recruitment YOY and SSB", "Compare", "Spatial"],
+      "interpretation": "Adult decline and recruit failure are different checks.",
+      "what_not_to_conclude": "A universal KDENR or beta direction.",
+      "tool_ids": ["recruitment", "compare", "spatial", "overview"],
+      "sources": ["fixture-manuals", "ra-knowledge"],
+      "review_status": "reviewed"
+    },
+    {
+      "case_id": "odd-diets",
+      "title": "Odd diets",
+      "keywords": ["diet", "pprey", "dietcheck", "gape", "preference"],
+      "observation": "Realised diet unexpected, or pPREY and DietCheck disagree.",
+      "hypotheses": [
+        {"id": "availability", "expected": "Feeding diagnostics show mismatch or zero overlap.", "counter": "Feeding and Predation agree."}
+      ],
+      "checks": ["Feeding matrix, predation pressure and diagnostics", "Predation", "Food web", "Consumption"],
+      "interpretation": "pPREY is availability, not realised diet.",
+      "what_not_to_conclude": "That a single pPREY cell should be raised as a rule.",
+      "tool_ids": ["feeding", "predation", "foodweb", "consumption"],
+      "sources": ["fixture-manuals", "ra-knowledge"],
+      "review_status": "reviewed"
+    },
+    {
+      "case_id": "excessive-predation",
+      "title": "Excessive predation",
+      "keywords": ["excessive predation", "eaten", "predat", "top prey"],
+      "observation": "A prey group is heavily eaten or predation mortality dominates.",
+      "hypotheses": [
+        {"id": "predators", "expected": "Predation and the predation mortality stack rise together.", "counter": "Predation stack is small."}
+      ],
+      "checks": ["Predation", "Mortality", "Compare for the predator", "Feeding predation pressure matrix, map and production flags", "Spatial"],
+      "interpretation": "High predation can be predator biomass, overlap, or pPREY.",
+      "what_not_to_conclude": "That pPREY must be reduced.",
+      "tool_ids": ["predation", "mortality", "compare", "feeding", "spatial"],
+      "sources": ["ra-knowledge"],
+      "review_status": "reviewed"
+    },
+    {
+      "case_id": "primary-producer-limitation",
+      "title": "Primary producer limitation",
+      "keywords": ["primary producer", "phyto", "light", "nutrient", "eddy", "producer"],
+      "observation": "Producers look weak, or consumers starve while producers are low.",
+      "hypotheses": [
+        {"id": "limitation", "expected": "Growth shows light, nutrient, or eddy limitation.", "counter": "Producers look healthy; consumer diet is the issue."}
+      ],
+      "checks": ["Growth", "Physics", "Consumption grazing", "Spatial"],
+      "interpretation": "Producer limitation is a Growth-tab question.",
+      "what_not_to_conclude": "That Growth diagnoses vertebrate ResN.",
+      "tool_ids": ["growth", "physics", "consumption", "spatial", "compare"],
+      "sources": ["ra-knowledge"],
+      "review_status": "reviewed"
+    },
+    {
+      "case_id": "spatial-patterns",
+      "title": "Spatial patterns",
+      "keywords": ["spatial", "map", "box", "layer", "distribution", "blank map"],
+      "observation": "Biomass in unexpected boxes or layers, or the map is empty.",
+      "hypotheses": [
+        {"id": "ecology", "expected": "Layer maps show a real shift.", "counter": "Whole-system Compare is stable."},
+        {"id": "files", "expected": "BGM missing or box counts disagree.", "counter": "Polygons load and unused boxes are explained."}
+      ],
+      "checks": ["Spatial map and by-age", "Physics", "Compare"],
+      "interpretation": "A blank map can be a file problem.",
+      "what_not_to_conclude": "That a blank map means a zero stock.",
+      "tool_ids": ["spatial", "physics", "compare", "ages"],
+      "sources": ["ra-knowledge"],
+      "review_status": "reviewed"
+    },
+    {
+      "case_id": "skill-deterioration",
+      "title": "Skill deterioration",
+      "keywords": ["skill", "observation", "rmse", "fit", "observed catch"],
+      "observation": "Catch or biomass skill versus observations gets worse.",
+      "hypotheses": [
+        {"id": "process", "expected": "Catch skill and Compare observed points degrade together.", "counter": "CSV missing or misaligned."}
+      ],
+      "checks": ["Catch skill view", "Compare", "Multi-run"],
+      "interpretation": "Skill lives on Catch view skill, not a separate tool.",
+      "what_not_to_conclude": "That the Guide can compute a new skill table.",
+      "tool_ids": ["catch", "compare", "ensemble"],
+      "sources": ["ra-knowledge"],
+      "review_status": "reviewed"
+    },
+    {
+      "case_id": "crashes-param-errors",
+      "title": "Crashes or parameter errors",
+      "keywords": ["crash", "crashed", "error", "NaN", "went to zero", "param"],
+      "observation": "A group hits zero, the run dies, or parameters look inconsistent.",
+      "hypotheses": [
+        {"id": "process", "expected": "Overview extinct; Mortality or Recruitment extreme.", "counter": "The tab is empty because a file role is missing."}
+      ],
+      "checks": ["Overview", "Compare", "Mortality", "Recruitment", "Feeding diagnostics", "Physics", "Run sidebar file roles"],
+      "interpretation": "Empty tabs and biological crashes are different.",
+      "what_not_to_conclude": "A crash from one parameter name. The Guide cannot edit the prm or rerun.",
+      "tool_ids": ["overview", "compare", "mortality", "recruitment", "feeding", "physics"],
+      "sources": ["ra-knowledge"],
+      "review_status": "reviewed"
+    }
+  ]
+}

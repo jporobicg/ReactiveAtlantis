@@ -20,6 +20,25 @@ update_select_keep <- function(session, inputId, choices, selected = NULL) {
   shiny::updateSelectInput(session, inputId, choices = choices, selected = sel)
 }
 
+##' Run an expression under shiny::withProgress when a session is active
+ra_progress <- function(message, expr, detail = NULL, value = 0) {
+  sess <- tryCatch(shiny::getDefaultReactiveDomain(), error = function(e) NULL)
+  if (is.null(sess)) return(force(expr))
+  shiny::withProgress(
+    message = message, detail = detail, value = value, session = sess, {
+      force(expr)
+    }
+  )
+}
+
+##' Advance a withProgress bar; no-op outside a progress context
+ra_inc <- function(amount = 0.1, detail = NULL) {
+  suppressWarnings(tryCatch(
+    shiny::incProgress(amount, detail = detail),
+    error = function(e) invisible(NULL)
+  ))
+}
+
 ##' Do not suspend outputs on hidden bslib nav panels
 keep_outputs_alive <- function(output, names) {
   for (nm in names) {
@@ -57,7 +76,11 @@ plot_message <- function(msg) {
 ##' Catch req() / errors so a plotOutput always has an image
 plot_or_message <- function(msg, expr) {
   tryCatch(force(expr), error = function(e) {
-    plot_message(msg)
+    if (inherits(e, "shiny.silent.error")) {
+      plot_message(msg)
+    } else {
+      plot_message(e$message)
+    }
     invisible(NULL)
   })
 }

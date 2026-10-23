@@ -163,6 +163,12 @@ write_northsea_fixture <- function(dest = northsea_fixture_dir(),
   }
   utils::write.table(pred, file.path(dest, "outputNorthSeaSpecificPredMort.txt"),
                      row.names = FALSE, quote = FALSE)
+  utils::write.table(
+    data.frame(Time = c(0, 365, 730), COD.M = c(0.5, 0.48, 0.46),
+               COD.F = c(0.1, 0.12, 0.11), HAD.M = c(0.4, 0.41, 0.39),
+               HAD.F = c(0.08, 0.09, 0.08)),
+    file.path(dest, "outputNorthSeaMort.txt"), row.names = FALSE, quote = FALSE
+  )
   write_northsea_biology_nc(file.path(dest, "outputNorthSea.nc"))
   write_northsea_biology_nc(file.path(dest, "init_NorthSea.nc"))
   write_northsea_prod_nc(file.path(dest, "outputNorthSeaPROD.nc"))

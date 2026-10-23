@@ -12,9 +12,10 @@ recruitment_ui <- function(id) {
         selectInput(ns("analysis_type"), "View",
                     choices = c("Recruits and YOY" = "yoy",
                                 "Spawning stock biomass" = "ssb",
+                                "Recruits vs SSB" = "sr",
                                 "Zooplankton and primary producers" = "growth")),
         conditionalPanel(
-          "input.analysis_type == 'yoy' || input.analysis_type == 'ssb'", ns = ns,
+          "input.analysis_type == 'yoy' || input.analysis_type == 'ssb' || input.analysis_type == 'sr'", ns = ns,
           selectInput(ns("fg_yoy"), "Functional group", choices = character())
         ),
         conditionalPanel(
@@ -30,6 +31,11 @@ recruitment_ui <- function(id) {
           p(class = "ra-muted", "SSB.txt from the run, with observed SSB ribbons when an observations CSV is loaded.")
         ),
         conditionalPanel(
+          "input.analysis_type == 'sr'", ns = ns,
+          p(class = "ra-muted",
+            "YOY.txt (CODE.0) against SSB.txt for the same age-structured group. Time series plus recruits versus spawning stock.")
+        ),
+        conditionalPanel(
           "input.analysis_type == 'growth'", ns = ns,
           selectInput(ns("fg_growth"), "Functional group", choices = character()),
           selectInput(ns("box"), "Box", choices = 0),
@@ -43,6 +49,9 @@ recruitment_ui <- function(id) {
                        plotOutput(ns("plot_relative_yoy"), height = "340px")),
       conditionalPanel("input.analysis_type == 'ssb'", ns = ns,
                        plotOutput(ns("plot_ssb"), height = "480px")),
+      conditionalPanel("input.analysis_type == 'sr'", ns = ns,
+                       plotOutput(ns("plot_sr_series"), height = "360px"),
+                       plotOutput(ns("plot_sr_scatter"), height = "360px")),
       conditionalPanel("input.analysis_type == 'growth'", ns = ns,
                        plotOutput(ns("plot_pp_growth"), height = "640px"))
     )
@@ -239,6 +248,69 @@ recruitment_server <- function(id, project = NULL) {
       p <- p + theme_reactiveatlantis()
       p <- ra_scale_x_year(p, df$Time)
       add_obs_overlay(p, dat$observations, fg_yoy_d(), "SSB")
+      })
+    })
+
+    sr_table <- reactive({
+      dat <- ps()$data
+      req(fg_yoy_d())
+      join_recruits_ssb(dat$yoy, dat$ssb, fg_yoy_d())
+    })
+
+    output$plot_sr_series <- renderPlot({
+      plot_or_message("Load YOY.txt and SSB.txt to plot recruits versus spawning stock", {
+        df <- sr_table()
+        if (is.null(df) || nrow(df) == 0) {
+          plot_message(attr(df, "reason") %||%
+                         "Load YOY.txt and SSB.txt to plot recruits versus spawning stock")
+          return(invisible(NULL))
+        }
+        long <- rbind(
+          data.frame(Time = yoy_dates(df$Time), Value = df$Recruits,
+                     Series = "Recruits (YOY)", stringsAsFactors = FALSE),
+          data.frame(Time = yoy_dates(df$Time), Value = df$SSB,
+                     Series = "SSB", stringsAsFactors = FALSE)
+        )
+        pal <- c(`Recruits (YOY)` = "#A33B20", SSB = "#0B3C5D")
+        p <- ggplot2::ggplot(long, ggplot2::aes(x = Time, y = Value, colour = Series))
+        p <- p + ggplot2::geom_line(linewidth = 0.9, na.rm = TRUE)
+        p <- p + ggplot2::geom_point(size = 1.6, na.rm = TRUE)
+        p <- p + ggplot2::facet_wrap(~ Series, ncol = 1, scales = "free_y")
+        p <- p + ggplot2::scale_color_manual(values = pal)
+        p <- p + ggplot2::labs(
+          title = paste("Recruits and SSB —", fg_yoy_d()),
+          subtitle = paste("YOY", unique(df$yoy_column), "· SSB", unique(df$ssb_column)),
+          x = "Year", y = NULL
+        )
+        p <- p + theme_reactiveatlantis()
+        ra_scale_x_year(p, long$Time)
+      })
+    })
+
+    output$plot_sr_scatter <- renderPlot({
+      plot_or_message("Load YOY.txt and SSB.txt to plot the stock-recruit scatter", {
+        df <- sr_table()
+        if (is.null(df) || nrow(df) == 0) {
+          plot_message(attr(df, "reason") %||%
+                         "Load YOY.txt and SSB.txt to plot the stock-recruit scatter")
+          return(invisible(NULL))
+        }
+        origin <- tryCatch(ensure_project_data(ps(), "nc_out")$origin,
+                           error = function(e) ps()$data$origin)
+        df$Date <- days_as_date(df$Time, origin)
+        p <- ggplot2::ggplot(df, ggplot2::aes(x = SSB, y = Recruits, colour = as.numeric(Date)))
+        p <- p + ggplot2::geom_point(size = 2.4, na.rm = TRUE)
+        p <- p + ggplot2::geom_path(linewidth = 0.4, alpha = 0.45, na.rm = TRUE)
+        p <- p + ggplot2::scale_colour_gradient(low = "#A33B20", high = "#1D7874",
+                                               name = "Year",
+                                               labels = function(x) {
+                                                 format(as.Date(x, origin = "1970-01-01"), "%Y")
+                                               })
+        p <- p + ggplot2::labs(
+          title = paste("Recruits vs spawning stock —", fg_yoy_d()),
+          x = "SSB", y = "Recruits (YOY.txt)"
+        )
+        p + theme_reactiveatlantis()
       })
     })
 

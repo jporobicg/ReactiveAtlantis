@@ -17,7 +17,7 @@ ensemble_ui <- function(id) {
                                 "Catch (CATCH.nc)" = "catch")),
         selectInput(ns("fg"), "Functional group", choices = character()),
         p(class = "ra-muted",
-          "Add extra run folders in the Run panel (one path per line) to overlay them here.")
+          "Add another run (config + output folders) in the Run panel to overlay it here.")
       ),
       plotOutput(ns("ens_plot"), height = "560px")
     )
@@ -37,8 +37,8 @@ ensemble_server <- function(id, project = NULL) {
         return(bslib::card(
           bslib::card_header("Only one run is loaded"),
           bslib::card_body(
-            shiny::p("Paste extra Atlantis output folders (one per line) in the Run panel, then click Load run."),
-            shiny::p("Each folder is scanned for BiomIndx, SSB and YOY. The current run is always included. With more than two runs the plot adds the ensemble mean and range.")
+            shiny::p("Use Add another run in the Run panel, then click Load run."),
+            shiny::p("Each extra run is a configuration folder plus an output folder. BiomIndx, SSB and YOY are read from the pair. The current run is always included. With more than two runs the plot adds the ensemble mean and range.")
           )
         ))
       }
@@ -52,14 +52,14 @@ ensemble_server <- function(id, project = NULL) {
     })
 
     output$ens_plot <- renderPlot({
-      plot_or_message("Load a run, then paste extra folders to overlay them", {
+      plot_or_message("Load a run, then add another run to overlay them", {
       if (!isTRUE(ps()$ready)) {
         plot_message("Load a run to overlay BiomIndx, SSB or YOY")
         return(invisible(NULL))
       }
       runs <- ps()$ensemble
       if (is.null(runs) || length(runs) < 2) {
-        plot_message("Paste extra run folders in the Run panel to overlay more than one simulation")
+        plot_message("Add another run in the Run panel to overlay more than one simulation")
         return(invisible(NULL))
       }
       req(input$fg, input$kind)

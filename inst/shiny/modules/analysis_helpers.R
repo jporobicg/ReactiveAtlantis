@@ -46,6 +46,140 @@ code_from_fg_label <- function(fg) {
   ifelse(nzchar(out), out, as.character(fg))
 }
 
+AGE_CLASS_VARS <- c("ResN", "StructN", "Numbers", "Biomass")
+
+##' Subset a tracer array to a box and/or display layer (pads already NA).
+age_subset_array <- function(arr, box = NULL, layer_key = "integrated", info = NULL) {
+  if (is.null(arr)) return(NULL)
+  d <- dim(arr)
+  if (!is.null(info) && !is.null(d) && length(d) >= 2 &&
+      exists("mask_padded_layers", mode = "function")) {
+    arr <- mask_padded_layers(arr, info)
+    d <- dim(arr)
+  }
+  if (!is.null(d) && length(d) == 3) {
+    if (!is.null(layer_key) && !identical(layer_key, "integrated") &&
+        exists("layer_storage_z", mode = "function") && !is.null(info)) {
+      z <- layer_storage_z(info, layer_key)
+      if (!is.finite(z) || z < 1 || z > d[1]) {
+        arr[] <- NA_real_
+      } else {
+        arr <- arr[z, , , drop = FALSE]
+      }
+    }
+    if (!is.null(box)) {
+      b1 <- as.integer(box)[1] + 1L
+      if (is.finite(b1) && b1 >= 1 && b1 <= dim(arr)[2]) {
+        arr <- arr[, b1, , drop = FALSE]
+      } else {
+        arr[] <- NA_real_
+      }
+    }
+    return(arr)
+  }
+  if (!is.null(d) && length(d) == 2 && !is.null(box)) {
+    b1 <- as.integer(box)[1] + 1L
+    if (is.finite(b1) && b1 >= 1 && b1 <= d[1]) {
+      arr <- arr[b1, , drop = FALSE]
+    } else {
+      arr[] <- NA_real_
+    }
+  }
+  arr
+}
+
+weighted_mean_space <- function(val, w) {
+  if (is.null(val) || is.null(w)) return(numeric())
+  d <- dim(val)
+  if (is.null(d) || length(d) == 1) {
+    ww <- as.numeric(w)
+    vv <- as.numeric(val)
+    ok <- is.finite(vv) & is.finite(ww) & ww > 0
+    if (!any(ok)) return(NA_real_)
+    return(sum(vv[ok] * ww[ok]) / sum(ww[ok]))
+  }
+  n_t <- d[length(d)]
+  vapply(seq_len(n_t), function(t) {
+    vv <- as.numeric(time_slice(val, t))
+    ww <- as.numeric(time_slice(w, t))
+    ok <- is.finite(vv) & is.finite(ww) & ww > 0
+    if (!any(ok)) return(NA_real_)
+    sum(vv[ok] * ww[ok]) / sum(ww[ok])
+  }, numeric(1))
+}
+
+##' Age-class time series: ResN, StructN, Numbers, Biomass.
+##'
+##' System-wide when \code{box} is NULL and \code{layer_key} is integrated.
+##' Numbers are summed; ResN/StructN are numbers-weighted means; biomass uses
+##' the same \code{mg2t * x.cn} conversion as Compare / Spatial.
+age_class_long <- function(nc, grp, fg_code, box = NULL,
+                           layer_key = "integrated", info = NULL,
+                           mg2t = 0.00000002, x.cn = 5.7) {
+  empty <- data.frame(
+    Time = integer(), Age = integer(), AgeLab = character(),
+    Variable = character(), Value = numeric(),
+    stringsAsFactors = FALSE
+  )
+  if (is.null(nc) || is.null(grp) || !nzchar(as.character(fg_code)[1])) {
+    return(empty)
+  }
+  row <- grp[grp$code == fg_code, , drop = FALSE]
+  if (nrow(row) == 0) return(empty)
+  n.coh <- as.integer(row$numcohorts[1])
+  gtype <- as.character(row$grouptype[1])
+  if (!is.finite(n.coh) || n.coh < 2 || gtype %in% AGE_SPECIAL) return(empty)
+  if (is.null(info) && exists("atlantis_layer_info", mode = "function")) {
+    info <- tryCatch(atlantis_layer_info(nc), error = function(e) NULL)
+  }
+  path <- tryCatch(nc$filename, error = function(e) "anon")
+  box_key <- if (is.null(box)) "all" else paste(as.integer(box), collapse = ",")
+  ck <- paste("agecls", file_cache_key(path, fg_code), box_key,
+              as.character(layer_key)[1], mg2t, x.cn, sep = "|")
+  hit <- tryCatch(ra_cache_get(ck), error = function(e) NULL)
+  if (!is.null(hit)) return(hit)
+
+  name <- as.character(row$name[1])
+  vars <- names(nc$var)
+  rows <- list()
+  for (coh in seq_len(n.coh)) {
+    n_var <- paste0(name, coh, "_Nums")
+    r_var <- paste0(name, coh, "_ResN")
+    s_var <- paste0(name, coh, "_StructN")
+    if (!all(c(n_var, r_var, s_var) %in% vars)) next
+    nums <- age_subset_array(nc_get(nc, n_var), box, layer_key, info)
+    resn <- age_subset_array(nc_get(nc, r_var), box, layer_key, info)
+    strn <- age_subset_array(nc_get(nc, s_var), box, layer_key, info)
+    if (is.null(nums)) next
+    n_t <- if (!is.null(dim(nums))) dim(nums)[length(dim(nums))] else length(nums)
+    nums_t <- as.numeric(sum_space(nums))
+    resn_t <- as.numeric(weighted_mean_space(resn, nums))
+    strn_t <- as.numeric(weighted_mean_space(strn, nums))
+    biom_t <- as.numeric(sum_space((resn + strn) * nums)) * mg2t * x.cn
+    if (length(nums_t) != n_t) n_t <- length(nums_t)
+    rows[[length(rows) + 1]] <- data.frame(
+      Time = rep(seq_len(n_t), 4L),
+      Age = coh,
+      AgeLab = paste("Age", coh),
+      Variable = rep(c("ResN", "StructN", "Numbers", "Biomass"), each = n_t),
+      Value = c(resn_t, strn_t, nums_t, biom_t),
+      stringsAsFactors = FALSE
+    )
+  }
+  out <- if (length(rows)) do.call(rbind, rows) else empty
+  tryCatch(ra_cache_set(ck, out), error = function(e) NULL)
+  out
+}
+
+age_class_ylab <- function(variable) {
+  switch(as.character(variable)[1],
+         ResN = "Reserve nitrogen (mg N)",
+         StructN = "Structural nitrogen (mg N)",
+         Numbers = "Numbers",
+         Biomass = "Biomass (t)",
+         "Value")
+}
+
 ##' Relative StructN / ResN at the end of the run versus t0
 ##'
 ##' Age-class groups only. A cohort is a problem when the spatial-mean
@@ -280,27 +414,245 @@ add_obs_overlay <- function(p, obs, codes, type, facet_var = NULL) {
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
 
 bgm_nbox <- function(lines) {
-  hit <- grep("^nbox[[:space:]]+", lines)
-  if (length(hit) == 0) return(NA_integer_)
-  as.integer(sub("^nbox[[:space:]]+", "", lines[hit[1]]))
+  hit <- grep("^nbox\\b", lines, ignore.case = TRUE)
+  if (length(hit)) {
+    n <- suppressWarnings(as.integer(sub(".*?([0-9]+).*", "\\1", lines[hit[1]])))
+    if (is.finite(n) && n > 0) return(as.integer(n))
+  }
+  ids <- suppressWarnings(as.integer(sub(
+    "^box([0-9]+)\\..*", "\\1",
+    grep("^box[0-9]+\\.", lines, value = TRUE)
+  )))
+  ids <- ids[is.finite(ids)]
+  if (!length(ids)) return(NA_integer_)
+  as.integer(max(ids) + 1L)
 }
 
-bgm_box_verts <- function(lines, boxid) {
+bgm_empty_poly <- function(reason = "", path = NA_character_, nbox = NA_integer_) {
+  out <- data.frame(boxid = integer(), x = numeric(), y = numeric(),
+                    boundary = logical(), order = integer(),
+                    stringsAsFactors = FALSE)
+  attr(out, "reason") <- as.character(reason)[1]
+  attr(out, "path") <- as.character(path)[1]
+  attr(out, "nbox") <- as.integer(nbox)[1]
+  out
+}
+
+read_bgm_lines <- function(bgm_path) {
+  lines <- tryCatch(readLines(bgm_path, warn = FALSE, encoding = "UTF-8"),
+                    error = function(e) NULL)
+  if (is.null(lines)) {
+    lines <- tryCatch(readLines(bgm_path, warn = FALSE),
+                      error = function(e) character())
+  }
+  lines <- sub("^\ufeff", "", lines)
+  lines <- sub("#.*$", "", lines)
+  trimws(lines)
+}
+
+##' rbgm needs a projection line and chokes on commented "projection" text.
+normalize_bgm_for_rbgm <- function(bgm_path) {
+  raw <- tryCatch(readLines(bgm_path, warn = FALSE, encoding = "UTF-8"),
+                  error = function(e) readLines(bgm_path, warn = FALSE))
+  raw <- sub("^\ufeff", "", raw)
+  raw <- vapply(raw, function(ln) {
+    if (grepl("^#+\\s*projection\\b", ln, ignore.case = TRUE)) {
+      sub("^#+\\s*", "", ln)
+    } else {
+      ln
+    }
+  }, character(1), USE.NAMES = FALSE)
+  if (!any(grepl("^\\s*projection\\b", raw, ignore.case = TRUE))) {
+    raw <- c("projection +proj=longlat +datum=WGS84 +no_defs", raw)
+  }
+  tmp <- tempfile(fileext = ".bgm")
+  writeLines(raw, tmp)
+  tmp
+}
+
+bgm_polygons_from_rbgm <- function(bgm_path) {
+  empty <- bgm_empty_poly("rbgm did not return polygons", bgm_path)
+  if (!requireNamespace("rbgm", quietly = TRUE)) return(empty)
+  tmp <- tryCatch(normalize_bgm_for_rbgm(bgm_path), error = function(e) bgm_path)
+  on.exit({
+    if (!identical(tmp, bgm_path) && file.exists(tmp)) unlink(tmp)
+  }, add = TRUE)
+  bgm <- tryCatch(rbgm::bgmfile(tmp), error = function(e) NULL)
+  if (is.null(bgm)) return(empty)
+  if (requireNamespace("sf", quietly = TRUE)) {
+    boxes <- tryCatch(sf::st_as_sf(rbgm::box_sf(bgm)), error = function(e) NULL)
+    if (!is.null(boxes) && nrow(boxes) > 0) {
+      rows <- list()
+      for (i in seq_len(nrow(boxes))) {
+        crd <- tryCatch(sf::st_coordinates(boxes[i, ]), error = function(e) NULL)
+        if (is.null(crd) || nrow(crd) < 3) next
+        bid <- NA_integer_
+        for (nm in c(".bx0", "box", "box_id", "boxid")) {
+          if (nm %in% names(boxes)) {
+            bid <- suppressWarnings(as.integer(boxes[[nm]][i]))
+            if (is.finite(bid)) break
+          }
+        }
+        if (!is.finite(bid)) bid <- i - 1L
+        rows[[length(rows) + 1]] <- data.frame(
+          boxid = bid, x = crd[, 1], y = crd[, 2],
+          boundary = FALSE, order = seq_len(nrow(crd)),
+          stringsAsFactors = FALSE
+        )
+      }
+      if (length(rows)) {
+        out <- do.call(rbind, rows)
+        attr(out, "reason") <- ""
+        attr(out, "path") <- bgm_path
+        attr(out, "nbox") <- length(unique(out$boxid))
+        attr(out, "parser") <- "rbgm"
+        return(out)
+      }
+    }
+  }
+  verts <- tryCatch(as.data.frame(bgm$vertices), error = function(e) NULL)
+  if (is.null(verts) || !all(c("x", "y") %in% names(verts))) return(empty)
+  vid <- if (".vx0" %in% names(verts)) as.integer(verts$.vx0) else seq_len(nrow(verts)) - 1L
+  boxes <- tryCatch(as.data.frame(bgm$boxes), error = function(e) NULL)
+  nbox <- if (!is.null(boxes) && nrow(boxes) > 0) nrow(boxes) else NA_integer_
+  if (!is.finite(nbox)) return(empty)
+  rows <- list()
+  for (b in seq_len(nbox) - 1L) {
+    idx <- NULL
+    for (nm in names(bgm)) {
+      if (grepl(paste0("^box", b, "v$"), nm, ignore.case = TRUE)) {
+        idx <- suppressWarnings(as.integer(unlist(bgm[[nm]])))
+        break
+      }
+    }
+    if (is.null(idx) && !is.null(boxes)) {
+      for (nm in c("v", "vert", "verts")) {
+        if (nm %in% names(boxes)) {
+          idx <- suppressWarnings(as.integer(unlist(boxes[b + 1L, nm])))
+          break
+        }
+      }
+    }
+    if (is.null(idx) || !length(idx)) next
+    m <- match(idx, vid)
+    if (anyNA(m)) m <- idx + 1L
+    ok <- is.finite(m) & m >= 1 & m <= nrow(verts)
+    if (sum(ok) < 3) next
+    rows[[length(rows) + 1]] <- data.frame(
+      boxid = as.integer(b),
+      x = verts$x[m[ok]], y = verts$y[m[ok]],
+      boundary = FALSE, order = seq_len(sum(ok)),
+      stringsAsFactors = FALSE
+    )
+  }
+  if (!length(rows)) return(empty)
+  out <- do.call(rbind, rows)
+  attr(out, "reason") <- ""
+  attr(out, "path") <- bgm_path
+  attr(out, "nbox") <- nbox
+  attr(out, "parser") <- "rbgm-vertices"
+  out
+}
+
+bgm_parse_xy <- function(txt) {
+  nums <- suppressWarnings(as.numeric(unlist(strsplit(trimws(txt), "[[:space:]]+"))))
+  nums <- nums[is.finite(nums)]
+  if (length(nums) < 2) return(NULL)
+  c(nums[1], nums[2])
+}
+
+##' Global vertex table: `vert <id> <x> <y>` or `vert <x> <y>`.
+bgm_global_verts <- function(lines) {
+  hits <- grep("^vert[[:space:]]+", lines, value = TRUE)
+  if (!length(hits)) return(NULL)
+  rows <- lapply(hits, function(ln) {
+    rest <- sub("^vert[[:space:]]+", "", ln)
+    nums <- suppressWarnings(as.numeric(unlist(strsplit(trimws(rest), "[[:space:]]+"))))
+    nums <- nums[is.finite(nums)]
+    if (length(nums) >= 3) {
+      data.frame(id = as.integer(nums[1]), x = nums[2], y = nums[3])
+    } else if (length(nums) == 2) {
+      data.frame(id = NA_integer_, x = nums[1], y = nums[2])
+    } else {
+      NULL
+    }
+  })
+  rows <- rows[!vapply(rows, is.null, logical(1))]
+  if (!length(rows)) return(NULL)
+  df <- do.call(rbind, rows)
+  if (all(is.na(df$id))) df$id <- seq_len(nrow(df)) - 1L
+  df
+}
+
+bgm_lookup_verts <- function(idx, gverts) {
+  if (is.null(gverts) || !length(idx)) {
+    return(data.frame(x = numeric(), y = numeric()))
+  }
+  m <- match(as.integer(idx), gverts$id)
+  if (anyNA(m)) m <- as.integer(idx) + 1L
+  ok <- is.finite(m) & m >= 1 & m <= nrow(gverts)
+  if (!any(ok)) return(data.frame(x = numeric(), y = numeric()))
+  data.frame(x = gverts$x[m[ok]], y = gverts$y[m[ok]])
+}
+
+bgm_box_from_faces <- function(lines, boxid) {
+  iface <- grep(paste0("^box", boxid, "\\.iface[[:space:]]+"), lines, value = TRUE)
+  if (!length(iface)) return(data.frame(x = numeric(), y = numeric()))
+  ids <- suppressWarnings(as.integer(unlist(strsplit(
+    sub(paste0("^box", boxid, "\\.iface[[:space:]]+"), "", iface[1]),
+    "[[:space:]]+"))))
+  ids <- ids[is.finite(ids)]
+  if (!length(ids)) return(data.frame(x = numeric(), y = numeric()))
+  xs <- numeric()
+  ys <- numeric()
+  last <- NULL
+  for (f in ids) {
+    p1 <- grep(paste0("^face", f, "\\.p1[[:space:]]+"), lines, value = TRUE)
+    p2 <- grep(paste0("^face", f, "\\.p2[[:space:]]+"), lines, value = TRUE)
+    a <- if (length(p1)) bgm_parse_xy(sub(".*\\.p1[[:space:]]+", "", p1[1])) else NULL
+    b <- if (length(p2)) bgm_parse_xy(sub(".*\\.p2[[:space:]]+", "", p2[1])) else NULL
+    if (!is.null(a)) {
+      xs <- c(xs, a[1]); ys <- c(ys, a[2])
+    }
+    last <- b
+  }
+  if (!is.null(last)) {
+    xs <- c(xs, last[1]); ys <- c(ys, last[2])
+  }
+  if (!length(xs)) return(data.frame(x = numeric(), y = numeric()))
+  data.frame(x = xs, y = ys)
+}
+
+bgm_box_verts <- function(lines, boxid, gverts = NULL) {
   pat_xy <- paste0("^box", boxid, "\\.vert[[:space:]]+")
   xy_lines <- grep(pat_xy, lines, value = TRUE)
   if (length(xy_lines) > 0) {
     coords <- strsplit(sub(pat_xy, "", xy_lines), "[[:space:]]+")
-    if (length(coords[[1]]) == 1 && length(coords) == 1) {
-      n <- suppressWarnings(as.integer(coords[[1]][1]))
+    n1 <- suppressWarnings(as.numeric(coords[[1]]))
+    n1 <- n1[is.finite(n1)]
+    if (length(n1) == 1 && length(coords) == 1) {
+      n <- as.integer(n1[1])
       start <- grep(pat_xy, lines)[1]
       if (is.finite(n) && n > 1) {
         block <- lines[(start + 1):(start + n)]
-        mat <- do.call(rbind, lapply(strsplit(trimws(block), "[[:space:]]+"), as.numeric))
-        return(data.frame(x = mat[, 1], y = mat[, 2], stringsAsFactors = FALSE))
+        mat <- do.call(rbind, lapply(strsplit(trimws(block), "[[:space:]]+"),
+                                     function(v) as.numeric(v[1:2])))
+        if (!is.null(dim(mat)) && ncol(mat) >= 2 && all(is.finite(mat[, 1:2]))) {
+          return(data.frame(x = mat[, 1], y = mat[, 2], stringsAsFactors = FALSE))
+        }
       }
     }
+    lens <- vapply(coords, length, integer(1))
+    if (all(lens == 1L)) {
+      idx <- suppressWarnings(as.integer(vapply(coords, function(v) v[1], character(1))))
+      got <- bgm_lookup_verts(idx, gverts)
+      if (nrow(got) > 2) return(got)
+    }
     mat <- do.call(rbind, lapply(coords, function(v) as.numeric(v[1:2])))
-    return(data.frame(x = mat[, 1], y = mat[, 2], stringsAsFactors = FALSE))
+    if (!is.null(dim(mat)) && ncol(mat) >= 2 &&
+        sum(is.finite(mat[, 1]) & is.finite(mat[, 2])) > 2) {
+      return(data.frame(x = mat[, 1], y = mat[, 2], stringsAsFactors = FALSE))
+    }
   }
   pat2 <- paste0("^box", boxid, "\\.vert2[[:space:]]+")
   hit2 <- grep(pat2, lines)
@@ -308,11 +660,12 @@ bgm_box_verts <- function(lines, boxid) {
     n <- suppressWarnings(as.integer(sub(pat2, "", lines[hit2])))
     if (is.finite(n) && n > 1) {
       block <- lines[(hit2 + 1):(hit2 + n)]
-      mat <- do.call(rbind, lapply(strsplit(trimws(block), "[[:space:]]+"), as.numeric))
+      mat <- do.call(rbind, lapply(strsplit(trimws(block), "[[:space:]]+"),
+                                   function(v) as.numeric(v[1:2])))
       return(data.frame(x = mat[, 1], y = mat[, 2], stringsAsFactors = FALSE))
     }
   }
-  data.frame(x = numeric(), y = numeric())
+  bgm_box_from_faces(lines, boxid)
 }
 
 bgm_box_flag <- function(lines, boxid) {
@@ -331,31 +684,481 @@ bgm_box_flag <- function(lines, boxid) {
 
 ##' Polygon vertices for every box in a BGM file
 read_bgm_polygons <- function(bgm_path) {
-  if (is.null(bgm_path) || !file.exists(bgm_path)) {
-    return(data.frame(boxid = integer(), x = numeric(), y = numeric(),
-                      boundary = logical(), order = integer(),
-                      stringsAsFactors = FALSE))
+  path <- as.character(bgm_path)[1]
+  if (is.null(bgm_path) || !nzchar(path) || is.na(path)) {
+    return(bgm_empty_poly("BGM path is empty (no .bgm was detected)."))
   }
-  lines <- readLines(bgm_path, warn = FALSE)
-  lines <- sub("#.*$", "", lines)
+  if (!file.exists(path)) {
+    return(bgm_empty_poly(paste("BGM not found at path", path), path))
+  }
+  lines <- read_bgm_lines(path)
+  if (!length(lines) || !any(nzchar(lines))) {
+    return(bgm_empty_poly(paste("BGM is empty:", path), path))
+  }
   nbox <- bgm_nbox(lines)
   if (!is.finite(nbox) || nbox < 1) {
-    stop("Could not read nbox from the BGM file.")
+    return(bgm_empty_poly(
+      paste("No nbox line and no boxN.* tokens in", path), path))
   }
+  gverts <- bgm_global_verts(lines)
   rows <- list()
   for (b in seq_len(nbox) - 1L) {
-    verts <- bgm_box_verts(lines, b)
+    verts <- bgm_box_verts(lines, b, gverts)
     if (nrow(verts) == 0) next
+    ok <- is.finite(verts$x) & is.finite(verts$y)
+    if (sum(ok) < 3) next
+    verts <- verts[ok, , drop = FALSE]
     fl <- bgm_box_flag(lines, b)
-    verts$boxid <- b
+    verts$boxid <- as.integer(b)
     verts$boundary <- fl$boundary
     verts$order <- seq_len(nrow(verts))
     rows[[length(rows) + 1]] <- verts
   }
   if (length(rows) == 0) {
-    stop("No box vertices were found in the BGM file.")
+    alt <- bgm_polygons_from_rbgm(path)
+    if (nrow(alt) > 0) return(alt)
+    return(bgm_empty_poly(
+      paste0("nbox ", nbox, " in ", path,
+             " but no vertices parsed (tried box.vert, index verts, faces",
+             if (requireNamespace("rbgm", quietly = TRUE)) ", rbgm" else "",
+             ")."),
+      path, nbox))
   }
-  do.call(rbind, rows)
+  out <- do.call(rbind, rows)
+  attr(out, "reason") <- ""
+  attr(out, "path") <- path
+  attr(out, "nbox") <- as.integer(nbox)
+  attr(out, "parser") <- "native"
+  out
+}
+
+##' Join box values onto BGM polygons (0-based box ids on both sides).
+spatial_join_polygons <- function(poly, values, time_i = 1L, value_col = "Value") {
+  if (is.null(poly) || nrow(poly) == 0) {
+    poly$Value <- numeric()
+    return(poly)
+  }
+  poly$boxid <- as.integer(poly$boxid)
+  if (is.null(values) || nrow(values) == 0) {
+    poly$Value <- NA_real_
+    return(poly)
+  }
+  if ("Time" %in% names(values)) {
+    values <- values[as.integer(values$Time) == as.integer(time_i)[1], , drop = FALSE]
+  }
+  src <- if (value_col %in% names(values)) values[[value_col]] else values$Biomass
+  box <- as.integer(values$Box)
+  poly$Value <- as.numeric(src[match(poly$boxid, box)])
+  poly
+}
+
+empty_spatial_values <- function() {
+  data.frame(Time = integer(), Box = integer(), Value = numeric(),
+             Variable = character(), stringsAsFactors = FALSE)
+}
+
+tracer_by_box_layer <- function(nc, varname, layer_key = "integrated", info = NULL) {
+  empty <- empty_spatial_values()
+  if (is.null(nc) || !nzchar(as.character(varname)[1])) return(empty)
+  if (is.null(info)) info <- tryCatch(atlantis_layer_info(nc), error = function(e) NULL)
+  arr <- tryCatch(nc_get(nc, varname), error = function(e) NULL)
+  if (is.null(arr)) return(empty)
+  d <- dim(arr)
+  if (!is.null(info) && !is.null(d) && length(d) >= 2 &&
+      exists("mask_padded_layers", mode = "function")) {
+    arr <- mask_padded_layers(arr, info)
+    d <- dim(arr)
+  }
+  if (is.null(d)) {
+    return(data.frame(Time = 1L, Box = 0L, Value = as.numeric(arr)[1],
+                      Variable = varname, stringsAsFactors = FALSE))
+  }
+  if (length(d) == 2 && !is.null(nc$dim$t) && d[2] == nc$dim$t$len) {
+    n_b <- d[1]; n_t <- d[2]
+    return(data.frame(
+      Time = rep(seq_len(n_t), each = n_b),
+      Box = rep(seq_len(n_b) - 1L, times = n_t),
+      Value = as.numeric(arr),
+      Variable = varname, stringsAsFactors = FALSE
+    ))
+  }
+  if (length(d) >= 3) {
+    if (!identical(layer_key, "integrated") && !is.null(info) &&
+        exists("layer_storage_z", mode = "function")) {
+      z <- layer_storage_z(info, layer_key)
+      if (is.finite(z) && z >= 1 && z <= d[1]) {
+        sl <- arr[z, , , drop = FALSE]
+      } else {
+        sl <- arr[rep(FALSE, d[1]), , , drop = FALSE]
+        sl <- array(NA_real_, dim = c(1, d[2], d[3]))
+      }
+    } else {
+      sl <- arr
+    }
+    acc <- apply(sl, c(2, 3), function(x) {
+      x <- x[is.finite(x)]
+      if (!length(x)) NA_real_ else mean(x)
+    })
+    n_b <- nrow(acc); n_t <- ncol(acc)
+    return(data.frame(
+      Time = rep(seq_len(n_t), each = n_b),
+      Box = rep(seq_len(n_b) - 1L, times = n_t),
+      Value = as.numeric(acc),
+      Variable = varname, stringsAsFactors = FALSE
+    ))
+  }
+  empty
+}
+
+numbers_by_box_layer <- function(nc, grp, fg_code, layer_key = "integrated",
+                                 info = NULL) {
+  empty <- empty_spatial_values()
+  row <- grp[grp$code == fg_code, , drop = FALSE]
+  if (nrow(row) == 0) return(empty)
+  n.coh <- as.integer(row$numcohorts[1])
+  name <- as.character(row$name[1])
+  vars <- names(nc$var)
+  if (is.null(info)) info <- tryCatch(atlantis_layer_info(nc), error = function(e) NULL)
+  acc <- NULL
+  if (is.finite(n.coh) && n.coh > 1) {
+    for (coh in seq_len(n.coh)) {
+      vn <- paste0(name, coh, "_Nums")
+      if (!vn %in% vars) next
+      arr <- age_subset_array(nc_get(nc, vn), box = NULL, layer_key = layer_key, info)
+      if (is.null(arr) || is.null(dim(arr))) next
+      bt <- sum_layers_to_box_time(arr)
+      acc <- if (is.null(acc)) bt else acc + bt
+    }
+  }
+  if (is.null(acc)) return(empty)
+  n_b <- nrow(acc); n_t <- ncol(acc)
+  data.frame(
+    Time = rep(seq_len(n_t), each = n_b),
+    Box = rep(seq_len(n_b) - 1L, times = n_t),
+    Value = as.numeric(acc),
+    Variable = "Numbers", stringsAsFactors = FALSE
+  )
+}
+
+##' Box-level series for the Spatial map / time series.
+spatial_box_values <- function(nc, grp, kind = "biomass", fg_code = NULL,
+                               tracer = NULL, layer_key = "integrated",
+                               info = NULL, mg2t = 0.00000002, x.cn = 5.7) {
+  kind <- tolower(as.character(kind)[1])
+  if (kind %in% c("tracer", "physics")) {
+    vn <- as.character(tracer)[1]
+    return(tracer_by_box_layer(nc, vn, layer_key, info))
+  }
+  if (kind %in% c("numbers", "nums")) {
+    return(numbers_by_box_layer(nc, grp, fg_code, layer_key, info))
+  }
+  bio <- biomass_by_box_layer(nc, grp, fg_code, layer_key, info, mg2t, x.cn)
+  if (is.null(bio) || nrow(bio) == 0) return(empty_spatial_values())
+  data.frame(Time = bio$Time, Box = as.integer(bio$Box), Value = bio$Biomass,
+             Variable = "Biomass", stringsAsFactors = FALSE)
+}
+
+spatial_ts_values <- function(values, scope = "box", box = 0L, boxes = NULL) {
+  if (is.null(values) || nrow(values) == 0) return(values)
+  scope <- as.character(scope)[1]
+  if (identical(scope, "system")) {
+    agg <- stats::aggregate(Value ~ Time, data = values, sum, na.rm = TRUE)
+    agg$Box <- -1L
+    agg$Variable <- values$Variable[1]
+    return(agg)
+  }
+  if (identical(scope, "boxes") && !is.null(boxes) && length(boxes)) {
+    return(values[as.integer(values$Box) %in% as.integer(boxes), , drop = FALSE])
+  }
+  values[as.integer(values$Box) == as.integer(box)[1], , drop = FALSE]
+}
+
+plot_spatial_map <- function(poly, fill_lim = NULL, fill_high = "#0B3C5D",
+                             selected_box = NULL, title = NULL,
+                             legend = "Value") {
+  if (is.null(poly) || nrow(poly) == 0) {
+    stop("No box polygons were found in the BGM file.")
+  }
+  poly$boxid <- as.integer(poly$boxid)
+  poly$lab <- paste0("Box ", poly$boxid, "<br>",
+                     if ("Value" %in% names(poly)) {
+                       ifelse(is.finite(poly$Value),
+                              format(poly$Value, digits = 4, trim = TRUE),
+                              "NA")
+                     } else "NA")
+  p <- ggplot2::ggplot(poly, ggplot2::aes(x = x, y = y, group = boxid,
+                                          fill = Value, text = lab, key = boxid))
+  p <- p + ggplot2::geom_polygon(colour = RA_BOX_OUTLINE, linewidth = 0.25)
+  p <- p + ggplot2::coord_equal()
+  fill_args <- list(low = "#F7F4EC", high = fill_high,
+                    na.value = "#C5C0B2", name = legend)
+  if (!is.null(fill_lim) && all(is.finite(fill_lim))) fill_args$limits <- fill_lim
+  p <- p + do.call(ggplot2::scale_fill_gradient, fill_args)
+  if (!is.null(selected_box) && is.finite(as.integer(selected_box)[1])) {
+    sel <- poly[poly$boxid == as.integer(selected_box)[1], , drop = FALSE]
+    if (nrow(sel) > 0) {
+      p <- p + ggplot2::geom_polygon(
+        data = sel, ggplot2::aes(x = x, y = y, group = boxid),
+        fill = NA, colour = "#121311", linewidth = 1.4, inherit.aes = FALSE
+      )
+    }
+  }
+  if (isTRUE(any(poly$boundary))) {
+    bnd <- poly[poly$boundary, ]
+    p <- p + ggplot2::geom_polygon(
+      data = bnd, ggplot2::aes(x = x, y = y, group = boxid),
+      fill = NA, colour = "#0B3C5D", linewidth = 0.7, inherit.aes = FALSE
+    )
+  }
+  p <- p + ggplot2::labs(title = title, x = NULL, y = NULL)
+  p + theme_reactiveatlantis() +
+    ggplot2::theme(axis.text = ggplot2::element_blank(),
+                   panel.grid = ggplot2::element_blank())
+}
+
+ra_html_escape <- function(x) {
+  x <- as.character(x)
+  x <- gsub("&", "&amp;", x, fixed = TRUE)
+  x <- gsub("<", "&lt;", x, fixed = TRUE)
+  x <- gsub(">", "&gt;", x, fixed = TRUE)
+  x
+}
+
+ra_hex_lerp <- function(a, b, t) {
+  t <- max(0, min(1, as.numeric(t)[1]))
+  aa <- grDevices::col2rgb(a)
+  bb <- grDevices::col2rgb(b)
+  rgb <- aa + (bb - aa) * t
+  grDevices::rgb(rgb[1], rgb[2], rgb[3], maxColorValue = 255)
+}
+
+##' Human-readable reason a Spatial map can or cannot draw.
+diagnose_spatial_map <- function(bgm_path = NULL, poly = NULL, values = NULL,
+                                 nc = NULL, fg = NULL, layer_key = NULL,
+                                 searched = NULL) {
+  notes <- character()
+  ok <- TRUE
+  path <- as.character(bgm_path)[1]
+  if (is.null(path) || !nzchar(path) || is.na(path)) {
+    ok <- FALSE
+    if (length(searched)) {
+      notes <- c(notes, paste("BGM not found. Searched:",
+                              paste(searched, collapse = "; ")))
+    } else {
+      notes <- c(notes, "BGM not found (no .bgm path was detected).")
+    }
+  } else if (!file.exists(path)) {
+    ok <- FALSE
+    notes <- c(notes, paste("BGM not found at path", path))
+  } else {
+    notes <- c(notes, paste("BGM:", path))
+    if (is.null(poly)) {
+      poly <- tryCatch(read_bgm_polygons(path), error = function(e) {
+        bgm_empty_poly(e$message, path)
+      })
+    }
+    nbox <- attr(poly, "nbox")
+    npoly <- if (is.null(poly) || nrow(poly) == 0) 0L else length(unique(poly$boxid))
+    nvert <- if (is.null(poly)) 0L else nrow(poly)
+    notes <- c(notes, paste0("nbox parsed: ",
+                             if (is.finite(nbox)) nbox else "unknown",
+                             "; polygons: ", npoly,
+                             "; vertices: ", nvert))
+    parser <- attr(poly, "parser")
+    if (!is.null(parser) && nzchar(parser)) {
+      notes <- c(notes, paste("parser:", parser))
+    }
+    if (npoly < 1) {
+      ok <- FALSE
+      why <- attr(poly, "reason")
+      notes <- c(notes, if (!is.null(why) && nzchar(why)) why
+                 else "No box polygons parsed from the BGM.")
+    } else {
+      xr <- range(poly$x, na.rm = TRUE)
+      yr <- range(poly$y, na.rm = TRUE)
+      notes <- c(notes, sprintf("coordinate range x=[%g, %g] y=[%g, %g]",
+                                xr[1], xr[2], yr[1], yr[2]))
+      span <- max(diff(xr), diff(yr), na.rm = TRUE)
+      if (is.finite(span) && span > 1e5) {
+        notes <- c(notes, "coordinates look projected (metres), not lon/lat.")
+      } else if (is.finite(span) && span <= 360) {
+        notes <- c(notes, "coordinates look geographic (lon/lat).")
+      }
+    }
+  }
+  if (is.null(nc) && (is.null(values) || nrow(values) == 0)) {
+    notes <- c(notes, "Output NetCDF not loaded or has no box values.")
+  }
+  if (!is.null(values) && nrow(values) > 0) {
+    nfin <- sum(is.finite(values$Value))
+    notes <- c(notes, paste(nfin, "finite values of", nrow(values)))
+    if (nfin == 0) {
+      notes <- c(notes, "Tracer or group has no finite values (boxes use unused fill).")
+    }
+  }
+  if (!is.null(fg) && nzchar(as.character(fg)[1])) {
+    notes <- c(notes, paste("Group:", as.character(fg)[1]))
+  }
+  if (!is.null(layer_key) && nzchar(as.character(layer_key)[1])) {
+    notes <- c(notes, paste("Layer:", as.character(layer_key)[1]))
+  }
+  list(
+    ok = isTRUE(ok) && !is.null(poly) && nrow(poly) > 0,
+    message = paste(notes, collapse = " "),
+    notes = notes,
+    n_polygons = if (is.null(poly) || nrow(poly) == 0) 0L else length(unique(poly$boxid)),
+    path = path
+  )
+}
+
+spatial_empty_plotly <- function(msg) {
+  if (!requireNamespace("plotly", quietly = TRUE)) {
+    p <- ggplot2::ggplot() + ggplot2::labs(title = msg) + theme_reactiveatlantis()
+    return(ra_ggplotly(p, tooltip = "text"))
+  }
+  bits <- unlist(strsplit(as.character(msg)[1], " (?=[A-Z])", perl = TRUE))
+  if (length(bits) < 2) bits <- strwrap(as.character(msg)[1], width = 70)
+  txt <- paste(ra_html_escape(bits), collapse = "<br>")
+  plt <- plotly::plot_ly(
+    x = 0, y = 0, type = "scatter", mode = "markers",
+    marker = list(opacity = 0, size = 1), hoverinfo = "skip",
+    showlegend = FALSE
+  )
+  plotly::layout(
+    plt,
+    title = list(text = "Spatial map cannot draw", font = list(size = 14)),
+    annotations = list(list(
+      x = 0.02, y = 0.98, xref = "paper", yref = "paper",
+      text = txt, showarrow = FALSE, align = "left",
+      font = list(size = 13, color = "#5A2418"),
+      bgcolor = "#F8ECE8", bordercolor = "#A33B20"
+    )),
+    xaxis = list(visible = FALSE),
+    yaxis = list(visible = FALSE),
+    margin = list(l = 20, r = 20, t = 50, b = 20)
+  )
+}
+
+##' Native plotly box map (ggplotly + geom_polygon + coord_equal is blank).
+plot_spatial_map_plotly <- function(poly, fill_lim = NULL, fill_high = "#0B3C5D",
+                                    selected_box = NULL, title = NULL,
+                                    legend = "Value") {
+  if (!requireNamespace("plotly", quietly = TRUE)) {
+    return(plot_spatial_map(poly, fill_lim, fill_high, selected_box, title, legend))
+  }
+  if (is.null(poly) || nrow(poly) == 0) {
+    why <- attr(poly, "reason")
+    return(spatial_empty_plotly(
+      if (!is.null(why) && nzchar(why)) why else "No box polygons were found in the BGM file."
+    ))
+  }
+  poly$boxid <- as.integer(poly$boxid)
+  ids <- sort(unique(poly$boxid))
+  vals <- if ("Value" %in% names(poly)) {
+    vapply(ids, function(id) {
+      x <- poly$Value[poly$boxid == id]
+      x <- x[is.finite(x)]
+      if (length(x)) x[1] else NA_real_
+    }, numeric(1))
+  } else {
+    rep(NA_real_, length(ids))
+  }
+  if (is.null(fill_lim) || !all(is.finite(fill_lim))) {
+    fill_lim <- suppressWarnings(range(vals, na.rm = TRUE))
+  }
+  if (!all(is.finite(fill_lim)) || !is.finite(diff(fill_lim)) ||
+      diff(fill_lim) == 0) {
+    fill_lim <- c(0, 1)
+  }
+  sel <- suppressWarnings(as.integer(selected_box)[1])
+  plt <- plotly::plot_ly()
+  for (i in seq_along(ids)) {
+    id <- ids[i]
+    sub <- poly[poly$boxid == id, , drop = FALSE]
+    if ("order" %in% names(sub)) sub <- sub[order(sub$order), , drop = FALSE]
+    if (nrow(sub) > 0 &&
+        (sub$x[1] != sub$x[nrow(sub)] || sub$y[1] != sub$y[nrow(sub)])) {
+      sub <- rbind(sub, sub[1, , drop = FALSE])
+    }
+    val <- vals[i]
+    t <- if (is.finite(val)) {
+      (val - fill_lim[1]) / max(diff(fill_lim), 1e-12)
+    } else {
+      NA_real_
+    }
+    col <- if (!is.finite(t)) "#C5C0B2" else ra_hex_lerp("#F7F4EC", fill_high, t)
+    lw <- if (is.finite(sel) && id == sel) 2.2 else 0.7
+    lc <- if (is.finite(sel) && id == sel) "#121311" else {
+      if (isTRUE(any(sub$boundary))) "#0B3C5D" else RA_BOX_OUTLINE
+    }
+    lab <- paste0(
+      "Box ", id, "<br>",
+      if (is.finite(val)) format(val, digits = 4, trim = TRUE) else "NA"
+    )
+    plt <- plotly::add_trace(
+      plt, type = "scatter", mode = "lines",
+      x = sub$x, y = sub$y,
+      fill = "toself",
+      fillcolor = col,
+      line = list(color = lc, width = lw),
+      hoverinfo = "text", text = lab,
+      customdata = rep(id, nrow(sub)),
+      name = paste("Box", id),
+      showlegend = FALSE,
+      hoveron = "fills"
+    )
+  }
+  fin <- vals[is.finite(vals)]
+  if (length(fin)) {
+    plt <- plotly::add_trace(
+      plt, type = "scatter", mode = "markers",
+      x = mean(range(poly$x, na.rm = TRUE)),
+      y = mean(range(poly$y, na.rm = TRUE)),
+      marker = list(
+        color = mean(fin),
+        colorscale = list(c(0, "#F7F4EC"), c(1, fill_high)),
+        cmin = fill_lim[1], cmax = fill_lim[2],
+        size = 1, opacity = 0,
+        colorbar = list(title = legend)
+      ),
+      hoverinfo = "skip", showlegend = FALSE
+    )
+  }
+  plotly::layout(
+    plt,
+    title = list(text = if (is.null(title)) "Spatial map" else title,
+                 font = list(size = 14)),
+    xaxis = list(title = "", scaleanchor = "y", scaleratio = 1,
+                 constrain = "domain", zeroline = FALSE, showgrid = FALSE),
+    yaxis = list(title = "", constrain = "domain", zeroline = FALSE,
+                 showgrid = FALSE),
+    margin = list(l = 40, r = 40, t = 50, b = 30),
+    hovermode = "closest"
+  )
+}
+
+plot_spatial_ts <- function(df, dates, time_i = NULL, title = NULL, ylab = "Value") {
+  if (is.null(df) || nrow(df) == 0) stop("No time series for this box / layer.")
+  df$Date <- if (!is.null(dates) && length(dates) >= max(df$Time)) {
+    dates[df$Time]
+  } else {
+    as.Date("1970-01-01") + (df$Time - 1L)
+  }
+  df$BoxLab <- ifelse(df$Box < 0, "Whole system", paste("Box", df$Box))
+  p <- ggplot2::ggplot(df, ggplot2::aes(x = Date, y = Value, colour = BoxLab))
+  p <- p + ggplot2::geom_line(linewidth = 0.8, na.rm = TRUE)
+  p <- p + ggplot2::geom_point(size = 1.4, na.rm = TRUE)
+  if (!is.null(time_i) && is.finite(as.integer(time_i)[1]) &&
+      as.integer(time_i)[1] >= 1 && as.integer(time_i)[1] <= max(df$Time)) {
+    xint <- df$Date[df$Time == as.integer(time_i)[1]][1]
+    if (!is.na(xint)) {
+      p <- p + ggplot2::geom_vline(xintercept = xint, linetype = "dashed",
+                                   colour = "#A33B20")
+    }
+  }
+  p <- p + ggplot2::labs(title = title, x = "Year", y = ylab, colour = NULL)
+  p <- p + theme_reactiveatlantis()
+  ra_scale_x_year(p, df$Date)
 }
 
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
@@ -383,10 +1186,10 @@ biomass_by_box <- function(nc, grp, fg_code, mg2t = 0.00000002, x.cn = 5.7) {
   ck <- paste("bbox", file_cache_key(path, fg_code), mg2t, x.cn, sep = "|")
   hit <- ra_cache_get(ck)
   if (!is.null(hit)) return(hit)
+  empty <- data.frame(Time = integer(), Box = integer(), Biomass = numeric(),
+                      Code = character(), stringsAsFactors = FALSE)
   row <- grp[grp$code == fg_code, , drop = FALSE]
-  if (nrow(row) == 0) {
-    stop("Unknown functional group: ", fg_code)
-  }
+  if (nrow(row) == 0) return(empty)
   vars <- names(nc$var)
   n.coh <- as.integer(row$numcohorts[1])
   gtype <- as.character(row$grouptype[1])
@@ -405,7 +1208,7 @@ biomass_by_box <- function(nc, grp, fg_code, mg2t = 0.00000002, x.cn = 5.7) {
       bt <- sum_layers_to_box_time(cell)
       acc <- if (is.null(acc)) bt else acc + bt
     }
-    if (is.null(acc)) stop("No StructN/ResN/Nums variables for ", fg_code)
+    if (is.null(acc)) return(empty)
     acc <- acc * mg2t * x.cn
   } else {
     vname <- if (n.coh > 1 && gtype %in% AGE_SPECIAL) {
@@ -414,7 +1217,7 @@ biomass_by_box <- function(nc, grp, fg_code, mg2t = 0.00000002, x.cn = 5.7) {
       paste0(name, "_N")
     }
     if (!vname %in% vars && paste0(name, "_N") %in% vars) vname <- paste0(name, "_N")
-    if (!vname %in% vars) stop("No nitrogen tracer for ", fg_code)
+    if (!vname %in% vars) return(empty)
     biom <- nc_get(nc, vname)
     vol <- nc_volume(nc)
     if (!is.null(vol) && length(dim(biom)) == 3) {
@@ -618,12 +1421,27 @@ match_nc_var <- function(nc_vars, candidates) {
   hit[1]
 }
 
-physics_long <- function(nc, varname, box = NULL) {
+physics_long <- function(nc, varname, box = NULL, info = NULL, inf_box = NULL) {
   arr <- nc_get(nc, varname)
   d <- dim(arr)
   if (is.null(d)) {
     return(data.frame(Time = seq_along(arr), Layer = 0, Box = 0,
-                      Value = as.numeric(arr), stringsAsFactors = FALSE))
+                      Value = as.numeric(arr), LayerLab = "Layer 0",
+                      stringsAsFactors = FALSE))
+  }
+  if (exists("atlantis_layer_info", mode = "function") && is.null(info)) {
+    info <- tryCatch(atlantis_layer_info(nc, inf_box), error = function(e) NULL)
+  }
+  if (exists("mask_padded_layers", mode = "function") && !is.null(info) &&
+      length(d) >= 2) {
+    arr <- mask_padded_layers(arr, info)
+  }
+  lab_for <- function(z1) {
+    if (!is.null(info) && exists("storage_z_label", mode = "function")) {
+      storage_z_label(info, z1)
+    } else {
+      paste("Layer", z1 - 1L)
+    }
   }
   if (length(d) == 2) {
     ## b, t  or z, b (no time) — treat columns as time if 2nd dim looks like t
@@ -632,7 +1450,8 @@ physics_long <- function(nc, varname, box = NULL) {
       boxes <- if (is.null(box)) seq_len(d[1]) - 1L else box
       rows <- lapply(boxes, function(b) {
         data.frame(Time = seq_len(d[2]), Layer = 0, Box = b,
-                   Value = as.numeric(arr[b + 1, ]), stringsAsFactors = FALSE)
+                   Value = as.numeric(arr[b + 1, ]), LayerLab = "Layer 0",
+                   stringsAsFactors = FALSE)
       })
       return(do.call(rbind, rows))
     }
@@ -644,17 +1463,30 @@ physics_long <- function(nc, varname, box = NULL) {
     boxes <- if (is.null(box)) seq_len(n_b) - 1L else as.integer(box)
     rows <- list()
     for (b in boxes) {
+      b1 <- as.integer(b) + 1L
       for (z in seq_len(n_z)) {
+        if (!is.null(info) && exists("box_has_storage_z", mode = "function") &&
+            !box_has_storage_z(info, b1, z)) {
+          next
+        }
         rows[[length(rows) + 1]] <- data.frame(
           Time = seq_len(n_t), Layer = z - 1L, Box = b,
-          Value = as.numeric(arr[z, b + 1, ]),
+          Value = as.numeric(arr[z, b1, ]),
+          LayerLab = lab_for(z),
           stringsAsFactors = FALSE
         )
       }
     }
+    if (length(rows) == 0) {
+      return(data.frame(Time = integer(), Layer = integer(), Box = integer(),
+                        Value = numeric(), LayerLab = character(),
+                        stringsAsFactors = FALSE))
+    }
     return(do.call(rbind, rows))
   }
-  data.frame(Time = integer(), Layer = integer(), Box = integer(), Value = numeric())
+  data.frame(Time = integer(), Layer = integer(), Box = integer(),
+             Value = numeric(), LayerLab = character(),
+             stringsAsFactors = FALSE)
 }
 
 layer_thickness <- function(nc) {
@@ -669,11 +1501,26 @@ layer_thickness <- function(nc) {
 ## ~               Ensemble runs                 ~ ##
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
 
-load_run_lite <- function(folder, label = NULL) {
-  paths <- detect_project_files(folder)
+load_run_lite <- function(folder, label = NULL, config_dir = NULL, output_dir = NULL) {
+  fold <- ra_nz(folder)
+  cfg <- ra_nz(config_dir)
+  outd <- ra_nz(output_dir)
+  if (!nzchar(cfg) && nzchar(fold)) cfg <- fold
+  if (!nzchar(outd) && nzchar(fold)) outd <- fold
+  det <- detect_run_pair(cfg, outd)
+  paths <- det$paths
+  if (!is.null(label) && nzchar(ra_nz(label))) {
+    lab <- ra_nz(label)
+  } else if (nzchar(cfg) && nzchar(outd) && !same_dir(cfg, outd)) {
+    lab <- paste(basename(cfg), basename(outd), sep = " + ")
+  } else {
+    lab <- basename(if (nzchar(outd)) outd else cfg)
+  }
   out <- list(
-    label = if (is.null(label) || !nzchar(label)) basename(folder) else label,
-    folder = folder,
+    label = lab,
+    folder = if (nzchar(fold)) fold else if (nzchar(outd)) outd else cfg,
+    config_dir = det$config_dir,
+    output_dir = det$output_dir,
     paths = paths,
     biomindx = NULL,
     yoy = NULL,

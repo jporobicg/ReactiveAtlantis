@@ -210,7 +210,23 @@ write_synthetic_atlantis_run <- function(dir) {
     COD.0.S0.M2 = 0.3, COD.1.S0.M2 = 0.28
   )
   utils::write.table(mort, file.path(dir, "SpecificMort.txt"), row.names = FALSE, quote = FALSE)
-  utils::write.table(mort, file.path(dir, "SpecificPredMort.txt"), row.names = FALSE, quote = FALSE)
+  pred_mort <- data.frame(
+    Time = rep(c(0, 365, 730), each = 2),
+    Group = "COD",
+    Cohort = rep(0:1, times = 3),
+    Stock = 0,
+    COD = c(0.05, 0.02, 0.06, 0.03, 0.04, 0.02),
+    PHY = c(0.25, 0.26, 0.22, 0.24, 0.20, 0.21),
+    stringsAsFactors = FALSE
+  )
+  utils::write.table(pred_mort, file.path(dir, "SpecificPredMort.txt"),
+                     row.names = FALSE, quote = FALSE)
+  utils::write.table(
+    data.frame(Time = c(0, 365, 730), COD.M = c(0.4, 0.42, 0.38),
+               COD.F = c(0.1, 0.11, 0.12), PHY.M = c(0.2, 0.21, 0.19),
+               PHY.F = c(0, 0, 0)),
+    file.path(dir, "Mort.txt"), row.names = FALSE, quote = FALSE
+  )
   writeLines(c(
     "flagnut 0",
     "KN_PHY 0.5",
@@ -231,6 +247,17 @@ write_synthetic_atlantis_run <- function(dir) {
     "0 1",
     "KLP_COD 0.5",
     "KUP_COD 2.0",
+    "flagfishrates 1",
+    "predcase_COD 0",
+    "C_COD 2",
+    "0.02 0.04",
+    "mum_COD 2",
+    "0.05 0.08",
+    "E_COD 0.5",
+    "EPlant_COD 0.01",
+    "EDL_COD 0.04",
+    "EDR_COD 0.001",
+    "COD_age_mat 2",
     "pPREY1COD1 2",
     "0.1 0.8",
     "pPREY2COD1 2",
@@ -250,4 +277,189 @@ write_synthetic_atlantis_run <- function(dir) {
     file.path(dir, "observations.csv"), row.names = FALSE
   )
   invisible(dir)
+}
+
+##' Split a mixed Atlantis folder into config/ and output/ subfolders
+split_atlantis_pair <- function(src, dest = NULL) {
+  src <- normalizePath(src, winslash = "/", mustWork = TRUE)
+  if (is.null(dest)) dest <- tempfile("ra_pair_")
+  cfg <- file.path(dest, "config")
+  out <- file.path(dest, "output")
+  dir.create(cfg, recursive = TRUE, showWarnings = FALSE)
+  dir.create(out, recursive = TRUE, showWarnings = FALSE)
+  files <- list.files(src, full.names = TRUE, recursive = FALSE)
+  files <- files[!dir.exists(files)]
+  is_config <- function(bn) {
+    grepl("\\.(prm|bgm)$", bn, ignore.case = TRUE) ||
+      grepl("group|fisher|init|_ini|observation", bn, ignore.case = TRUE) ||
+      (grepl("\\.csv$", bn, ignore.case = TRUE) &&
+         grepl("catch|obs", bn, ignore.case = TRUE))
+  }
+  is_output <- function(bn) {
+    grepl("BiomIndx|DietCheck|SSB\\.txt|YOY\\.txt|SpecificMort|SpecificPred|Mort\\.txt",
+          bn, ignore.case = TRUE) ||
+      grepl("CATCH|PROD", bn, ignore.case = TRUE) ||
+      (grepl("\\.nc$", bn, ignore.case = TRUE) &&
+         !grepl("init|_ini", bn, ignore.case = TRUE))
+  }
+  for (p in files) {
+    bn <- basename(p)
+    if (is_config(bn)) {
+      file.copy(p, file.path(cfg, bn), overwrite = TRUE)
+    }
+    if (is_output(bn)) {
+      file.copy(p, file.path(out, bn), overwrite = TRUE)
+    }
+  }
+  list(root = dest, config_dir = cfg, output_dir = out)
+}
+
+##' Write a synthetic run already split into config/ and output/
+write_synthetic_atlantis_pair <- function(dir) {
+  if (!dir.exists(dir)) dir.create(dir, recursive = TRUE)
+  mixed <- file.path(dir, "_mixed")
+  write_synthetic_atlantis_run(mixed)
+  pair <- split_atlantis_pair(mixed, dir)
+  unlink(mixed, recursive = TRUE)
+  pair
+}
+
+##' NESP-style pair: config (groups/prm/init/bgm) separate from output tables
+write_nesp_style_pair <- function(dir) {
+  write_synthetic_atlantis_pair(dir)
+}
+
+##' BGM that stores vertices globally and boxes as vertex indices (NESP-style).
+write_index_bgm <- function(path) {
+  writeLines(c(
+    "nbox 3",
+    "vert 0 0 0",
+    "vert 1 1 0",
+    "vert 2 1 1",
+    "vert 3 0 1",
+    "vert 4 2 0",
+    "vert 5 2 1",
+    "vert 6 3 0",
+    "vert 7 3 1",
+    "box0.vert 0",
+    "box0.vert 1",
+    "box0.vert 2",
+    "box0.vert 3",
+    "box0.ibox 1 2 -1",
+    "box0.botz -50",
+    "box0.area 1",
+    "box1.vert 1",
+    "box1.vert 4",
+    "box1.vert 5",
+    "box1.vert 2",
+    "box1.ibox 0 2",
+    "box1.botz -20",
+    "box1.area 1",
+    "box2.vert 4",
+    "box2.vert 6",
+    "box2.vert 7",
+    "box2.vert 5",
+    "box2.ibox 0 1",
+    "box2.botz 0",
+    "box2.area 1"
+  ), path)
+  invisible(path)
+}
+
+##' BGM using nbox=N (equals form) and uppercase .BGM extension.
+write_equals_nbox_bgm <- function(path) {
+  writeLines(c(
+    "#projection +proj=utm +zone=55 +south +ellps=WGS84",
+    "nbox=3",
+    "box0.vert 4", "0 0", "1 0", "1 1", "0 1",
+    "box0.ibox 1 2 -1", "box0.botz -50", "box0.area 1",
+    "box1.vert 4", "1 0", "2 0", "2 1", "1 1",
+    "box1.ibox 0 2", "box1.botz -20", "box1.area 1",
+    "box2.vert 4", "2 0", "3 0", "3 1", "2 1",
+    "box2.ibox 0 1", "box2.botz 0", "box2.area 1"
+  ), path)
+  invisible(path)
+}
+
+##' NESP-style pair with BGM only under output/geometry as .BGM (nbox=).
+write_hard_nesp_pair <- function(dir) {
+  pair <- write_nesp_style_pair(dir)
+  old <- list.files(pair$config_dir, pattern = "\\.bgm$", full.names = TRUE,
+                    ignore.case = TRUE)
+  unlink(old)
+  geo <- file.path(pair$output_dir, "geometry")
+  dir.create(geo, recursive = TRUE, showWarnings = FALSE)
+  bgm <- file.path(geo, "VMPA_SETAS.BGM")
+  write_equals_nbox_bgm(bgm)
+  run <- file.path(pair$config_dir, "run.prm")
+  if (file.exists(run)) {
+    writeLines(c(readLines(run), "geometry VMPA_SETAS.BGM"), run)
+  }
+  pair$bgm <- bgm
+  pair
+}
+
+##' Biology NetCDF with 3 water layers + sediment and padded shallow boxes
+write_layered_biology_nc <- function(path, count_var = "numlayers") {
+  dim_z <- ncdf4::ncdim_def("z", "layer", 1:4)
+  dim_b <- ncdf4::ncdim_def("b", "box", 1:3)
+  t_vals <- c(0, 365, 730)
+  dim_t <- ncdf4::ncdim_def("t", "days since 1970-01-01", t_vals)
+  mk3 <- function(name, units = "mg N m-3") {
+    ncdf4::ncvar_def(name, units, list(dim_z, dim_b, dim_t), -999, prec = "float")
+  }
+  mk_b <- function(name) {
+    ncdf4::ncvar_def(name, "1", list(dim_b), -999, prec = "float")
+  }
+  if (is.null(count_var) || !nzchar(as.character(count_var)[1])) {
+    count_var <- "numlayers"
+  }
+  count_var <- as.character(count_var)[1]
+  vars <- list(
+    mk3("cod1_StructN"), mk3("cod1_ResN"), mk3("cod1_Nums", "individuals"),
+    mk3("cod2_StructN"), mk3("cod2_ResN"), mk3("cod2_Nums", "individuals"),
+    mk3("diatoms_N"), mk3("Temp", "degC"), mk3("volume", "m3"),
+    ncdf4::ncvar_def("nominal_dz", "m", list(dim_z, dim_b), -999, prec = "float"),
+    mk_b(count_var)
+  )
+  nc <- ncdf4::nc_create(path, vars, force_v4 = TRUE)
+  ncdf4::ncatt_put(nc, "t", "units", "days since 1970-01-01")
+  fill <- function(name, v) {
+    arr <- array(v, dim = c(4, 3, 3))
+    ## Pads at the deep end for shallow boxes: box 2 (1 water), box 1 (2 water)
+    arr[1, 2, ] <- 0
+    arr[1:2, 3, ] <- 0
+    ncdf4::ncvar_put(nc, name, arr)
+  }
+  fill("cod1_StructN", 10)
+  fill("cod1_ResN", 5)
+  fill("cod1_Nums", 100)
+  fill("cod2_StructN", 8)
+  fill("cod2_ResN", 4)
+  fill("cod2_Nums", 50)
+  fill("diatoms_N", 2)
+  fill("Temp", 8)
+  ncdf4::ncvar_put(nc, "Temp", {
+    arr <- array(0, dim = c(4, 3, 3))
+    ## storage: z1 deep, z3 surface, z4 sediment
+    arr[1, , ] <- 4
+    arr[2, , ] <- 6
+    arr[3, , ] <- 10
+    arr[4, , ] <- 2
+    arr[1, 2, ] <- 0
+    arr[1:2, 3, ] <- 0
+    arr
+  })
+  vol <- array(1e6, dim = c(4, 3, 3))
+  vol[1, 2, ] <- 0
+  vol[1:2, 3, ] <- 0
+  ncdf4::ncvar_put(nc, "volume", vol)
+  dz <- array(0, dim = c(4, 3))
+  dz[, 1] <- c(20, 30, 40, 5)
+  dz[, 2] <- c(0, 30, 40, 5)
+  dz[, 3] <- c(0, 0, 40, 5)
+  ncdf4::ncvar_put(nc, "nominal_dz", dz)
+  ncdf4::ncvar_put(nc, count_var, c(3, 2, 1))
+  ncdf4::nc_close(nc)
+  invisible(path)
 }

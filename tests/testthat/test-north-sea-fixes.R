@@ -41,11 +41,15 @@ source(file.path(mod, "compare_module.R"), local = TRUE)
 source(file.path(mod, "project_store.R"), local = TRUE)
 source(file.path(mod, "nc_cache.R"), local = TRUE)
 source(file.path(mod, "analysis_helpers.R"), local = TRUE)
+source(file.path(mod, "process_diagnostics.R"), local = TRUE)
+source(file.path(mod, "predation_pressure.R"), local = TRUE)
+source(file.path(mod, "layers.R"), local = TRUE)
 source(file.path(mod, "overview_module.R"), local = TRUE)
 source(file.path(mod, "feeding_module.R"), local = TRUE)
 source(file.path(mod, "growth_module.R"), local = TRUE)
 source(file.path(mod, "recruitment_module.R"), local = TRUE)
 source(file.path(mod, "spatial_module.R"), local = TRUE)
+source(file.path(mod, "ages_module.R"), local = TRUE)
 source(file.path(mod, "consumption_module.R"), local = TRUE)
 source(file.path(mod, "physics_module.R"), local = TRUE)
 source(file.path(mod, "ensemble_module.R"), local = TRUE)
@@ -958,7 +962,10 @@ test_that("spatial_server draws from BGM polygons and consumption needs PROD", {
   shiny::testServer(spatial_server, args = list(project = proj), {
     ui_html <- paste(as.character(spatial_ui("spatial")), collapse = " ")
     expect_true(grepl("time_i", ui_html) || grepl("Functional group", ui_html))
-    session$setInputs(fg = "COD", time_i = 1, highlight_boundary = TRUE)
+    expect_true(grepl("Depth layer", ui_html) || grepl("layer", ui_html))
+    expect_true(grepl("Stable colour scale", ui_html))
+    session$setInputs(fg = "COD", layer = "integrated", time_i = 1,
+                      highlight_boundary = TRUE, stable_scale = TRUE)
     expect_true(!is.null(output$map_plot))
   })
 
@@ -1203,6 +1210,139 @@ test_that("feeding predator row filters the matrix and pressure is a matrix", {
   expect_s3_class(p2, "ggplot")
 })
 
+test_that("pPREY full matrix hover, click selection, bars, diagnostics and compare", {
+  ava <- matrix(
+    c(
+      0.10, 0.80, 0.05, 0,
+      0.00, 0.20, 0.00, 0,
+      0.40, 0.10, 0.00, 0,
+      0.00, 0.30, 0.00, 0,
+      0.00, 0.00, 0.50, 0,
+      0.00, 0.00, 0.00, 0
+    ),
+    nrow = 6, byrow = TRUE,
+    dimnames = list(
+      c("pPREY1COD1", "pPREY2COD1", "pPREY1COD2", "pPREY2COD2",
+        "pPREY1HAD1", "pPREYPHY"),
+      c("COD", "HAD", "PHY", "DET")
+    )
+  )
+  grp <- data.frame(
+    code = c("COD", "HAD", "PHY", "DET"),
+    name = c("cod", "haddock", "diatoms", "detritus"),
+    longname = c("Cod", "Haddock", "Phytoplankton", "Detritus"),
+    stringsAsFactors = FALSE
+  )
+  meta <- parse_pprey_rownames(rownames(ava))
+  expect_equal(meta$pred_code, c("COD", "COD", "COD", "COD", "HAD", "PHY"))
+  expect_equal(meta$pred_stage, c(1L, 1L, 2L, 2L, 1L, NA))
+  expect_equal(meta$prey_stage, c(1L, 2L, 1L, 2L, 1L, NA))
+
+  idx <- pprey_filter_index(ava, "COD", "1", "(all)", "all")
+  expect_equal(rownames(ava)[idx$pred_keep], c("pPREY1COD1", "pPREY2COD1"))
+  idx2 <- pprey_filter_index(ava, "COD", "2", "HAD", "1")
+  expect_equal(rownames(ava)[idx2$pred_keep], "pPREY1COD2")
+  expect_equal(colnames(ava)[idx2$prey_keep], "HAD")
+
+  pred_df <- pprey_one_group(ava, "predator", "COD", "1", grp)
+  expect_true(nrow(pred_df) >= 2)
+  expect_equal(as.character(pred_df$Label[1]), as.character(pred_df$Label[order(-pred_df$Value)[1]]))
+  expect_true(pred_df$Value[1] >= pred_df$Value[nrow(pred_df)])
+  expect_match(attr(pred_df, "title"), "Cod")
+  p_pred <- plot_pprey_one_group(pred_df)
+  expect_s3_class(p_pred, "ggplot")
+
+  prey_df <- pprey_one_group(ava, "prey", "HAD", "1", grp)
+  expect_true(nrow(prey_df) >= 1)
+  expect_true(all(prey_df$Value > 0))
+  p_prey <- plot_pprey_one_group(prey_df)
+  expect_s3_class(p_prey, "ggplot")
+
+  hover <- pprey_hover_text(ava, grp)
+  expect_equal(dim(hover), dim(ava))
+  expect_match(hover["pPREY1COD1", "HAD"], "pPREY: 0.8")
+  expect_match(hover["pPREY1COD1", "HAD"], "Cod")
+  expect_match(hover["pPREY1COD1", "HAD"], "Haddock")
+  expect_match(hover["pPREY1COD1", "HAD"], "juvenile")
+  click <- pprey_selection_from_click(
+    ava, pprey_axis_labels(meta, grp)[1], pprey_group_label("HAD", grp), grp
+  )
+  expect_equal(click$pred_group, "COD")
+  expect_equal(click$pred_stage, "1")
+  expect_equal(click$prey_group, "HAD")
+  expect_equal(click$prey_stage, "1")
+  sel <- pprey_resolve_selection(ava, "COD", "1", "HAD", "1")
+  expect_equal(sel$rows, "pPREY1COD1")
+  expect_equal(sel$prey, "HAD")
+  expect_equal(nrow(ava), 6)
+  expect_equal(ncol(ava), 4)
+  info <- pprey_cell_info_text(ava, sel, grp)
+  expect_match(info, "0.8")
+  plt <- plot_feed_matrix_plotly(ava, sel, grp)
+  expect_true(inherits(plt, "plotly") || inherits(plt, "ggplot"))
+  p_full <- plot_feed_tile(t(ava), "Availability matrix (pPREY)", "YlOrRd",
+                           "Availability", sel$rows, sel$prey)
+  expect_s3_class(p_full, "ggplot")
+  expect_equal(nrow(p_full$data), 24)
+
+  sums <- pprey_preference_sums(ava)
+  expect_true("pPREYPHY" %in% sums$Predator[sums$Flag == "zero preferences"])
+  uneaten <- pprey_uneaten_prey(ava)
+  expect_true("DET" %in% uneaten$Prey)
+  none <- pprey_uneaten_prey(ava[, c("HAD", "PHY"), drop = FALSE])
+  expect_equal(nrow(none), 0)
+  unnamed <- ava
+  colnames(unnamed) <- NULL
+  expect_equal(nrow(pprey_uneaten_prey(unnamed[, 1:2, drop = FALSE])), 0)
+  diet <- data.frame(
+    Time = c(0, 0),
+    Predator = "COD",
+    Cohort = c(1, 2),
+    COD = c(0, 0),
+    HAD = c(0.8, 0.9),
+    PHY = c(0.2, 0),
+    DET = c(0, 0),
+    stringsAsFactors = FALSE
+  )
+  mm <- pprey_dietcheck_mismatch(ava, diet, eps = 0.001)
+  expect_true(any(grepl("pPREY > 0, DietCheck", mm$Flag) & mm$Prey == "COD"))
+  expect_true(nrow(mm) >= 1)
+  diag_tab <- pprey_diagnostics_table(ava, diet, 0.001)
+  expect_true(any(diag_tab$Type == "preference_sum"))
+  expect_true(any(diag_tab$Type == "uneaten_prey"))
+  expect_true(any(diag_tab$Type == "dietcheck"))
+  p_diag <- plot_pprey_sum_flags(sums)
+  expect_s3_class(p_diag, "ggplot")
+
+  edited <- ava
+  hit <- pprey_apply_edit(edited, "COD", "1", "HAD", "1", 0.55)
+  expect_equal(hit$mat["pPREY1COD1", "HAD"], 0.55)
+  expect_equal(ava["pPREY1COD1", "HAD"], 0.80)
+  ch <- pprey_changed_cells(ava, hit$mat)
+  expect_equal(nrow(ch), 1)
+  expect_equal(ch$Prey, "HAD")
+  expect_equal(ch$Original, 0.80)
+  expect_equal(ch$Edited, 0.55)
+  p_cmp <- plot_pprey_compare(ava, hit$mat)
+  expect_s3_class(p_cmp, "ggplot")
+  p_none <- plot_pprey_compare(ava, ava)
+  expect_s3_class(p_none, "ggplot")
+
+  art <- "/opt/cursor/artifacts"
+  if (dir.exists(art)) {
+    ggplot2::ggsave(file.path(art, "feeding_matrix_full.png"), p_full,
+                    width = 9, height = 6, dpi = 120)
+    ggplot2::ggsave(file.path(art, "feeding_pred_bars.png"), p_pred,
+                    width = 8, height = 5, dpi = 120)
+    ggplot2::ggsave(file.path(art, "feeding_prey_bars.png"), p_prey,
+                    width = 8, height = 5, dpi = 120)
+    ggplot2::ggsave(file.path(art, "feeding_diagnostics.png"), p_diag,
+                    width = 9, height = 6, dpi = 120)
+    ggplot2::ggsave(file.path(art, "feeding_compare.png"), p_cmp,
+                    width = 9, height = 6, dpi = 120)
+  }
+})
+
 test_that("growth limitation plot has labelled factors and a 0-1 axis", {
   Time <- as.Date("1970-01-01") + c(0, 365, 730)
   plot_df <- rbind(
@@ -1385,8 +1525,10 @@ test_that("app.R sources the new analysis modules", {
   txt <- paste(vapply(parsed, function(e) paste(deparse(e), collapse = " "), character(1)),
                collapse = "\n")
   expect_true(grepl("analysis_helpers.R", txt, fixed = TRUE))
+  expect_true(grepl("layers.R", txt, fixed = TRUE))
   expect_true(grepl("nc_cache.R", txt, fixed = TRUE))
   expect_true(grepl("spatial_ui", txt, fixed = TRUE))
+  expect_true(grepl("ages_ui", txt, fixed = TRUE))
   expect_true(grepl("consumption_ui", txt, fixed = TRUE))
   expect_true(grepl("physics_ui", txt, fixed = TRUE))
   expect_true(grepl("ensemble_ui", txt, fixed = TRUE))
@@ -1510,10 +1652,513 @@ test_that("problem_cohorts reads only first and last time slices", {
   expect_equal(dim(ends$first)[3], 1)
 })
 
+test_that("detect_run_pair prefers each folder and notes fallback", {
+  tmp <- tempfile("ra_pair_unit_")
+  pair <- write_synthetic_atlantis_pair(tmp)
+  on.exit(unlink(tmp, recursive = TRUE), add = TRUE)
+
+  det <- detect_run_pair(pair$config_dir, pair$output_dir)
+  expect_false(isTRUE(det$same_folder))
+  expect_equal(length(det$fallback), 0)
+  expect_equal(basename(det$paths$groups), "groups.csv")
+  expect_equal(basename(det$paths$biomindx), "BiomIndx.txt")
+  expect_equal(normalizePath(dirname(det$paths$groups), winslash = "/"),
+               normalizePath(pair$config_dir, winslash = "/"))
+  expect_equal(normalizePath(dirname(det$paths$biomindx), winslash = "/"),
+               normalizePath(pair$output_dir, winslash = "/"))
+  note <- scan_note_text(det, "Found")
+  expect_true(grepl("config \\+ output", note) || grepl("file roles", note))
+
+  mixed <- tempfile("ra_mixed_")
+  write_synthetic_atlantis_run(mixed)
+  on.exit(unlink(mixed, recursive = TRUE), add = TRUE)
+  one <- detect_run_pair(mixed, mixed)
+  expect_true(isTRUE(one$same_folder))
+  expect_equal(length(one$fallback), 0)
+  expect_true(grepl("one folder", scan_note_text(one, "Found")))
+
+  only_cfg <- detect_run_pair(mixed, NULL)
+  expect_true(path_ok(only_cfg$paths$groups))
+  expect_true(path_ok(only_cfg$paths$biomindx))
+
+  file.rename(file.path(pair$config_dir, "groups.csv"),
+              file.path(pair$output_dir, "groups.csv"))
+  fb <- detect_run_pair(pair$config_dir, pair$output_dir)
+  expect_true("groups" %in% fb$fallback)
+  expect_true(path_ok(fb$paths$groups))
+  expect_true(grepl("other folder", scan_note_text(fb, "Found")))
+  html <- paste(as.character(role_checklist_ui(list(
+    ready = TRUE, paths = fb$paths, fallback_roles = fb$fallback, data = NULL
+  ))), collapse = " ")
+  expect_true(grepl("data-status=\"fallback\"", html))
+  expect_true(grepl("loaded \\(other folder\\)", html))
+
+  lite <- load_run_lite(pair$output_dir, label = "Alt",
+                        config_dir = pair$config_dir,
+                        output_dir = pair$output_dir)
+  expect_equal(lite$label, "Alt")
+  expect_true(path_ok(lite$paths$groups) || !is.null(lite$biomindx))
+})
+
+test_that("NESP-style pair and North Sea split load as two folders", {
+  nesp <- tempfile("nesp_pair_")
+  pair <- write_nesp_style_pair(nesp)
+  on.exit(unlink(nesp, recursive = TRUE), add = TRUE)
+  expect_true(dir.exists(pair$config_dir))
+  expect_true(dir.exists(pair$output_dir))
+  expect_true(file.exists(file.path(pair$config_dir, "groups.csv")))
+  expect_true(file.exists(file.path(pair$output_dir, "BiomIndx.txt")))
+  expect_false(file.exists(file.path(pair$config_dir, "BiomIndx.txt")))
+
+  fx <- northsea_fixture_dir()
+  skip_if_not(dir.exists(fx) && file.exists(file.path(fx, "functionalGroups.csv")),
+              "North Sea fixture not packaged")
+  dest <- tempfile("ns_pair_")
+  ns <- split_atlantis_pair(fx, dest)
+  on.exit(unlink(dest, recursive = TRUE), add = TRUE)
+  det <- detect_run_pair(ns$config_dir, ns$output_dir)
+  expect_equal(basename(det$paths$groups), "functionalGroups.csv")
+  expect_equal(basename(det$paths$biomindx), "outputNorthSeaBiomIndx.txt")
+  expect_false(isTRUE(det$same_folder))
+  loaded <- load_project(det$paths)
+  expect_true(!is.null(loaded$grp))
+  expect_true(!is.null(loaded$biomindx))
+})
+
+test_that("pair sidebar Load uses config and output folders", {
+  tmp <- tempfile("ra_pair_srv_")
+  pair <- write_synthetic_atlantis_pair(tmp)
+  on.exit(unlink(tmp, recursive = TRUE), add = TRUE)
+  shiny::testServer(project_server, {
+    session$setInputs(
+      run1_name = "Base",
+      run1_config_dir = pair$config_dir,
+      run1_output_dir = pair$output_dir
+    )
+    session$setInputs(scan_folder = 1)
+    note <- paste(as.character(output$scan_note$html), collapse = " ")
+    expect_true(grepl("Scan:", note) || grepl("file roles", note))
+    session$setInputs(load_project = 1)
+    note2 <- paste(as.character(output$scan_note$html), collapse = " ")
+    expect_true(grepl("Loaded", note2))
+    check <- paste(as.character(output$file_checklist$html), collapse = " ")
+    expect_true(grepl("data-status=\"loaded\"", check) || grepl("is-loaded", check))
+    expect_true(isTRUE(rv$state$ready) || isTRUE(rv$ready))
+  })
+})
+
+test_that("launch options accept config_dir and output_dir", {
+  old <- options(
+    reactiveatlantis.project_dir = NULL,
+    reactiveatlantis.config_dir = NULL,
+    reactiveatlantis.output_dir = NULL
+  )
+  on.exit(options(old), add = TRUE)
+  src <- paste(readLines(file.path(root, "R", "launch_app.R")), collapse = "\n")
+  expect_true(grepl("config_dir", src, fixed = TRUE))
+  expect_true(grepl("output_dir", src, fixed = TRUE))
+  expect_true(grepl("reactiveatlantis.config_dir", src, fixed = TRUE))
+})
+
+hex_dist <- function(a, b) {
+  ra <- col2rgb(a)
+  rb <- col2rgb(b)
+  sqrt(sum((ra - rb)^2))
+}
+
+test_that("Atlantis layer helper masks padded water and names surface/sediment", {
+  tmp <- tempfile("ra_layers_")
+  dir.create(tmp)
+  on.exit(unlink(tmp, recursive = TRUE), add = TRUE)
+  nc_path <- file.path(tmp, "layered.nc")
+  write_layered_biology_nc(nc_path)
+  nc <- ncdf4::nc_open(nc_path)
+  on.exit(ncdf4::nc_close(nc), add = TRUE)
+  info <- atlantis_layer_info(nc)
+  expect_equal(info$n_z, 4L)
+  expect_equal(info$n_water_max, 3L)
+  expect_true(info$has_sediment)
+  expect_equal(info$n_water, c(3L, 2L, 1L))
+  expect_equal(unname(layer_choices(info)[1]), "integrated")
+  expect_true("sediment" %in% layer_choices(info))
+  expect_equal(layer_storage_z(info, "water_1"), 3L)
+  expect_equal(layer_storage_z(info, "sediment"), 4L)
+  expect_true(box_has_storage_z(info, 1, 1))
+  expect_false(box_has_storage_z(info, 2, 1))
+  expect_false(box_has_storage_z(info, 3, 1))
+  expect_false(box_has_storage_z(info, 3, 2))
+  expect_true(box_has_storage_z(info, 3, 3))
+  expect_true(box_has_storage_z(info, 3, 4))
+
+  temp <- physics_long(nc, "Temp", box = 2, info = info)
+  expect_false(any(temp$Layer %in% 0:1))
+  expect_true(all(temp$Layer %in% c(2, 3)))
+  expect_true(any(grepl("Surface|Sediment", temp$LayerLab)))
+
+  temp0 <- physics_long(nc, "Temp", box = 0, info = info)
+  expect_equal(sort(unique(temp0$Layer)), 0:3)
+
+  grp <- data.frame(code = "COD", name = "cod", numcohorts = 1,
+                    grouptype = "FISH", isturnedon = 1, stringsAsFactors = FALSE)
+  ## one cohort uses _N; write uses StructN. Use diatoms as pool.
+  grp_phy <- data.frame(code = "PHY", name = "diatoms", numcohorts = 1,
+                        grouptype = "LG_PHY", isturnedon = 1, stringsAsFactors = FALSE)
+  surf <- biomass_by_box_layer(nc, grp_phy, "PHY", "water_1", info)
+  deep <- biomass_by_box_layer(nc, grp_phy, "PHY", "water_3", info)
+  expect_equal(nrow(surf), 9)
+  expect_true(all(is.na(deep$Biomass[deep$Box == 2]) | deep$Biomass[deep$Box == 2] == 0))
+  expect_true(any(is.finite(surf$Biomass[surf$Box == 2])))
+
+  src <- paste(readLines(file.path(root, "inst", "shiny", "modules", "spatial_module.R")),
+               collapse = "\n")
+  helper_src <- paste(readLines(file.path(root, "inst", "shiny", "modules",
+                                          "analysis_helpers.R")), collapse = "\n")
+  expect_true(grepl("RA_BOX_OUTLINE", helper_src, fixed = TRUE) ||
+                grepl("RA_BOX_OUTLINE",
+                      paste(readLines(file.path(mod, "theme.R")), collapse = "\n"),
+                      fixed = TRUE))
+  expect_identical(RA_BOX_OUTLINE, "#0A1218")
+  expect_true(grepl("linewidth = 0.25", helper_src, fixed = TRUE))
+  expect_false(grepl("RA_BOX_OUTLINE_HALO", src, fixed = TRUE))
+  expect_false(grepl("outline/label|Show box labels|Show outlines", src, ignore.case = TRUE))
+  ui_html <- paste(as.character(spatial_ui("spatial")), collapse = " ")
+  expect_false(grepl("Show box labels|Show outlines|outline toggle", ui_html,
+                     ignore.case = TRUE))
+})
+
+expect_physics_layers_match_box <- function(nc, info, varname = "Temp") {
+  n_b <- info$n_box
+  for (b in seq_len(n_b) - 1L) {
+    phy <- physics_long(nc, varname, box = b, info = info)
+    n_expect <- as.integer(info$n_water[b + 1L]) + as.integer(isTRUE(info$has_sediment))
+    expect_equal(length(unique(phy$Layer)), n_expect)
+    expect_false(any(is.na(phy$LayerLab) | !nzchar(as.character(phy$LayerLab))))
+    if (info$n_water[b + 1L] < info$n_water_max) {
+      unused <- seq_len(info$n_water_max - info$n_water[b + 1L]) - 1L
+      expect_false(any(phy$Layer %in% unused))
+    }
+    dz <- layer_thickness_long(nc, box = b, info = info)
+    if (!is.null(dz)) {
+      expect_equal(length(unique(dz$Layer)), n_expect)
+      expect_false(any(dz$Thickness == 0 & dz$Layer < info$n_water_max))
+    }
+  }
+}
+
+test_that("nlayers and BGM Layers count water columns the same as numlayers", {
+  tmp <- tempfile("ra_nlayers_")
+  dir.create(tmp)
+  on.exit(unlink(tmp, recursive = TRUE), add = TRUE)
+  nc_num <- file.path(tmp, "numlayers.nc")
+  nc_n <- file.path(tmp, "nlayers.nc")
+  write_layered_biology_nc(nc_num, count_var = "numlayers")
+  write_layered_biology_nc(nc_n, count_var = "nlayers")
+  a <- ncdf4::nc_open(nc_num)
+  b <- ncdf4::nc_open(nc_n)
+  on.exit({ ncdf4::nc_close(a); ncdf4::nc_close(b) }, add = TRUE)
+  expect_equal(box_water_layer_counts(a), c(3L, 2L, 1L))
+  expect_equal(box_water_layer_counts(b), c(3L, 2L, 1L))
+  expect_equal(atlantis_layer_info(a)$n_water, atlantis_layer_info(b)$n_water)
+
+  inf <- dummy_inf_box(3, 4)
+  inf$info$Layers <- c(3, 2, 1)
+  info_bgm <- atlantis_layer_info(a, inf)
+  expect_equal(info_bgm$n_water, c(3L, 2L, 1L))
+
+  ## When the NetCDF has no count variable, BGM Layers win over raw z
+  nc_bare <- file.path(tmp, "bare.nc")
+  write_synthetic_biology_nc(nc_bare)
+  c <- ncdf4::nc_open(nc_bare)
+  on.exit(ncdf4::nc_close(c), add = TRUE)
+  expect_false(any(tolower(names(c$var)) %in% c("numlayers", "nlayers")))
+  inf2 <- dummy_inf_box(3, 2)
+  inf2$info$Layers <- c(1, 1, 0)
+  info2 <- atlantis_layer_info(c, inf2)
+  expect_equal(info2$n_water, c(1L, 1L, 0L))
+  shallow <- physics_long(c, "Temp", box = 2, info = info2)
+  expect_true(all(shallow$LayerLab == "Sediment"))
+  expect_false(any(grepl("Water", shallow$LayerLab)))
+})
+
+test_that("layer helper matches Javier viewer arrange_layers order", {
+  tmp <- tempfile("ra_viewer_")
+  dir.create(tmp)
+  on.exit(unlink(tmp, recursive = TRUE), add = TRUE)
+  nc_path <- file.path(tmp, "layered.nc")
+  write_layered_biology_nc(nc_path)
+  nc <- ncdf4::nc_open(nc_path)
+  on.exit(ncdf4::nc_close(nc), add = TRUE)
+  info <- atlantis_layer_info(nc)
+  ## arrange_layers(): c(rev(1:water_layers), sediment_layer)
+  expect_equal(viewer_layer_storage_order(info), c(3L, 2L, 1L, 4L))
+  expect_equal(layer_storage_z(info, "water_1"), 3L)
+  expect_equal(layer_storage_z(info, "water_2"), 2L)
+  expect_equal(layer_storage_z(info, "water_3"), 1L)
+  expect_equal(layer_storage_z(info, "sediment"), 4L)
+  expect_equal(layer_lab_levels(info), c("Surface", "Water layer 2", "Deepest water", "Sediment"))
+  expect_true(all(info$water_keys %in% unname(layer_choices(info))))
+
+  phy <- physics_long(nc, "Temp", box = 2, info = info)
+  expect_equal(sort(unique(as.character(phy$LayerLab))), c("Sediment", "Surface"))
+  expect_false(any(phy$Value[phy$LayerLab == "Surface"] == 0))
+  dz <- layer_thickness_long(nc, box = 2, info = info)
+  expect_equal(sort(unique(as.character(dz$LayerLab))), c("Sediment", "Surface"))
+  expect_false(any(dz$Thickness == 0))
+
+  src_phys <- paste(readLines(file.path(mod, "physics_module.R")), collapse = "\n")
+  src_spat <- paste(readLines(file.path(mod, "spatial_module.R")), collapse = "\n")
+  expect_true(grepl("atlantis_layer_info", src_phys, fixed = TRUE))
+  expect_true(grepl("atlantis_layer_info", src_spat, fixed = TRUE))
+  expect_true(grepl("inf_box", src_phys, fixed = TRUE))
+  expect_true(grepl("layer_thickness_long", src_phys, fixed = TRUE))
+})
+
+test_that("North Sea and NESP fixtures expose water plus sediment layers", {
+  nesp <- tempfile("nesp_layers_")
+  pair <- write_nesp_style_pair(nesp)
+  on.exit(unlink(nesp, recursive = TRUE), add = TRUE)
+  det <- detect_run_pair(pair$config_dir, pair$output_dir)
+  nc <- ncdf4::nc_open(det$paths$output_nc)
+  on.exit(ncdf4::nc_close(nc), add = TRUE)
+  info <- atlantis_layer_info(nc)
+  expect_gte(info$n_z, 2)
+  expect_true(info$has_sediment)
+  expect_true("integrated" %in% layer_choices(info))
+  expect_true("sediment" %in% layer_choices(info))
+  expect_lte(max(info$n_water), info$n_water_max)
+  expect_physics_layers_match_box(nc, info, "Temp")
+  nesp_bio <- biomass_by_box_layer(nc, {
+    grp <- data.frame(code = "COD", name = "cod", numcohorts = 2,
+                      grouptype = "FISH", isturnedon = 1, stringsAsFactors = FALSE)
+    grp
+  }, "COD", "sediment", info)
+  expect_gt(nrow(nesp_bio), 0)
+
+  ## NESP-style pair whose output uses nlayers and padded shallow boxes
+  nesp_pad <- tempfile("nesp_pad_")
+  pair_pad <- write_nesp_style_pair(nesp_pad)
+  on.exit(unlink(nesp_pad, recursive = TRUE), add = TRUE)
+  write_layered_biology_nc(file.path(pair_pad$output_dir, "output.nc"),
+                           count_var = "nlayers")
+  det_pad <- detect_run_pair(pair_pad$config_dir, pair_pad$output_dir)
+  nc_pad <- ncdf4::nc_open(det_pad$paths$output_nc)
+  on.exit(ncdf4::nc_close(nc_pad), add = TRUE)
+  expect_true("nlayers" %in% names(nc_pad$var))
+  expect_false("numlayers" %in% names(nc_pad$var))
+  info_pad <- atlantis_layer_info(nc_pad)
+  expect_equal(info_pad$n_water, c(3L, 2L, 1L))
+  expect_physics_layers_match_box(nc_pad, info_pad, "Temp")
+  pad_box <- physics_long(nc_pad, "Temp", box = 2, info = info_pad)
+  expect_equal(sort(unique(as.character(pad_box$LayerLab))), c("Sediment", "Surface"))
+  expect_false(any(pad_box$Layer %in% 0:1))
+
+  fx <- northsea_fixture_dir()
+  skip_if_not(dir.exists(fx) && file.exists(file.path(fx, "outputNorthSea.nc")),
+              "North Sea fixture not packaged")
+  nc2 <- ncdf4::nc_open(file.path(fx, "outputNorthSea.nc"))
+  on.exit(ncdf4::nc_close(nc2), add = TRUE)
+  expect_false(any(tolower(names(nc2$var)) %in% c("numlayers", "nlayers")))
+  ns <- atlantis_layer_info(nc2)
+  expect_gte(ns$n_z, 2)
+  expect_true(ns$has_sediment)
+  expect_lte(max(ns$n_water), ns$n_water_max)
+  expect_physics_layers_match_box(nc2, ns, "Temp")
+  phy <- physics_long(nc2, "Temp", box = 0, info = ns)
+  expect_gt(nrow(phy), 0)
+  expect_false(any(is.na(phy$LayerLab) | !nzchar(as.character(phy$LayerLab))))
+  expect_true(any(grepl("Sediment|Water", phy$LayerLab)))
+  ## BGM Layers from the North Sea geometry must not invent extra water layers
+  bgm <- file.path(fx, "NorthSea.bgm")
+  if (file.exists(bgm)) {
+    depths <- infer_cum_depths(nc2)
+    inf_ns <- tryCatch(boxes.prop(bgm, depths), error = function(e) NULL)
+    if (!is.null(inf_ns)) {
+      ns_bgm <- atlantis_layer_info(nc2, inf_ns)
+      expect_lte(max(ns_bgm$n_water), ns_bgm$n_water_max)
+      expect_physics_layers_match_box(nc2, ns_bgm, "Temp")
+    }
+  }
+})
+
+test_that("shared palette spreads adjacent series colours", {
+  codes <- c("COD", "HAD", "WHG", "POK", "HER")
+  types <- rep("FISH", length(codes))
+  pal <- build_fg_palette(codes, types)
+  expect_equal(unname(pal["COD"]),
+               unname(build_fg_palette(codes, types)["COD"]))
+  d12 <- hex_dist(pal["COD"], pal["HAD"])
+  d13 <- hex_dist(pal["COD"], pal["WHG"])
+  expect_gt(d12, 80)
+  expect_gt(d13, 40)
+  expect_false(identical(unname(pal["COD"]), unname(pal["HAD"])))
+  pair <- utils::combn(codes, 2, simplify = FALSE)
+  mind <- min(vapply(pair, function(ab) hex_dist(pal[ab[1]], pal[ab[2]]), numeric(1)))
+  expect_gt(mind, 50)
+  lv <- spread_series_levels(c("COD", "HAD", "WHG", "Other"), pal)
+  expect_identical(tail(lv, 1), "Other")
+  expect_true(all(c("COD", "HAD", "WHG") %in% lv))
+})
+
+test_that("Spatial map draws NESP-style pairs and index BGM polygons", {
+  nesp <- tempfile("nesp_map_")
+  pair <- write_nesp_style_pair(nesp)
+  on.exit(unlink(nesp, recursive = TRUE), add = TRUE)
+  nested <- file.path(pair$config_dir, "geometry")
+  dir.create(nested, recursive = TRUE, showWarnings = FALSE)
+  idx_bgm <- file.path(nested, "model.bgm")
+  write_index_bgm(idx_bgm)
+  file.remove(file.path(pair$config_dir, "geo.bgm"))
+  det <- detect_run_pair(pair$config_dir, pair$output_dir)
+  expect_true(path_ok(det$paths$bgm))
+  expect_equal(basename(det$paths$bgm), "model.bgm")
+
+  poly <- read_bgm_polygons(det$paths$bgm)
+  expect_gt(nrow(poly), 0)
+  expect_equal(sort(unique(poly$boxid)), 0:2)
+  expect_true(all(is.finite(poly$x) & is.finite(poly$y)))
+
+  nc <- ncdf4::nc_open(det$paths$output_nc)
+  on.exit(ncdf4::nc_close(nc), add = TRUE)
+  grp <- utils::read.csv(det$paths$groups, stringsAsFactors = FALSE)
+  names(grp) <- tolower(names(grp))
+  info <- atlantis_layer_info(nc)
+  vals <- spatial_box_values(nc, grp, kind = "biomass", fg_code = "COD",
+                             layer_key = "integrated", info = info)
+  expect_gt(nrow(vals), 0)
+  expect_true(any(is.finite(vals$Value)))
+  joined <- spatial_join_polygons(poly, vals, time_i = 1L)
+  expect_true(any(is.finite(joined$Value)))
+  p <- plot_spatial_map(joined, selected_box = 1L, title = "NESP map")
+  expect_s3_class(p, "ggplot")
+  expect_true(any(vapply(p$layers, function(ly) inherits(ly$geom, "GeomPolygon"),
+                         logical(1))))
+
+  empty_poly <- read_bgm_polygons(tempfile())
+  expect_equal(nrow(empty_poly), 0)
+  expect_error(plot_spatial_map(empty_poly), "No box polygons")
+
+  fx <- northsea_fixture_dir()
+  skip_if_not(dir.exists(fx) && file.exists(file.path(fx, "NorthSea.bgm")),
+              "North Sea fixture not packaged")
+  ns_poly <- read_bgm_polygons(file.path(fx, "NorthSea.bgm"))
+  expect_gte(length(unique(ns_poly$boxid)), 3)
+  nc_ns <- ncdf4::nc_open(file.path(fx, "outputNorthSea.nc"))
+  on.exit(ncdf4::nc_close(nc_ns), add = TRUE)
+  grp_ns <- utils::read.csv(file.path(fx, "functionalGroups.csv"),
+                            stringsAsFactors = FALSE)
+  names(grp_ns) <- tolower(names(grp_ns))
+  ns_vals <- spatial_box_values(nc_ns, grp_ns, kind = "biomass", fg_code = "COD",
+                                layer_key = "integrated",
+                                info = atlantis_layer_info(nc_ns))
+  ns_join <- spatial_join_polygons(ns_poly, ns_vals, time_i = 1L)
+  expect_true(any(is.finite(ns_join$Value)))
+  p_ns <- plot_spatial_map(ns_join, title = "North Sea")
+  expect_s3_class(p_ns, "ggplot")
+  ts <- spatial_ts_values(ns_vals, scope = "system")
+  expect_equal(unique(ts$Box), -1L)
+  expect_gt(nrow(ts), 0)
+})
+
+test_that("Ages tab and Spatial by-age use shared layer helper", {
+  tmp <- tempfile("ra_ages_")
+  dir.create(tmp)
+  on.exit(unlink(tmp, recursive = TRUE), add = TRUE)
+  nc_path <- file.path(tmp, "layered.nc")
+  write_layered_biology_nc(nc_path)
+  nc <- ncdf4::nc_open(nc_path)
+  on.exit(ncdf4::nc_close(nc), add = TRUE)
+  info <- atlantis_layer_info(nc)
+  grp <- data.frame(code = "COD", name = "cod", numcohorts = 2,
+                    grouptype = "FISH", isturnedon = 1, stringsAsFactors = FALSE)
+  sys <- age_class_long(nc, grp, "COD", box = NULL, layer_key = "integrated",
+                        info = info)
+  expect_true(all(AGE_CLASS_VARS %in% sys$Variable))
+  expect_equal(sort(unique(sys$Age)), 1:2)
+  nums1 <- sys$Value[sys$Age == 1 & sys$Variable == "Numbers" & sys$Time == 1]
+  ## box0: 3 water + sed; box1: 2 water + sed; box2: 1 water + sed; 100 each
+  expect_equal(nums1, 100 * (4 + 3 + 2))
+  resn1 <- sys$Value[sys$Age == 1 & sys$Variable == "ResN" & sys$Time == 1]
+  expect_equal(resn1, 5)
+  biom1 <- sys$Value[sys$Age == 1 & sys$Variable == "Biomass" & sys$Time == 1]
+  expect_equal(biom1, nums1 * (10 + 5) * 0.00000002 * 5.7)
+
+  surf <- age_class_long(nc, grp, "COD", box = 2, layer_key = "water_1",
+                         info = info)
+  expect_equal(surf$Value[surf$Age == 1 & surf$Variable == "Numbers" &
+                            surf$Time == 1], 100)
+  deep <- age_class_long(nc, grp, "COD", box = 2, layer_key = "water_3",
+                         info = info)
+  expect_true(all(!is.finite(deep$Value[deep$Variable == "Numbers"]) |
+                    deep$Value[deep$Variable == "Numbers"] == 0))
+
+  pal <- age_class_palette(4)
+  expect_equal(length(unique(unname(pal))), 4)
+  ui_a <- paste(as.character(ages_ui("ages")), collapse = " ")
+  expect_true(grepl("Functional group", ui_a))
+  ui_s <- paste(as.character(spatial_ui("spatial")), collapse = " ")
+  expect_true(grepl("By age class", ui_s))
+  expect_false(grepl("Show box labels|Show outlines", ui_s, ignore.case = TRUE))
+
+  nesp <- tempfile("nesp_ages_")
+  pair <- write_nesp_style_pair(nesp)
+  on.exit(unlink(nesp, recursive = TRUE), add = TRUE)
+  det <- detect_run_pair(pair$config_dir, pair$output_dir)
+  nc_n <- ncdf4::nc_open(det$paths$output_nc)
+  on.exit(ncdf4::nc_close(nc_n), add = TRUE)
+  grp_n <- data.frame(code = "COD", name = "cod", numcohorts = 2,
+                      grouptype = "FISH", isturnedon = 1, stringsAsFactors = FALSE)
+  info_n <- atlantis_layer_info(nc_n)
+  nesp_sys <- age_class_long(nc_n, grp_n, "COD", info = info_n)
+  expect_gt(nrow(nesp_sys), 0)
+  expect_equal(sort(unique(nesp_sys$Age)), 1:2)
+  nesp_box <- age_class_long(nc_n, grp_n, "COD", box = 0, layer_key = "sediment",
+                             info = info_n)
+  expect_gt(nrow(nesp_box), 0)
+  expect_lt(max(nesp_box$Value[nesp_box$Variable == "Numbers"], na.rm = TRUE),
+            max(nesp_sys$Value[nesp_sys$Variable == "Numbers"], na.rm = TRUE))
+
+  fx <- northsea_fixture_dir()
+  skip_if_not(dir.exists(fx) && file.exists(file.path(fx, "outputNorthSea.nc")),
+              "North Sea fixture not packaged")
+  nc_ns <- ncdf4::nc_open(file.path(fx, "outputNorthSea.nc"))
+  on.exit(ncdf4::nc_close(nc_ns), add = TRUE)
+  grp_ns <- data.frame(code = "COD", name = "cod", numcohorts = 14,
+                       grouptype = "FISH", isturnedon = 1, stringsAsFactors = FALSE)
+  ns_info <- atlantis_layer_info(nc_ns)
+  ns_sys <- age_class_long(nc_ns, grp_ns, "COD", info = ns_info)
+  expect_equal(sort(unique(ns_sys$Age)), 1:14)
+  expect_true(all(AGE_CLASS_VARS %in% ns_sys$Variable))
+  ns_box <- age_class_long(nc_ns, grp_ns, "COD", box = 1,
+                           layer_key = "integrated", info = ns_info)
+  expect_gt(nrow(ns_box), 0)
+  expect_lt(max(ns_box$Value[ns_box$Variable == "Numbers"], na.rm = TRUE),
+            max(ns_sys$Value[ns_sys$Variable == "Numbers"], na.rm = TRUE))
+})
+
+test_that("busy helpers and Ask Atlantis thinking markup are present", {
+  css <- paste(readLines(file.path(root, "inst", "shiny", "www", "custom.css")),
+               collapse = "\n")
+  expect_true(grepl("shiny-busy", css, fixed = TRUE))
+  expect_true(grepl("recalculating", css, fixed = TRUE))
+  expect_true(grepl("ra-msg-thinking", css, fixed = TRUE))
+  app_src <- paste(readLines(file.path(root, "inst", "shiny", "app.R")),
+                   collapse = "\n")
+  expect_true(grepl("busyIndicatorOptions", app_src, fixed = TRUE))
+  expect_true(grepl("useBusyIndicators", app_src, fixed = TRUE))
+  expect_true(grepl("ra-busy-bar", app_src, fixed = TRUE))
+  ai_src <- paste(readLines(file.path(root, "inst", "shiny", "modules",
+                                      "assistant_module.R")), collapse = "\n")
+  expect_true(grepl("Thinking", ai_src, fixed = TRUE))
+  expect_true(grepl("ra-msg-thinking", ai_src, fixed = TRUE))
+  expect_true(exists("ra_progress", mode = "function"))
+  expect_true(exists("ra_inc", mode = "function"))
+})
+
 test_that("hidden-tab plots are not kept alive after load", {
   mods <- file.path(root, "inst", "shiny", "modules")
   src <- paste(vapply(
-    c("consumption_module.R", "spatial_module.R", "compare_module.R",
+    c("consumption_module.R", "spatial_module.R", "ages_module.R",
+      "compare_module.R",
       "recruitment_module.R", "growth_module.R", "feeding_module.R",
       "predation_module.R", "foodweb_module.R", "catch_module.R",
       "physics_module.R", "mortality_module.R"),
@@ -1524,5 +2169,149 @@ test_that("hidden-tab plots are not kept alive after load", {
   expect_true(grepl("ensure_project_data", src, fixed = TRUE))
   expect_true(grepl("ra_debounce", src, fixed = TRUE))
   expect_true(grepl("ra_scale_x_year", src, fixed = TRUE))
+})
+
+test_that("pPREY matrix keeps every predator x prey cell including zeros", {
+  ava <- rbind(
+    pPREY1COD1 = c(COD = 0, HAD = 0.8, PHY = 0.2, DET = 0),
+    pPREY2COD1 = c(COD = 0.1, HAD = 0, PHY = 0, DET = 0),
+    pPREYPHY = c(COD = 0, HAD = 0, PHY = 0, DET = 0)
+  )
+  grp <- data.frame(code = c("COD", "HAD", "PHY", "DET"),
+                    name = c("Cod", "Haddock", "Phyto", "Detritus"),
+                    stringsAsFactors = FALSE)
+  expect_equal(sum(ava == 0), 9)
+  plt <- plotly::plotly_build(plot_feed_matrix_plotly(ava, grp = grp))
+  expect_true(inherits(plt, "plotly"))
+  z <- plt$x$data[[1]]$z
+  expect_equal(length(plt$x$data[[1]]$x), ncol(ava))
+  expect_equal(length(plt$x$data[[1]]$y), nrow(ava))
+  expect_true(any(unlist(z) == 0, na.rm = TRUE))
+  expect_equal(sum(is.na(unlist(z))), 0)
+  sz <- feed_matrix_plot_size(ava)
+  expect_gte(sz$height, 520)
+  big <- matrix(0, nrow = 80, ncol = 55)
+  rownames(big) <- paste0("pPREY1G", sprintf("%02d", seq_len(80)), "1")
+  colnames(big) <- paste0("G", sprintf("%02d", seq_len(55)))
+  expect_gt(feed_matrix_plot_size(big)$height, 1000)
+  expect_true(grepl("ra-scroll-plot",
+                    paste(as.character(feeding_ui("feeding")), collapse = " ")))
+})
+
+test_that("read_pprey_matrix pads uneven rows and same-line values", {
+  txt <- c(
+    "pPREY1COD1 4",
+    "0.1 0.8 0.0 0.0",
+    "pPREY2COD1 0.0 0.2 0.3",
+    "pPREY1HAD 0.4 0.1 0.0 0.05 0.01"
+  )
+  mat <- read_pprey_matrix(txt)
+  expect_equal(nrow(mat), 3)
+  expect_equal(ncol(mat), 5)
+  expect_equal(unname(mat["pPREY1COD1", 2]), 0.8)
+  expect_equal(unname(mat["pPREY2COD1", 4]), 0)
+  expect_equal(unname(mat["pPREY1HAD", 5]), 0.01)
+  expect_equal(rownames(mat), c("pPREY1COD1", "pPREY2COD1", "pPREY1HAD"))
+})
+
+test_that("Spatial diagnose and native plotly report why a map cannot draw", {
+  miss <- diagnose_spatial_map(bgm_path = tempfile())
+  expect_false(isTRUE(miss$ok))
+  expect_match(miss$message, "BGM not found at path")
+  empty <- diagnose_spatial_map(bgm_path = NULL, searched = c("/cfg", "/out"))
+  expect_match(empty$message, "Searched")
+
+  nesp <- tempfile("hard_nesp_")
+  pair <- write_hard_nesp_pair(nesp)
+  on.exit(unlink(nesp, recursive = TRUE), add = TRUE)
+  det <- detect_run_pair(pair$config_dir, pair$output_dir)
+  expect_true(path_ok(det$paths$bgm))
+  expect_equal(toupper(basename(det$paths$bgm)), "VMPA_SETAS.BGM")
+  poly <- read_bgm_polygons(det$paths$bgm)
+  expect_gt(nrow(poly), 0)
+  expect_equal(sort(unique(poly$boxid)), 0:2)
+  d <- diagnose_spatial_map(det$paths$bgm, poly)
+  expect_true(d$ok)
+  expect_match(d$message, "polygons: 3")
+
+  nc <- ncdf4::nc_open(det$paths$output_nc)
+  on.exit(ncdf4::nc_close(nc), add = TRUE)
+  grp <- utils::read.csv(det$paths$groups, stringsAsFactors = FALSE)
+  names(grp) <- tolower(names(grp))
+  vals <- spatial_box_values(nc, grp, kind = "biomass", fg_code = "COD",
+                             layer_key = "integrated",
+                             info = atlantis_layer_info(nc))
+  joined <- spatial_join_polygons(poly, vals, time_i = 1L)
+  plt <- plotly::plotly_build(plot_spatial_map_plotly(
+    joined, selected_box = 1L, title = "NESP"))
+  expect_true(inherits(plt, "plotly"))
+  expect_gte(length(plt$x$data), 3)
+
+  blank <- plotly::plotly_build(plot_spatial_map_plotly(read_bgm_polygons(tempfile())))
+  expect_true(inherits(blank, "plotly"))
+  ann <- tryCatch(blank$x$layout$annotations[[1]]$text, error = function(e) "")
+  expect_match(paste(ann, collapse = " "), "BGM not found|No box")
+})
+
+test_that("BGM discovery finds nbox= , .BGM, output/geometry and inferred nbox", {
+  tmp <- tempfile("bgm_disc_")
+  dir.create(tmp)
+  on.exit(unlink(tmp, recursive = TRUE), add = TRUE)
+  cfg <- file.path(tmp, "0000_NESP_bio")
+  out <- file.path(tmp, "outputFolder")
+  dir.create(cfg, recursive = TRUE)
+  dir.create(file.path(out, "geometry"), recursive = TRUE)
+  writeLines("tstop 365", file.path(cfg, "NESP_bio_run.prm"))
+  writeLines(c("KUP_COD 1", "pPREY1COD 2", "0.1 0.2"),
+             file.path(cfg, "NESP_bio.prm"))
+  writeLines(c("geometry VMPA_SETAS.BGM"), file.path(cfg, "run.prm"))
+  write_equals_nbox_bgm(file.path(out, "geometry", "VMPA_SETAS.BGM"))
+  found <- find_bgm_path(config_dir = cfg, output_dir = out,
+                         prm_paths = file.path(cfg, "run.prm"))
+  expect_true(path_ok(found))
+  expect_equal(toupper(basename(found)), "VMPA_SETAS.BGM")
+
+  no_nbox <- tempfile(fileext = ".bgm")
+  writeLines(c(
+    "box0.vert 4", "0 0", "1 0", "1 1", "0 1",
+    "box1.vert 4", "1 0", "2 0", "2 1", "1 1"
+  ), no_nbox)
+  on.exit(unlink(no_nbox), add = TRUE)
+  expect_equal(bgm_nbox(read_bgm_lines(no_nbox)), 2L)
+  poly <- read_bgm_polygons(no_nbox)
+  expect_equal(sort(unique(poly$boxid)), 0:1)
+
+  eq <- tempfile(fileext = ".bgm")
+  write_equals_nbox_bgm(eq)
+  on.exit(unlink(eq), add = TRUE)
+  expect_equal(bgm_nbox(read_bgm_lines(eq)), 3L)
+  expect_equal(length(unique(read_bgm_polygons(eq)$boxid)), 3)
+})
+
+test_that("North Sea pPREY keeps all rows and Spatial diagnose is on the map", {
+  fx <- northsea_fixture_dir()
+  skip_if_not(dir.exists(fx) && file.exists(file.path(fx, "059_C_PAD_T15_x10.prm")),
+              "North Sea fixture not packaged")
+  prm <- readLines(file.path(fx, "059_C_PAD_T15_x10.prm"), warn = FALSE)
+  mat <- read_pprey_matrix(prm)
+  expect_gt(nrow(mat), 100)
+  expect_gt(ncol(mat), 40)
+  expect_true(any(mat == 0, na.rm = TRUE))
+  plt <- plotly::plotly_build(plot_feed_matrix_plotly(mat))
+  expect_equal(length(plt$x$data[[1]]$y), nrow(mat))
+  expect_equal(length(plt$x$data[[1]]$x), ncol(mat))
+  expect_equal(dim(plt$x$data[[1]]$z), dim(mat))
+  expect_true(any(unlist(plt$x$data[[1]]$z) == 0, na.rm = TRUE))
+
+  ns_poly <- read_bgm_polygons(file.path(fx, "NorthSea.bgm"))
+  expect_gte(length(unique(ns_poly$boxid)), 20)
+  d <- diagnose_spatial_map(file.path(fx, "NorthSea.bgm"), ns_poly)
+  expect_true(d$ok)
+  expect_match(d$message, "polygons:")
+  plt_m <- plotly::plotly_build(plot_spatial_map_plotly(ns_poly, title = "North Sea"))
+  expect_true(inherits(plt_m, "plotly"))
+  expect_gte(length(plt_m$x$data), 20)
+  ui <- paste(as.character(spatial_ui("spatial")), collapse = " ")
+  expect_true(grepl("map_status", ui))
 })
 

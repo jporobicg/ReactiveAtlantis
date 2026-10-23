@@ -92,6 +92,7 @@ predation_server <- function(id, project = NULL) {
       agg <- stats::aggregate(consum ~ Time + series, data = df, sum)
       pal <- get_fg_colors(setdiff(unique(agg$series), "Other"), ps()$data$fg_palette)
       pal <- c(pal, Other = "#8D99AE")
+      agg$series <- factor(agg$series, levels = spread_series_levels(agg$series, pal))
       ylab <- if (isTRUE(input$scaled)) "Proportion of diet" else "Consumption (tons)"
       p <- ggplot2::ggplot(agg, ggplot2::aes(x = Time, y = consum, fill = series))
       p <- p + ggplot2::geom_area(position = if (isTRUE(input$scaled)) "fill" else "stack")
@@ -108,6 +109,7 @@ predation_server <- function(id, project = NULL) {
       agg <- stats::aggregate(eff.pred ~ Time + series, data = df, sum)
       pal <- get_fg_colors(setdiff(unique(agg$series), "Other"), ps()$data$fg_palette)
       pal <- c(pal, Other = "#8D99AE")
+      agg$series <- factor(agg$series, levels = spread_series_levels(agg$series, pal))
       ylab <- if (isTRUE(input$scaled)) "Proportion of predation" else "Predation pressure (tons)"
       p <- ggplot2::ggplot(agg, ggplot2::aes(x = Time, y = eff.pred, fill = series))
       p <- p + ggplot2::geom_area(position = if (isTRUE(input$scaled)) "fill" else "stack")

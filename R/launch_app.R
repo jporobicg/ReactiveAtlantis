@@ -9,9 +9,13 @@
 ##' @param max_upload_mb Maximum Shiny upload size in megabytes. Applied only
 ##'   when it is larger than the current \code{shiny.maxRequestSize} option.
 ##'   Default is 8192 (8 GB).
-##' @param project_dir Optional local folder. The app scans it for Atlantis
-##'   files (BiomIndx, DietCheck, CATCH.nc, groups CSV, and so on) so large
-##'   outputs do not need to be uploaded through the browser.
+##' @param project_dir Optional local folder. Fills both the configuration and
+##'   output fields (single-folder / backward compatible). Prefer
+##'   \code{config_dir} and \code{output_dir} when those live apart.
+##' @param config_dir Optional Atlantis configuration folder (groups CSV,
+##'   \code{.prm}, init NetCDF, BGM).
+##' @param output_dir Optional Atlantis output folder (biology / CATCH /
+##'   PROD NetCDF, BiomIndx, DietCheck, SSB, YOY).
 ##' @return Starts the Shiny application
 ##' @export
 ##' @examples
@@ -20,11 +24,17 @@
 ##' launch_reactiveatlantis(port = 8080, launch.browser = FALSE)
 ##' launch_reactiveatlantis(max_upload_mb = 8192)
 ##' launch_reactiveatlantis(project_dir = "/path/to/NorthSea/output")
+##' launch_reactiveatlantis(
+##'   config_dir = "/path/to/NESP/config",
+##'   output_dir = "/path/to/NESP/output"
+##' )
 ##' }
 launch_reactiveatlantis <- function(host = "127.0.0.1", port = NULL,
                                     launch.browser = TRUE,
                                     max_upload_mb = 8192,
-                                    project_dir = NULL) {
+                                    project_dir = NULL,
+                                    config_dir = NULL,
+                                    output_dir = NULL) {
   app_dir <- system.file("shiny", package = "ReactiveAtlantis")
   
   if (app_dir == "") {
@@ -35,6 +45,12 @@ launch_reactiveatlantis <- function(host = "127.0.0.1", port = NULL,
   options(reactiveatlantis.max_upload_mb = max_upload_mb)
   if (!is.null(project_dir)) {
     options(reactiveatlantis.project_dir = project_dir)
+  }
+  if (!is.null(config_dir)) {
+    options(reactiveatlantis.config_dir = config_dir)
+  }
+  if (!is.null(output_dir)) {
+    options(reactiveatlantis.output_dir = output_dir)
   }
   apply_max_upload_mb(max_upload_mb)
   

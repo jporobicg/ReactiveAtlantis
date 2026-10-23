@@ -1,0 +1,272 @@
+{
+  "version": 1,
+  "verified_against_commit": "11c4ee7",
+  "description": "Unified-app tabs only. tool_id must match ra_ai_nav_catalog() and nav_panel titles.",
+  "not_tool_ids": [
+    "predation()",
+    "growth.pp()",
+    "recruitment.cal()",
+    "mortality()",
+    "compare()",
+    "feeding.mat()",
+    "food.web()",
+    "catch()",
+    "skill_assessment"
+  ],
+  "tools": [
+    {
+      "tool_id": "overview",
+      "title": "Overview",
+      "purpose": "Summary cards and group-health table (extinct, exploding, odd ResN/StructN).",
+      "example_questions": [
+        "What can Reactive Atlantis do?",
+        "Which groups look extinct or exploding?",
+        "Why is a group collapsing?"
+      ],
+      "preconditions": ["groups"],
+      "function_refs": ["overview_ui", "overview_server"],
+      "navigation_target": "Overview",
+      "what_to_look_for": "Groups below 1% of initial biomass, more than tenfold growth, age classes outside 0.5-1.5 of initial ResN/StructN.",
+      "limitations": "Flags are ratios, not a process diagnosis.",
+      "keywords": ["overview", "health", "extinct", "exploding", "summary", "structn", "resn", "what can reactive", "collapse", "crash", "declin"],
+      "module": "overview",
+      "inputs": [],
+      "views": []
+    },
+    {
+      "tool_id": "compare",
+      "title": "Compare",
+      "purpose": "Biomass and numbers through time; Bt/B0; age structure.",
+      "example_questions": [
+        "Where do I see biomass trajectories?",
+        "Is biomass relative to initial outside 0.5-1.5?"
+      ],
+      "preconditions": ["groups"],
+      "function_refs": ["compare_ui", "compare_server"],
+      "navigation_target": "Compare",
+      "what_to_look_for": "Trend versus initial, age-structure change, observed biomass points.",
+      "limitations": "Does not name the process that caused a trend.",
+      "keywords": ["compare", "biomass", "bt/b0", "relative", "age structure", "small multiples", "collapse", "crash", "declin"],
+      "module": "compare",
+      "inputs": ["group_type", "search", "relative", "show_band", "y_scale", "view", "fg_total", "fg_age"],
+      "views": ["facets", "total", "age", "age_bars"]
+    },
+    {
+      "tool_id": "ages",
+      "title": "Ages",
+      "purpose": "Whole-system age-class ResN, StructN, Numbers, Biomass.",
+      "example_questions": [
+        "How do I inspect condition by age?",
+        "Where is reserve nitrogen by cohort?"
+      ],
+      "preconditions": ["groups", "output_nc"],
+      "function_refs": ["ages_ui", "ages_server", "age_class_long"],
+      "navigation_target": "Ages",
+      "what_to_look_for": "Numbers-weighted ResN/StructN and age-class biomass.",
+      "limitations": "Whole-system only. Spatial by-age is on Spatial.",
+      "keywords": ["ages", "age class", "cohort", "resn", "structn", "numbers", "weight", "age structure", "condition"],
+      "module": "ages",
+      "inputs": ["fg", "variable"],
+      "views": []
+    },
+    {
+      "tool_id": "spatial",
+      "title": "Spatial",
+      "purpose": "Box map by layer and time; series; by-age; predator-prey overlap.",
+      "example_questions": [
+        "Where is the biomass in space?",
+        "Did the stock move into poor boxes?",
+        "Where do predator and prey overlap?"
+      ],
+      "preconditions": ["groups", "output_nc", "bgm"],
+      "function_refs": ["spatial_ui", "spatial_server", "plot_spatial_map", "spatial_overlap_index"],
+      "navigation_target": "Spatial",
+      "what_to_look_for": "Per-box water layers, sediment last, unused boxes, time slider. Overlap view: local 2 min(Bp,Bq)/(Bp+Bq) on the map; Schoener D in the series.",
+      "limitations": "Needs a parseable BGM. Map is empty without polygons. Overlap uses box biomass, not layers.",
+      "keywords": ["spatial", "map", "box", "polygon", "bgm", "distribution", "layer", "depth", "sediment", "overlap", "schoener"],
+      "module": "spatial",
+      "inputs": ["view", "kind", "fg", "prey", "tracer", "layer", "time_i", "play", "ts_scope", "box"],
+      "views": ["map", "age", "overlap"]
+    },
+    {
+      "tool_id": "consumption",
+      "title": "Consumption",
+      "purpose": "Tonnes consumed from outputPROD.nc with DietCheck.",
+      "example_questions": [
+        "Is intake too low?",
+        "Where is consumption?"
+      ],
+      "preconditions": ["groups", "prod_nc"],
+      "function_refs": ["consumption_ui", "consumption_server"],
+      "navigation_target": "Consumption",
+      "what_to_look_for": "Eat and Grazing series, predator versus prey views.",
+      "limitations": "Disabled when PROD is missing.",
+      "keywords": ["consumption", "consumed", "eat", "grazing", "prod.nc", "starv", "food limitation"],
+      "module": "consumption",
+      "inputs": ["view", "fg", "top_n"],
+      "views": []
+    },
+    {
+      "tool_id": "physics",
+      "title": "Physics",
+      "purpose": "Temperature, salinity, nutrients and layer thickness.",
+      "example_questions": [
+        "Where are temperature and nitrate shown?"
+      ],
+      "preconditions": ["output_nc"],
+      "function_refs": ["physics_ui", "physics_server", "atlantis_layer_info"],
+      "navigation_target": "Physics",
+      "what_to_look_for": "Real water-column layers per box; padded layers excluded.",
+      "limitations": "A tracer pattern is not a biological diagnosis.",
+      "keywords": ["physics", "temperature", "salinity", "nitrate", "nh3", "chl", "denitrif", "nominal_dz", "oxygen"],
+      "module": "physics",
+      "inputs": ["tracer", "box", "all_boxes"],
+      "views": []
+    },
+    {
+      "tool_id": "ensemble",
+      "title": "Multi-run",
+      "purpose": "Overlay series from extra run pairs.",
+      "example_questions": [
+        "How do I compare two runs?"
+      ],
+      "preconditions": ["groups"],
+      "function_refs": ["ensemble_ui", "ensemble_server"],
+      "navigation_target": "Multi-run",
+      "what_to_look_for": "Biomass, SSB, YOY or catch overlays; ensemble range.",
+      "limitations": "Needs extra named pairs in the sidebar.",
+      "keywords": ["multi-run", "ensemble", "overlay", "scenario compare"],
+      "module": "ensemble",
+      "inputs": ["kind", "fg"],
+      "views": []
+    },
+    {
+      "tool_id": "predation",
+      "title": "Predation",
+      "purpose": "Realised diet composition from DietCheck.",
+      "example_questions": [
+        "Where do I inspect predation?",
+        "What is this group eating?"
+      ],
+      "preconditions": ["groups", "biomindx", "dietcheck"],
+      "function_refs": ["predation_ui", "predation_server"],
+      "navigation_target": "Predation",
+      "what_to_look_for": "Diet shifts, top prey, Other remainder.",
+      "limitations": "Realised diet is not pPREY.",
+      "keywords": ["predation", "predator", "prey", "diet", "dietcheck"],
+      "module": "predation",
+      "inputs": ["fg", "stock", "threshold", "top_n", "scaled", "time_age"],
+      "views": []
+    },
+    {
+      "tool_id": "foodweb",
+      "title": "Food web",
+      "purpose": "Interactive network and trophic-level table.",
+      "example_questions": [
+        "How do I see the food web?"
+      ],
+      "preconditions": ["groups", "dietcheck"],
+      "function_refs": ["foodweb_ui", "foodweb_server"],
+      "navigation_target": "Food web",
+      "what_to_look_for": "Trophic connections above the diet threshold.",
+      "limitations": "Weak links are hidden by the threshold.",
+      "keywords": ["food web", "foodweb", "trophic", "network"],
+      "module": "foodweb",
+      "inputs": ["focal_fg", "max_connections", "min_proportion", "time_step", "stock"],
+      "views": []
+    },
+    {
+      "tool_id": "recruitment",
+      "title": "Recruitment",
+      "purpose": "YOY, SSB, recruits vs spawning stock, Beverton-Holt side panel.",
+      "example_questions": [
+        "What should I check when recruitment is low?",
+        "Where do I plot recruits against SSB?"
+      ],
+      "preconditions": ["groups", "output_nc", "yoy", "bio_prm"],
+      "function_refs": ["recruitment_ui", "recruitment_server", "join_recruits_ssb"],
+      "navigation_target": "Recruitment",
+      "what_to_look_for": "YOY.txt CODE.0, SSB, recruits vs SSB scatter, larvae from the curve.",
+      "limitations": "Recalculate is a curve what-if, not a saved official run. Recruits vs SSB uses loaded YOY and SSB tables.",
+      "keywords": ["recruit", "yoy", "ssb", "beverton", "alpha", "beta", "larvae", "kdenr", "stock recruit", "spawning stock"],
+      "module": "recruitment",
+      "inputs": ["analysis_type", "fg_yoy", "new_alpha", "new_beta", "recalc"],
+      "views": ["yoy", "ssb", "sr", "growth"]
+    },
+    {
+      "tool_id": "growth",
+      "title": "Growth",
+      "purpose": "Light, nutrient and eddy limitation for primary producers.",
+      "example_questions": [
+        "Are primary producers limited?"
+      ],
+      "preconditions": ["groups", "output_nc", "bio_prm"],
+      "function_refs": ["growth_ui", "growth_server"],
+      "navigation_target": "Growth",
+      "what_to_look_for": "Limitation by layer for a producer group.",
+      "limitations": "Not vertebrate weight-at-age. Use Ages for ResN/StructN.",
+      "keywords": ["growth", "light", "nutrient", "eddy", "primary producer", "phyto"],
+      "module": "growth",
+      "inputs": ["fg", "box", "layer", "all_layers", "log_scale"],
+      "views": []
+    },
+    {
+      "tool_id": "catch",
+      "title": "Catch",
+      "purpose": "Catch by group or fleet; skill versus observed.",
+      "example_questions": [
+        "How do I compare catch to observations?"
+      ],
+      "preconditions": ["groups", "fisheries", "catch_nc"],
+      "function_refs": ["catch_ui", "catch_server"],
+      "navigation_target": "Catch",
+      "what_to_look_for": "Fleet stacks; Skill vs observed when a catch CSV is loaded.",
+      "limitations": "Skill is view=skill on this tab, not a separate tool_id.",
+      "keywords": ["catch", "harvest", "fleet", "landings", "discard", "skill", "fishing"],
+      "module": "catch",
+      "inputs": ["view", "fishery", "fg", "by_year"],
+      "views": ["by_group", "by_fleet", "numbers", "skill"]
+    },
+    {
+      "tool_id": "feeding",
+      "title": "Feeding",
+      "purpose": "Full pPREY matrix; expected predation pressure (Holling matrix from init or output biomass); per-box map; DietCheck / SpecificPredMort / production compare for the selected pair; diagnostics; edited-versus-original compare.",
+      "example_questions": [
+        "What is pPREY?",
+        "What does KLP represent?",
+        "How does realised diet compare to pPREY?",
+        "Where is expected predation pressure?",
+        "Which equation does the pressure view use?",
+        "Can predation pressure use output biomass and map it per box?"
+      ],
+      "preconditions": ["groups", "bio_prm", "init_nc"],
+      "function_refs": ["feeding_ui", "feeding_server", "parse_pprey_rownames", "dietcheck_pair_series", "consumed_pair_series", "expected_predation_pressure", "holling_ingest_mgn_day", "pressure_pair_by_box", "pressure_vs_realised"],
+      "navigation_target": "Feeding",
+      "what_to_look_for": "pPREY>0 with zero gape overlap; uneaten prey; DietCheck mismatch; DietCheck proportion and consumed tonnes for the clicked predator/prey. Predation pressure view: pPREY-shaped matrix of implied prey loss per day from C, mum, E, predcase, KLP/KUP and biomass at the selected time; per-box map; flags when loss exceeds standing stock, 5%/day, or prey production.",
+      "limitations": "pPREY is availability, not realised diet. Expected pressure is the Holling diagnostic, not output DietCheck. Habitat refuge is 1. KDENR is recruitment, not feeding. In-session edits are not prm writes. Consumed biomass and production flags need outputPROD.nc. Output source needs output.nc; the map needs a BGM.",
+      "keywords": ["feeding", "pprey", "gape", "availability", "preference", "klp", "kup", "mum", "dietcheck", "realised diet", "consumed", "predation pressure", "holling", "predcase", "clearance", "specificpredmort", "production"],
+      "module": "feeding",
+      "inputs": ["view_type", "pred_group", "pred_stage", "prey_group", "prey_stage", "pressure_metric", "pressure_source", "pressure_time_i", "pressure_box"],
+      "views": ["matrix", "pressure", "diagnostics", "compare"]
+    },
+    {
+      "tool_id": "mortality",
+      "title": "Mortality",
+      "purpose": "Fishing, natural and predation mortality by age; predation by predator; Mort.txt F vs M.",
+      "example_questions": [
+        "What does mL represent?",
+        "Has fishing mortality increased?",
+        "Which predators drive predation mortality?"
+      ],
+      "preconditions": ["groups", "specific_mort"],
+      "function_refs": ["mortality_ui", "mortality_server", "calc_mort", "parse_pred_mort_by_predator", "parse_mort_txt"],
+      "navigation_target": "Mortality",
+      "what_to_look_for": "Stacked F / M1 / M2 by age; SpecificPredMort by predator; missing-file notes for Mort.txt, SpecificMort.txt, SpecificPredMort.txt.",
+      "limitations": "mL is linear natural mortality, not fishing. Mort.txt is relative F vs M only.",
+      "keywords": ["mortality", "fishing mortality", "natural mortality", "predation mortality", "specificmort", "specificpredmort", "mort.txt", "ml"],
+      "module": "mortality",
+      "inputs": ["view", "fg", "age"],
+      "views": ["source", "predator", "mort"]
+    }
+  ]
+}
