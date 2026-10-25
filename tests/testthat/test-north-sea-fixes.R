@@ -179,8 +179,10 @@ test_that("catch variables match FC index and cohort Num totals", {
   expect_equal(fish$code, c("DEM", "PEL"))
   expect_equal(fish$name, c("demersal trawls and seines", "pelagic"))
 
+  ## Atlantis names fleet catch {Code}_Catch_FC{nf + 1}, nf = 0-based row in
+  ## the fisheries CSV (atHarvestSetup.c:316), not the CSV Index (D14).
   nc_vars <- c(
-    "t", "COD_Catch_FC1", "COD_Catch_FC12",
+    "t", "COD_Catch_FC1", "COD_Catch_FC2", "Tot_COD_Catch",
     paste0("cod", 1:10, "_Catch"),
     paste0("cod", 1:10, "_Num")
   )
@@ -190,8 +192,16 @@ test_that("catch variables match FC index and cohort Num totals", {
   expect_true(any(grepl("COD_Catch_FC1", bio$patterns)))
 
   pel <- fishery_row(fish, "PEL")
-  bio12 <- match_catch_vars(nc_vars, grp, pel, "biomass")
-  expect_equal(bio12$matched, "COD_Catch_FC12")
+  expect_equal(pel$fc, 2L)
+  bio2 <- match_catch_vars(nc_vars, grp, pel, "biomass")
+  expect_equal(bio2$matched, "COD_Catch_FC2")
+
+  ## A fleet that does not catch the group returns nothing, not another
+  ## fleet's catch; biomass never uses cohort _Catch (numbers).
+  bio_none <- match_catch_vars(setdiff(nc_vars, "COD_Catch_FC2"), grp, pel, "biomass")
+  expect_length(bio_none$matched, 0)
+  tot <- match_catch_vars(nc_vars, grp, NULL, "biomass")
+  expect_equal(tot$matched, "Tot_COD_Catch")
 
   nums <- match_catch_vars(nc_vars, grp, dem, "numbers")
   expect_true(all(grepl("_Num$", nums$matched)))

@@ -6,6 +6,11 @@ catch_ui <- function(id) {
   ns <- NS(id)
   tagList(
     uiOutput(ns("banner")),
+    div(class = "alert alert-secondary", role = "note",
+        strong("Not validated. "),
+        "The Catch tab has not been checked against a real fished Atlantis run.",
+        " Tonnes come from {Code}_Catch_FC{fleet} or Tot_{Code}_Catch; numbers",
+        " from the cohort catch variables."),
     layout_sidebar(
       sidebar = sidebar(
         width = 280, open = "open",
@@ -309,7 +314,17 @@ fishery_row <- function(fish, fishery_code) {
   if (nrow(row) == 0) {
     return(NULL)
   }
-  row[1, , drop = FALSE]
+  out <- row[1, , drop = FALSE]
+  ## Atlantis names fleet catch {Code}_Catch_FC{nf + 1} with nf the 0-based
+  ## fleet order in the fisheries CSV, i.e. the row position (validation D14).
+  out$fc <- match(out$code[1], fish$code)
+  out
+}
+
+fleet_fc <- function(fish_row) {
+  if (is.null(fish_row)) return(NA_integer_)
+  if (!is.null(fish_row$fc) && is.finite(fish_row$fc[1])) return(as.integer(fish_row$fc[1]))
+  as.integer(fish_row$index[1])
 }
 
 catch_var_patterns <- function(grp_row, fish_row, quantity = "biomass") {
@@ -317,7 +332,7 @@ catch_var_patterns <- function(grp_row, fish_row, quantity = "biomass") {
   name <- trimws(as.character(grp_row$name[1]))
   n.coh <- as.integer(grp_row$numcohorts[1])
   if (!is.finite(n.coh) || n.coh < 1) n.coh <- 1
-  fc <- if (is.null(fish_row)) NA_integer_ else as.integer(fish_row$index[1])
+  fc <- fleet_fc(fish_row)
   
   patterns <- character()
   if (identical(quantity, "numbers")) {
@@ -343,20 +358,17 @@ catch_var_patterns <- function(grp_row, fish_row, quantity = "biomass") {
       patterns <- c(patterns, paste0(code, "_Num_FC", fc), paste0(code, "_Catch_FC", fc))
     }
   } else {
+    ## Biomass: tonnes only. Fleet catch {Code}_Catch_FC{n} (and discards);
+    ## without a fleet, the total Tot_{Code}_Catch. Cohort {name}{c}_Catch is
+    ## numbers and is never used for tonnes (validation D14).
     if (is.finite(fc)) {
       patterns <- c(
         paste0(code, "_Catch_FC", fc),
         paste0(code, "_Discard_FC", fc),
         paste0(code, "_Discards_FC", fc)
       )
-    }
-    if (n.coh > 1) {
-      coh <- seq_len(n.coh)
-      patterns <- c(patterns, paste0(name, coh, "_Catch"), paste0(name, coh, "_Discard"),
-                    paste0(name, coh, "_Discards"))
     } else {
-      patterns <- c(patterns, paste0(name, "_Catch"), paste0(name, "_Discard"),
-                    paste0(name, "_Discards"))
+      patterns <- paste0("Tot_", code, "_Catch")
     }
   }
   unique(patterns)
@@ -367,7 +379,7 @@ catch_var_regex <- function(grp_row, fish_row, quantity = "biomass") {
   name <- trimws(as.character(grp_row$name[1]))
   n.coh <- as.integer(grp_row$numcohorts[1])
   if (!is.finite(n.coh) || n.coh < 1) n.coh <- 1
-  fc <- if (is.null(fish_row)) NA_integer_ else as.integer(fish_row$index[1])
+  fc <- fleet_fc(fish_row)
   code_esc <- gsub("([.|()\\^$*+?{}])", "\\\\\\1", code)
   name_esc <- gsub("([.|()\\^$*+?{}])", "\\\\\\1", name)
   
@@ -384,12 +396,8 @@ catch_var_regex <- function(grp_row, fish_row, quantity = "biomass") {
   } else {
     if (is.finite(fc)) {
       rx <- c(rx, paste0("^", code_esc, "_(Catch|Discard|Discards)_FC", fc, "$"))
-    }
-    rx <- c(rx, paste0("^", code_esc, "_(Catch|Discard|Discards)_FC[0-9]+$"))
-    if (n.coh > 1) {
-      rx <- c(rx, paste0("^", name_esc, "[0-9]+_(Catch|Discard|Discards)$"))
     } else {
-      rx <- c(rx, paste0("^", name_esc, "_(Catch|Discard|Discards)$"))
+      rx <- c(rx, paste0("^Tot_", code_esc, "_Catch$"))
     }
   }
   unique(rx)
@@ -413,7 +421,7 @@ match_catch_vars <- function(nc_vars, grp_row, fish_row, quantity = "biomass") {
 
 prefer_catch_vars <- function(matched, fish_row, quantity) {
   if (length(matched) == 0) return(matched)
-  fc <- if (is.null(fish_row)) NA_integer_ else as.integer(fish_row$index[1])
+  fc <- fleet_fc(fish_row)
   
   if (identical(quantity, "numbers")) {
     num_vars <- grep("(_Num|_Catch_Num)", matched, value = TRUE, ignore.case = TRUE)
@@ -429,11 +437,9 @@ prefer_catch_vars <- function(matched, fish_row, quantity) {
     if (length(catch_fc) > 0) return(catch_fc)
     if (length(fc_match) > 0) return(fc_match)
   }
-  fc_any <- grep("_Catch_FC[0-9]+$", matched, value = TRUE, ignore.case = TRUE)
-  if (length(fc_any) > 0) return(fc_any)
-  coh <- grep("_FC[0-9]+$", matched, value = TRUE, invert = TRUE)
-  if (length(coh) > 0) return(coh)
-  matched
+  tot <- grep("^Tot_.*_Catch$", matched, value = TRUE)
+  if (length(tot) > 0) return(tot)
+  character()
 }
 
 sum_nc_var <- function(nc.data, varname) {
@@ -568,37 +574,8 @@ extract_catch_series <- function(nc.data, nc_vars, grp, fish, time, quantity,
     }
   }
   
-  ## Biomass fallback: if the selected group had no FC variable, try all groups
-  if (length(rows) == 0 && identical(quantity, "biomass") &&
-      !is.null(fg_code) && nrow(grp) > 1) {
-    extra <- grp
-    if ("isimpacted" %in% names(grp)) {
-      extra <- grp[grp$isimpacted == 1, , drop = FALSE]
-      if (nrow(extra) == 0) extra <- grp
-    }
-    extra <- extra[!extra$code %in% used_groups, , drop = FALSE]
-    for (i in seq_len(nrow(extra))) {
-      grp_row <- extra[i, , drop = FALSE]
-      found <- match_catch_vars(nc_vars, grp_row, fish_row, quantity)
-      all_patterns <- c(all_patterns, found$patterns)
-      all_regexes <- c(all_regexes, found$regexes)
-      if (length(found$matched) == 0) next
-      for (vn in found$matched) {
-        vals <- tryCatch(sum_nc_var(nc.data, vn), error = function(e) NULL)
-        if (is.null(vals)) next
-        n <- min(length(vals), length(time))
-        rows[[length(rows) + 1]] <- data.frame(
-          years = time[seq_len(n)],
-          catch = as.numeric(vals[seq_len(n)]),
-          series = series_label_from_var(vn, grp_row),
-          Functional_group = grp_row$code[1],
-          variable = vn,
-          stringsAsFactors = FALSE
-        )
-      }
-    }
-  }
-  
+  ## No fallback to other groups or other fleets: a fleet that does not catch
+  ## the group shows nothing rather than another fleet's catch (D14).
   if (length(rows) == 0) {
     return(catch_empty_result(unique(all_patterns), unique(all_regexes),
                               nc_vars, quantity, fishery_code, fg_code))

@@ -89,7 +89,7 @@ launch_reactiveatlantis()
 | Food web | Interactive network (visNetwork when installed) with a time slider |
 | Recruitment | Beverton–Holt alpha/beta in a side panel; SSB view; observed Recruitment / SSB ribbons |
 | Growth | Light / nutrient / eddy limitation by layer, years on the x-axis |
-| Catch | Stacked catch by group or fleet; observed overlay and skill when a catch CSV is loaded |
+| Catch | **Not validated against a fished run.** Stacked catch by group or fleet (tonnes from `{Code}_Catch_FC{fleet}`, fleet = row in the fisheries CSV, or `Tot_{Code}_Catch`); numbers by age; observed overlay and skill when a catch CSV is loaded |
 | Feeding | pPREY matrix (cells with pPREY > 0 and no gape overlap are flagged); predation-pressure **screening index** (a simplified Holling calculation, not Atlantis intake; the realised intake is shown beside the selected pair); realised diet; diagnostics |
 | Mortality | Fishing, natural and predation mortality stacked per age; predation mortality on a group split by predator (SpecificPredMort.txt: rows are prey, columns predators); Mort.txt F vs M |
 
