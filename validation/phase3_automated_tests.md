@@ -46,3 +46,14 @@ The suite is **green, but it does not validate the science**:
 - The NetCDF fixtures are synthetic: 3 boxes, constant values.
 
 Browser coverage depends on machine-specific Chrome paths, and it found a real P1 (S17) once it was able to run.
+
+## Launch methods on real NESP (run `v8d_t12_5y/c3`, PR #4 installed package, shinytest2 with Chrome 156)
+
+| Method | App ready | Load click to idle | Files resolved | Tools enabled | Result |
+|---|---|---|---|---|---|
+| `config_dir = c3, output_dir = c3/outputs` | 28.6 s | 130.5 s | 18 | 13 of 14 (Catch correctly disabled: NESP has no fishing) | PASS |
+| Blank launch, both folders typed in the sidebar | 25.3 s | 135.2 s | 18 (identical) | identical | PASS (equivalent to the pair) |
+| `project_dir = c3` (run folder) | 39 s | 15.7 s | 5 (no outputs found) | 2 | FAIL (L01) |
+| `project_dir = c3/outputs` (README example) | 54.5 s | 26.3 s | 13 (no groups CSV, no prm) | 1 (Physics) | FAIL (L01) |
+
+These times were measured with estigia at load ~30 from the concurrent Atlantis runs; Phase 7 will repeat them on an idle machine. Every launch logs warning S20. Screenshots are in `evidence/phase3/launch/`.

@@ -1,0 +1,16 @@
+         n  exact
+kind             
+age     73     73
+pool2d  10      0
+pool3d  18     18
+Code   kind      ref_tot   ra_tot  max_abs_rel    ratio_tot    ok
+ BFD pool2d 1.413283e+07 0.000469          1.0 3.319253e-11 False
+ BMD pool2d 2.678204e+05 0.000014          1.0 5.236942e-11 False
+ BMS pool2d 2.452968e+05 0.000042          1.0 1.730381e-10 False
+ BGZ pool2d 1.982845e+06 0.000414          1.0 2.088934e-10 False
+ BFS pool2d 2.215380e+05 0.000051          1.0 2.280133e-10 False
+ BFO pool2d 1.050509e+07 0.002428          1.0 2.310950e-10 False
+  MA pool2d 5.047046e+07 0.012161          1.0 2.409476e-10 False
+  SG pool2d 1.390604e+07 0.004049          1.0 2.911743e-10 False
+ BCR pool2d 5.340305e+04 0.000024          1.0 4.435324e-10 False
+ BFF pool2d 1.895049e+05 0.000167          1.0 8.829406e-10 False
