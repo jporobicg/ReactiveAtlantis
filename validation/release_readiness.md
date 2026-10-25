@@ -14,12 +14,18 @@ The owner asked for the remaining P1 items to be fixed, accepted Catch as "not v
 | S02 tests | Partly fixed: 13 tests now use hand-computed references; most older tests still rely on synthetic fixtures |
 | S25 Scientific Guide reliability | **Open, not accepted.** About 1 in 3 answers contains a false scientific claim. Options: ship it disabled (it is off by default) and documented as experimental, remove it from this release, or improve retrieval and prompts before release |
 
-**Recommendation now: CONDITIONAL GO**, provided the owner:
+**Owner decisions (2026-10-26):**
 
-1. decides the Scientific Guide (S25);
-2. accepts D05's remaining approximation.
+- The Scientific Guide ships **off by default and marked experimental** (S25 accepted as a labelled limitation).
+- Predation pressure is **closed as labelled approximate** (D05 accepted).
 
-S02 remains a test-quality gap, not a correctness defect.
+**Recommendation: CONDITIONAL GO.** The accepted limitations are:
+
+- Catch is not validated;
+- the Scientific Guide is experimental and off by default;
+- expected predation pressure is approximate.
+
+S02 (most older tests use synthetic fixtures) remains a test-quality gap, not a correctness defect.
 
 ---
 
