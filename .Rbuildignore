@@ -1,3 +1,6 @@
 ^.*\.Rproj$
 ^\.Rproj\.user$
 ^inst/ai/corpus$
+^validation$
+^docs$
+^\.travis\.yml$
