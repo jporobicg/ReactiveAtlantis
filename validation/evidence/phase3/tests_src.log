@@ -1,0 +1,50 @@
+ai-assistant: .......................................................................................................................................................................................................................................................
+ai-disabled: ....
+ai-e2e: SS
+ai-installed: ....S
+ai-scientific-guide: .....................................................................................
+e2e-app: SSSSSSS
+north-sea-fixes: .............................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................
+predation-pressure: ..........................................
+process-diagnostics: ..................................................
+
+══ Skipped ═════════════════════════════════════════════════════════════════════
+1. Ask Atlantis button and drawer are absent when disabled ('test-ai-e2e.R:15:3') - Reason: Google Chrome is required for shinytest2
+
+2. Ask Atlantis drawer is closed by default and survives tab switches ('test-ai-e2e.R:39:3') - Reason: Google Chrome is required for shinytest2
+
+3. installed app can download, enable, launch, and open the drawer ('test-ai-installed.R:65:3') - Reason: Google Chrome is required for shinytest2
+
+4. folder load fills every tab with a bound plot or table ('test-e2e-app.R:58:3') - Reason: Google Chrome is required for shinytest2
+
+5. favicon and logo return HTTP 200 ('test-e2e-app.R:255:3') - Reason: Google Chrome is required for shinytest2
+
+6. North Sea real names load COD into every group tab ('test-e2e-app.R:292:3') - Reason: Google Chrome is required for shinytest2
+
+7. messy North Sea folder first Load click fills Catch Mortality Recruitment Spatial ('test-e2e-app.R:408:3') - Reason: Google Chrome is required for shinytest2
+
+8. two-run pair loader and busy indicators are visible ('test-e2e-app.R:466:3') - Reason: Google Chrome is required for shinytest2
+
+9. Spatial map can show two depth layers ('test-e2e-app.R:544:3') - Reason: Google Chrome is required for shinytest2
+
+10. fresh install draws Spatial map and full pPREY for a NESP-style pair ('test-e2e-app.R:600:3') - Reason: Google Chrome is required for shinytest2
+
+══ DONE ════════════════════════════════════════════════════════════════════════
+🐝 Your tests are the bee's knees 🐝
+
+FILES
+                        file  nb failed skipped error
+1        test-ai-assistant.R 247      0       0     0
+2         test-ai-disabled.R   4      0       0     0
+3              test-ai-e2e.R   2      0       2     0
+4        test-ai-installed.R   5      0       1     0
+5 test-ai-scientific-guide.R  85      0       0     0
+6             test-e2e-app.R   7      0       7     0
+7     test-north-sea-fixes.R 653      0       0     0
+8  test-predation-pressure.R  42      0       0     0
+9 test-process-diagnostics.R  50      0       0     0
+TOTAL expectations 1095 failed 0 tests skipped 10 errored 0 
+
+real	2m25.449s
+user	2m30.142s
+sys	0m6.266s

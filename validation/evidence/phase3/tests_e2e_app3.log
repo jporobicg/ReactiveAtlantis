@@ -1,0 +1,29 @@
+ai-e2e: ............1
+e2e-app: .....................................................................................................................................................
+
+══ Failed ══════════════════════════════════════════════════════════════════════
+── 1. Error ('test-ai-e2e.R:73:3'): Ask Atlantis drawer is closed by default and
+Error in `app_wait_for_idle(self, private, duration = duration, timeout = timeout)`: An error occurred while waiting for Shiny to be stable
+Backtrace:
+    ▆
+ 1. └─app$wait_for_idle(timeout = 120000) at test-ai-e2e.R:73:3
+ 2.   └─shinytest2:::app_wait_for_idle(self, private, duration = duration, timeout = timeout)
+ 3.     └─shinytest2:::app_abort(self, private, "An error occurred while waiting for Shiny to be stable")
+ 4.       └─rlang::abort(..., app = self, call = call)
+
+══ DONE ════════════════════════════════════════════════════════════════════════
+Don't worry, you'll get it.
+            file nb failed skipped error    real
+1  test-ai-e2e.R  5      0   FALSE FALSE  28.367
+2  test-ai-e2e.R  7      0   FALSE  TRUE 265.858
+3 test-e2e-app.R 44      0   FALSE FALSE 106.125
+4 test-e2e-app.R 11      0   FALSE FALSE  29.092
+5 test-e2e-app.R 34      0   FALSE FALSE 156.581
+6 test-e2e-app.R 23      0   FALSE FALSE  72.740
+7 test-e2e-app.R 12      0   FALSE FALSE  43.706
+8 test-e2e-app.R  7      0   FALSE FALSE  46.684
+9 test-e2e-app.R 18      0   FALSE FALSE 140.149
+
+real	14m53.933s
+user	22m39.660s
+sys	0m36.517s

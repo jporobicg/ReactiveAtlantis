@@ -1,0 +1,141 @@
+* using log directory ‘/home/diemurgo/whacamole_nesp/ra_audit_data/check/ReactiveAtlantis.Rcheck’
+* using R version 4.5.2 (2025-10-31)
+* using platform: x86_64-pc-linux-gnu
+* R was compiled by
+    gcc (Ubuntu 15.2.0-11ubuntu1) 15.2.0
+    GNU Fortran (Ubuntu 15.2.0-11ubuntu1) 15.2.0
+* running under: Ubuntu 26.04.1 LTS
+* using session charset: UTF-8
+* using options ‘--no-manual --as-cran’
+* checking for file ‘ReactiveAtlantis/DESCRIPTION’ ... OK
+* this is package ‘ReactiveAtlantis’ version ‘0.0.2.0’
+* package encoding: UTF-8
+* checking CRAN incoming feasibility ... [11s/37s] NOTE
+Maintainer: ‘Javier Porobic <jporobicg@gmail.com>’
+
+New submission
+
+Found the following (possibly) invalid URLs:
+  URL: https://github.com/shanearichards/shinyrAtlantis (moved to https://github.com/Atlantis-Ecosystem-Model/shinyrAtlantis)
+    From: man/make.map.Rd
+    Status: 200
+    Message: OK
+
+The Title field should be in title case. Current version is:
+  ‘Multiple Reactive HTML tools to help in the calibration of the Atlantis ecosystem model (AEM)’
+In title case that is:
+  ‘Multiple Reactive HTML Tools to Help in the Calibration of the Atlantis Ecosystem Model (AEM)’
+
+The Description field should not start with the package name,
+  'This package' or similar.
+* checking package namespace information ... OK
+* checking package dependencies ... OK
+* checking if this is a source package ... OK
+* checking if there is a namespace ... OK
+* checking for executable files ... OK
+* checking for hidden files and directories ... NOTE
+Found the following hidden files and directories:
+  .travis.yml
+These were most likely included in error. See section ‘Package
+structure’ in the ‘Writing R Extensions’ manual.
+
+CRAN-pack does not know about
+  .travis.yml
+* checking for portable file names ... OK
+* checking for sufficient/correct file permissions ... OK
+* checking serialization versions ... OK
+* checking whether package ‘ReactiveAtlantis’ can be installed ... [22s/18s] OK
+* checking installed package size ... OK
+* checking package directory ... OK
+* checking for future file timestamps ... OK
+* checking DESCRIPTION meta-information ... OK
+* checking top-level files ... NOTE
+Non-standard file/directory found at top level:
+  ‘docs’
+* checking for left-over files ... OK
+* checking index information ... OK
+* checking package subdirectories ... OK
+* checking code files for non-ASCII characters ... OK
+* checking R files for syntax errors ... OK
+* checking whether the package can be loaded ... OK
+* checking whether the package can be loaded with stated dependencies ... OK
+* checking whether the package can be unloaded cleanly ... OK
+* checking whether the namespace can be loaded with stated dependencies ... OK
+* checking whether the namespace can be unloaded cleanly ... OK
+* checking loading without being on the library search path ... OK
+* checking use of S3 registration ... OK
+* checking dependencies in R code ... NOTE
+Namespaces in Imports field not imported from:
+  ‘bslib’ ‘plotly’ ‘visNetwork’
+  All declared Imports should be used.
+* checking S3 generic/method consistency ... NOTE
+Mismatches for apparent methods not registered:
+plot:
+  function(x, ...)
+plot.catch:
+  function(ctch, Time, ylm, coh, col.bi, bio.n, by.year, external, ...)
+
+plot:
+  function(x, ...)
+plot.tlvl:
+  function(T.lvl, rel.prey, foc.fg, pol, color.p)
+
+plot:
+  function(x, ...)
+plot.age.total:
+  function(total, Time, rn2, sn2, num2, bio2, scl2, limit, right,
+           colors, coh, max.coh)
+See section ‘Registering S3 methods’ in the ‘Writing R Extensions’
+manual.
+* checking replacement functions ... OK
+* checking foreign function calls ... OK
+* checking R code for possible problems ... [38s/21s] OK
+* checking Rd files ... OK
+* checking Rd metadata ... OK
+* checking Rd line widths ... OK
+* checking Rd cross-references ... OK
+* checking for missing documentation entries ... WARNING
+Undocumented code objects:
+  ‘download_atlantis_html_manual’ ‘launch_reactiveatlantis’
+All user-level objects in a package should have documentation entries.
+See chapter ‘Writing R documentation files’ in the ‘Writing R
+Extensions’ manual.
+* checking for code/documentation mismatches ... OK
+* checking Rd \usage sections ... OK
+* checking Rd contents ... OK
+* checking for unstated dependencies in examples ... OK
+* checking examples ... OK
+* checking for unstated dependencies in ‘tests’ ... OK
+* checking tests ...
+  Running ‘testthat.R’
+ ERROR
+Running the tests in ‘tests/testthat.R’ failed.
+Last 13 lines of output:
+      ▆
+   1. └─find_pkg_root() at test-predation-pressure.R:13:1
+  
+  ERROR: 'test-process-diagnostics.R:10:3' ----------
+  Error in `find_pkg_root()`: Cannot find package root
+  Backtrace:
+      ▆
+   1. └─find_pkg_root() at test-process-diagnostics.R:13:1
+  
+  
+  Maximum number of failures exceeded; quitting.
+  ℹ Increase this number with (e.g.) `testthat::set_max_fails(Inf)` 
+  Error:
+  ! Test failures.
+  Execution halted
+* checking for non-standard things in the check directory ... OK
+* checking for detritus in the temp directory ... OK
+* DONE
+
+Status: 1 ERROR, 1 WARNING, 5 NOTEs
+See
+  ‘/home/diemurgo/whacamole_nesp/ra_audit_data/check/ReactiveAtlantis.Rcheck/00check.log’
+for details.
+
+
+real	2m26.548s
+user	2m51.543s
+sys	0m9.161s
