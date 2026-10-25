@@ -15,13 +15,24 @@ Independent audit of ReactiveAtlantis before public release. It covers scientifi
 
 | Phase | Status |
 |---|---|
-| 1 Discovery | **Done (static).** See `feature_inventory.md`, `defects.md` and the risk assessment in `audit_plan.md` |
-| 2 Test design | Drafted: `audit_plan.md`, `test_dataset_manifest.md`, `scientific_reference_matrix.md`. Awaiting approval |
-| 3–10 | Not started. **Blocked:** R and a browser are not installed on estigia (see below) |
+| 1 Discovery | Done. `feature_inventory.md`, `defects.md` |
+| 2 Test design | Done. `audit_plan.md`, `test_dataset_manifest.md`, `scientific_reference_matrix.md` |
+| 3 Automated tests | Done. `phase3_automated_tests.md` |
+| 4 Scientific validation | Done, except catch (no real fished run). `phase4_scientific_validation.md` |
+| 5 Interactive and visual | Done. 35 states at 3 sizes; science and design reviews reconciled. `visual_design/` |
+| 6 Scientific Guide | Done. `ai_guide_validation.md` |
+| 7 Performance | Done, on a loaded machine. `performance_report.md` |
+| 8 Remediation | Awaiting owner decisions on scientific fixes |
+| 9–10 | Not started |
 
-## Environment blocker
+Interim recommendation: **NO-GO** (`release_readiness.md`).
 
-estigia has no R, no Chrome/Chromium and no passwordless sudo, so nothing in this package has been executed yet. Every finding so far comes from reading code and the Atlantis source, or from inspecting real NESP output files with Python netCDF4. A finding is marked **CONFIRMED** only when it was checked against Atlantis source or real output.
+## Environment
+
+- R 4.5.2 and Google Chrome 156, installed system-wide by the owner.
+- CRAN plotly 4.12.1, replacing Ubuntu's broken package (S16).
+- Ollama 0.40.11 with `qwen3.5:4b` and `nomic-embed-text`.
+- Large working data (NetCDF, index, synthetic files) is kept outside the repository, in `~/whacamole_nesp/ra_audit_data/`.
 
 ## Files
 
