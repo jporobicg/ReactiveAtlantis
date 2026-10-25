@@ -254,3 +254,18 @@ test_that("Scientific Guide registry lists the new views", {
   expect_true(grepl("DietCheck", nav$feeding$summary, fixed = TRUE))
   expect_true("overlap" %in% nav$spatial$keywords)
 })
+
+test_that("stock-recruit pairs use the spawning before each recruitment (N7)", {
+  ## Output every 30 days; spawning (SSB change) at day 330 and 690,
+  ## recruitment (YOY change) at day 180 (initial pulse, before any spawning),
+  ## 540 and 900. SSB is 0 until day 330.
+  t <- seq(0, 960, by = 30)
+  ssb <- data.frame(Time = t, FTM = ifelse(t < 330, 0, ifelse(t < 690, 100, 80)))
+  yoy <- data.frame(Time = t, `FTM-0` = ifelse(t < 180, 5, ifelse(t < 540, 50, ifelse(t < 900, 20, 30))),
+                    check.names = FALSE)
+  pr <- recruit_ssb_pairs(yoy, ssb, "FTM")
+  expect_equal(pr$Time, c(540, 900))
+  expect_equal(pr$Recruits, c(20, 30))
+  expect_equal(pr$SSB, c(100, 80))
+  expect_equal(pr$SSB_time, c(330, 690))
+})

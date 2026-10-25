@@ -2375,3 +2375,56 @@ test_that("map hover numbers are plain for ordinary magnitudes (S19)", {
                c("100,005", "7,000", "12.5", "0.01234", "0"))
   expect_equal(ra_fmt_num(1.2e-5), "1.200e-05")
 })
+
+test_that("trophic levels are solved for the whole web (N5)", {
+  ## PL producer; ZS eats PL; FPS eats 50 % ZS, 50 % PL; FTM eats FPS.
+  ## Hand values: PL 1, ZS 2, FPS 1 + 0.5*2 + 0.5*1 = 2.5, FTM 3.5.
+  diet <- data.frame(Time = 30, Predator = c("ZS", "FPS", "FTM"),
+                     PL = c(1, 0.5, 0), ZS = c(0, 0.5, 0), FPS = c(0, 0, 1), FTM = 0)
+  tl <- solve_trophic_levels(diet)
+  expect_equal(unname(tl[c("PL", "ZS", "FPS", "FTM")]), c(1, 2, 2.5, 3.5))
+  ## A cohort table (two rows per predator) gives the same answer.
+  diet2 <- rbind(diet, data.frame(Time = 30, Predator = "FPS", PL = 0.5, ZS = 0.5, FPS = 0, FTM = 0))
+  expect_equal(unname(solve_trophic_levels(diet2)["FPS"]), 2.5)
+})
+
+test_that("missing BGM is reported on Compare instead of silently (D17)", {
+  fx <- northsea_fixture_dir()
+  skip_if_not(dir.exists(fx))
+  det <- detect_run_pair(fx, fx)
+  paths <- det$paths
+  rv <- shiny::reactiveValues(state = list(paths = paths, ready = TRUE, data = list()))
+  expect_null(shiny::isolate(tool_banner(rv, "compare")))
+  paths$bgm <- NA_character_
+  rv2 <- shiny::reactiveValues(state = list(paths = paths, ready = TRUE, data = list()))
+  b <- shiny::isolate(tool_banner(rv2, "compare"))
+  expect_true(grepl("No BGM geometry", as.character(b)))
+  expect_true(isTRUE(dummy_inf_box(3, 2)$dummy))
+})
+
+test_that("concentrations are volume-weighted, not summed or plain means (D18)", {
+  tmp <- tempfile(fileext = ".nc")
+  dz <- ncdf4::ncdim_def("z", "", 1:3); db <- ncdf4::ncdim_def("b", "", 1:2)
+  dt <- ncdf4::ncdim_def("t", "seconds since 2000-01-01", c(0, 86400))
+  v <- list(ncdf4::ncvar_def("Temp", "degC", list(dz, db, dt)),
+            ncdf4::ncvar_def("volume", "m3", list(dz, db, dt)),
+            ncdf4::ncvar_def("numlayers", "", list(db)))
+  nc <- ncdf4::nc_create(tmp, v)
+  ## z: 1 deep water, 2 surface water, 3 sediment (Atlantis order)
+  ncdf4::ncvar_put(nc, "Temp", array(rep(c(10, 20, 99,  14, 14, 99), 2), c(3, 2, 2)))
+  ncdf4::ncvar_put(nc, "volume", array(rep(c(100, 300, 1,  50, 50, 1), 2), c(3, 2, 2)))
+  ncdf4::ncvar_put(nc, "numlayers", c(2, 2))
+  ncdf4::nc_close(nc)
+  nc <- ncdf4::nc_open(tmp); on.exit(ncdf4::nc_close(nc), add = TRUE)
+  ra_cache_clear()
+  info <- atlantis_layer_info(nc)
+  integ <- tracer_by_box_layer(nc, "Temp", "integrated", info)
+  ## box 0: (10*100 + 20*300) / 400 = 17.5 (sediment excluded); box 1: 14
+  expect_equal(integ$Value[integ$Time == 1], c(17.5, 14))
+  ## whole system: volume-weighted over boxes = (17.5*400 + 14*100) / 500 = 16.8
+  w <- nc_box_water_volume(nc, info)
+  sys <- spatial_ts_values(integ, scope = "system", weights = w)
+  expect_equal(sys$Value, c(16.8, 16.8))
+  expect_equal(ra_weighted_mean(c(1, NA, 3), c(1, 1, 3)), 2.5)
+  ra_cache_clear()
+})

@@ -263,6 +263,49 @@ find_ssb_column <- function(ssb, code) {
 }
 
 ##' Join YOY recruits with SSB for one age-structured group.
+## Times at which a held series changes value (Atlantis writes YOY.txt and
+## SSB.txt every output step but updates them once per event).
+series_events <- function(time, value) {
+  ok <- is.finite(time) & is.finite(value)
+  time <- time[ok]; value <- value[ok]
+  if (!length(value)) return(integer())
+  ch <- c(TRUE, abs(diff(value)) > 1e-12 * pmax(1, abs(value[-1])))
+  which(ch)
+}
+
+##' Stock-recruit pairs: each recruitment (a change in YOY.txt) paired with
+##' the latest spawning stock (a change in SSB.txt) before it. Recruitments
+##' before any spawning in the run (the initial-year pulse) and SSB = 0 rows
+##' are dropped (validation N7: recruits were paired with SSB at the same
+##' output time, including SSB = 0 artefacts).
+recruit_ssb_pairs <- function(yoy, ssb, code) {
+  base <- join_recruits_ssb(yoy, ssb, code)
+  empty <- data.frame(Time = numeric(), Recruits = numeric(), SSB = numeric(),
+                      SSB_time = numeric(), stringsAsFactors = FALSE)
+  if (!nrow(base)) { attributes(empty)$reason <- attr(base, "reason"); return(empty) }
+  ycol <- unique(base$yoy_column)[1]; scol <- unique(base$ssb_column)[1]
+  yt <- if ("Time" %in% names(yoy)) as.numeric(yoy$Time) else seq_len(nrow(yoy)) - 1
+  st <- if ("Time" %in% names(ssb)) as.numeric(ssb$Time) else seq_len(nrow(ssb)) - 1
+  rec <- as.numeric(yoy[[ycol]]); sp <- as.numeric(ssb[[scol]])
+  ye <- series_events(yt, rec)
+  se <- series_events(st, sp)
+  se <- se[is.finite(sp[se]) & sp[se] > 0]
+  rows <- lapply(ye, function(i) {
+    prior <- se[st[se] < yt[i]]
+    if (!length(prior)) return(NULL)
+    j <- prior[length(prior)]
+    data.frame(Time = yt[i], Recruits = rec[i], SSB = sp[j], SSB_time = st[j])
+  })
+  rows <- rows[!vapply(rows, is.null, logical(1))]
+  if (!length(rows)) {
+    attr(empty, "reason") <- paste("No recruitment after a spawning with SSB > 0 for", code, ".")
+    return(empty)
+  }
+  out <- do.call(rbind, rows)
+  out$yoy_column <- ycol; out$ssb_column <- scol
+  out
+}
+
 join_recruits_ssb <- function(yoy, ssb, code) {
   empty <- data.frame(
     Time = numeric(), Recruits = numeric(), SSB = numeric(),

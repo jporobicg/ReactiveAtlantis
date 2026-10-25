@@ -90,7 +90,7 @@ foodweb_server <- function(id, project = NULL) {
         grp$Code <- grp$code
         grp$GroupType <- grp$grouptype
       }
-      trophic.lvl(prey_data(), grp)
+      trophic.lvl(prey_data(), grp, diet = time_prey_data())
     })
 
     output$network <- if (requireNamespace("visNetwork", quietly = TRUE)) {
@@ -226,38 +226,70 @@ tot.prey <- function(foc.fg, connect, Fg.code, real.pred, min, grp.dat){
   }
 }
 
-trophic.lvl <- function(rel.prey, grp.dat){
-  npred <- unique(rel.prey$Pred)
-  TL <- NULL
-  for(pred in npred){
-    pospred <- which(rel.prey$Pred %in% pred)
-    TL <- c(TL, Tlevel(rel.prey$value[pospred], rel.prey$TLprey[pospred]))
+##' Trophic levels solved for the whole food web from a diet table.
+##'
+##' TL = 1 for groups that eat nothing (primary producers, detritus,
+##' bacteria without diet rows); for consumers TL_i = 1 + sum_j p_ij TL_j,
+##' with p_ij the diet proportions of predator i (rows normalised to 1).
+##' Solved as the linear system (I - P) TL = 1 (validation N5: producers
+##' were hard-coded at 1.5 / 1.2 and the system was never solved).
+##' @param diet data.frame with a Predator column and one column per prey
+##' @return named numeric vector of trophic levels
+solve_trophic_levels <- function(diet) {
+  if (is.null(diet) || !nrow(diet) || !"Predator" %in% names(diet)) return(NULL)
+  prey_cols <- setdiff(names(diet), c("Time", "Predator", "Stock", "Cohort", "Updated"))
+  agg <- stats::aggregate(as.data.frame(diet)[, prey_cols, drop = FALSE],
+                          by = list(Predator = as.character(diet$Predator)),
+                          FUN = function(x) sum(as.numeric(x), na.rm = TRUE))
+  fgs <- union(as.character(agg$Predator), prey_cols)
+  n <- length(fgs)
+  P <- matrix(0, n, n, dimnames = list(fgs, fgs))
+  for (i in seq_len(nrow(agg))) {
+    row <- as.numeric(agg[i, prey_cols])
+    tot <- sum(row, na.rm = TRUE)
+    if (is.finite(tot) && tot > 0) P[agg$Predator[i], prey_cols] <- row / tot
   }
-  left <- rel.prey$Prey[-which(rel.prey$Prey %in% npred)]
-  pp.prey <- unique(left)
-  pp.prey <- data.frame(FG = pp.prey, Tlevel = prey.pos(pp.prey, grp.dat))
-  TL <- data.frame(FG = npred, Tlevel = TL)
-  TL <- rbind(TL, pp.prey)
+  A <- diag(n) - P
+  tl <- tryCatch(solve(A, rep(1, n)), error = function(e) NULL)
+  if (is.null(tl) || any(!is.finite(tl))) {
+    ## Fall back to fixed-point iteration (e.g. a closed cannibalism loop).
+    tl <- rep(1, n)
+    for (k in 1:500) {
+      new <- 1 + as.numeric(P %*% tl)
+      if (max(abs(new - tl)) < 1e-9) { tl <- new; break }
+      tl <- new
+    }
+  }
+  stats::setNames(as.numeric(tl), fgs)
+}
+
+trophic.lvl <- function(rel.prey, grp.dat, diet = NULL){
+  solved <- solve_trophic_levels(diet)
+  fgs <- unique(c(as.character(rel.prey$Pred), as.character(rel.prey$Prey)))
+  if (!is.null(solved)) {
+    tl <- unname(solved[fgs])
+    tl[!is.finite(tl)] <- 1
+    TL <- data.frame(FG = fgs, Tlevel = tl)
+    prey.f <- as.data.frame(rel.prey)
+    prey.f$TLprey <- unname(solved[as.character(prey.f$Prey)])
+    prey.f$TLprey[!is.finite(prey.f$TLprey)] <- 1
+  } else {
+    ## No diet table: previous approximation from group types.
+    npred <- unique(rel.prey$Pred)
+    TL <- NULL
+    for(pred in npred){
+      pospred <- which(rel.prey$Pred %in% pred)
+      TL <- c(TL, Tlevel(rel.prey$value[pospred], rel.prey$TLprey[pospred]))
+    }
+    left <- rel.prey$Prey[!rel.prey$Prey %in% npred]
+    pp.prey <- unique(left)
+    pp.prey <- data.frame(FG = pp.prey, Tlevel = prey.pos(pp.prey, grp.dat))
+    TL <- rbind(data.frame(FG = npred, Tlevel = TL), pp.prey)
+    prey.f <- as.data.frame(rel.prey)
+  }
   
-  prey.f <- as.data.frame(rel.prey)
-  for(fg in 1:nrow(TL)){
-    pntl <- which(prey.f$Prey %in% TL$FG[fg])
-    if(length(pntl) == 0) next
-    prey.f$TLprey[pntl] <- TL$Tlevel[fg]
-  }
-  npred <- unique(prey.f$Pred)
-  TL <- NULL
-  for(pred in npred){
-    pospred <- which(prey.f$Pred %in% pred)
-    TL <- c(TL, Tlevel(prey.f$value[pospred], prey.f$TLprey[pospred]))
-  }
-  left <- prey.f$Prey[-which(prey.f$Prey %in% npred)]
-  pp.prey <- unique(left)
-  pp.prey <- data.frame(FG = pp.prey, Tlevel = prey.pos(pp.prey, grp.dat))
-  TL <- data.frame(FG = npred, Tlevel = TL)
-  TL <- rbind(TL, pp.prey)
-  
-  his <- hist(TL$Tlevel, breaks = c(0.5:6.5), plot = FALSE)
+  top <- max(6.5, ceiling(max(TL$Tlevel, na.rm = TRUE)) + 0.5)
+  his <- hist(TL$Tlevel, breaks = seq(0.5, top, by = 1), plot = FALSE)
   v.lev <- max(his$counts)
   brk <- his$breaks
   h.lev <- max(his$mids[his$counts > 0]) + 1

@@ -73,7 +73,16 @@ physics_server <- function(id, project = NULL) {
         if (length(keep)) df$LayerLab <- factor(as.character(df$LayerLab), levels = keep)
       }
       if (isTRUE(input$all_boxes)) {
-        df <- stats::aggregate(Value ~ Date + LayerLab, data = df, mean, na.rm = TRUE)
+        ## Volume-weighted mean across boxes for each layer (validation D18).
+        if ("Vol" %in% names(df) && any(is.finite(df$Vol) & df$Vol > 0)) {
+          key <- interaction(df$Date, df$LayerLab, drop = TRUE)
+          sp <- split(df, key)
+          df <- do.call(rbind, lapply(sp, function(x) data.frame(
+            Date = x$Date[1], LayerLab = x$LayerLab[1],
+            Value = ra_weighted_mean(x$Value, x$Vol))))
+        } else {
+          df <- stats::aggregate(Value ~ Date + LayerLab, data = df, mean, na.rm = TRUE)
+        }
       }
       p <- ggplot2::ggplot(df, ggplot2::aes(x = Date, y = Value, colour = LayerLab))
       p <- p + ggplot2::geom_line(linewidth = 0.8, na.rm = TRUE)

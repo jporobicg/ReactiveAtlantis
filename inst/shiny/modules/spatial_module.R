@@ -389,8 +389,11 @@ spatial_server <- function(id, project = NULL) {
         scope <- if (is.null(input$ts_scope)) "box" else input$ts_scope
         box <- as.integer(input$box)[1]
         if (!is.finite(box)) box <- 0L
+        w <- if (identical(input$kind, "tracer") && identical(input$view, "map")) {
+          tryCatch(nc_box_water_volume(dat$nc_out), error = function(e) NULL)
+        } else NULL
         df <- spatial_ts_values(vals, scope = scope, box = box,
-                                boxes = unique(vals$Box))
+                                boxes = unique(vals$Box), weights = w)
         ylab <- if (identical(input$view, "overlap")) "Overlap"
         else if (identical(input$kind, "biomass")) "Biomass (t)"
         else if (identical(input$kind, "numbers")) "Numbers"

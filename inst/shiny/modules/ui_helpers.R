@@ -153,7 +153,7 @@ dummy_inf_box <- function(n_box = 1, n_z = 2) {
     stringsAsFactors = FALSE
   )
   vol <- matrix(1, nrow = n_z, ncol = n_box)
-  list(info = info, Vol = vol, VolInf = vol)
+  list(info = info, Vol = vol, VolInf = vol, dummy = TRUE)
 }
 
 tool_banner <- function(project, tool) {
@@ -165,5 +165,16 @@ tool_banner <- function(project, tool) {
   }
   miss <- tool_missing(snap$paths, tool, snap)
   if (length(miss)) return(tool_missing_card(miss, tool))
+  ## Without a BGM the app cannot tell boundary boxes apart (validation D17):
+  ## say so where totals or maps depend on it, instead of failing silently.
+  if (tool %in% c("compare", "ages", "physics", "overview") &&
+      !path_ok(snap$paths$bgm)) {
+    return(shiny::div(
+      class = "alert alert-warning", role = "alert",
+      shiny::strong("No BGM geometry found. "),
+      "Boundary boxes cannot be identified, so system totals here include them",
+      " and will not match BiomIndx.txt. Add the .bgm file to the configuration folder."
+    ))
+  }
   NULL
 }

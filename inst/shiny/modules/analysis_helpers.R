@@ -214,9 +214,18 @@ problem_cohorts <- function(nc, grp, band = ACCEPT_BAND) {
         if (!vn %in% vars) next
         ends <- tryCatch(nc_get_time_ends(nc, vn), error = function(e) NULL)
         if (is.null(ends) || is.null(ends$first) || is.null(ends$last)) next
-        first <- mean(as.numeric(ends$first), na.rm = TRUE)
-        last <- mean(as.numeric(ends$last), na.rm = TRUE)
-        ratio <- last / pmax(first, 1e-12)
+        ## Numbers-weighted mean over cells: empty, padded and sediment cells
+        ## carry no individuals (validation D18).
+        n_var <- paste0(age$name[i], coh, "_Nums")
+        nends <- if (n_var %in% vars) tryCatch(nc_get_time_ends(nc, n_var), error = function(e) NULL) else NULL
+        if (!is.null(nends) && length(nends$first) == length(ends$first)) {
+          first <- ra_weighted_mean(as.numeric(ends$first), as.numeric(nends$first))
+          last <- ra_weighted_mean(as.numeric(ends$last), as.numeric(nends$last))
+        } else {
+          first <- mean(as.numeric(ends$first)[as.numeric(ends$first) > 0], na.rm = TRUE)
+          last <- mean(as.numeric(ends$last)[as.numeric(ends$last) > 0], na.rm = TRUE)
+        }
+        ratio <- if (is.finite(first) && first > 0) last / first else NA_real_
         flag <- if (!is.finite(ratio)) {
           "No data"
         } else if (ratio < lo || ratio > hi) {
@@ -795,10 +804,21 @@ tracer_by_box_layer <- function(nc, varname, layer_key = "integrated", info = NU
     } else {
       sl <- arr
     }
-    acc <- apply(sl, c(2, 3), function(x) {
-      x <- x[is.finite(x)]
-      if (!length(x)) NA_real_ else mean(x)
-    })
+    vol <- if (identical(layer_key, "integrated")) tryCatch(nc_volume(nc), error = function(e) NULL) else NULL
+    if (!is.null(vol) && length(dim(vol)) == 3 && all(dim(vol) == dim(sl))) {
+      ## Integrated concentration = volume-weighted mean over water cells;
+      ## sediment is a different medium and is excluded (validation D18).
+      if (!is.null(info) && isTRUE(info$has_sediment)) vol[info$n_z, , ] <- 0
+      acc <- matrix(NA_real_, dim(sl)[2], dim(sl)[3])
+      for (b in seq_len(dim(sl)[2])) for (t in seq_len(dim(sl)[3])) {
+        acc[b, t] <- ra_weighted_mean(sl[, b, t], vol[, b, t])
+      }
+    } else {
+      acc <- apply(sl, c(2, 3), function(x) {
+        x <- x[is.finite(x)]
+        if (!length(x)) NA_real_ else mean(x)
+      })
+    }
     n_b <- nrow(acc); n_t <- ncol(acc)
     return(data.frame(
       Time = rep(seq_len(n_t), each = n_b),
@@ -840,6 +860,22 @@ numbers_by_box_layer <- function(nc, grp, fg_code, layer_key = "integrated",
   )
 }
 
+## Weighted mean ignoring non-finite values and non-positive weights.
+ra_weighted_mean <- function(x, w) {
+  ok <- is.finite(x) & is.finite(w) & w > 0
+  if (!any(ok)) return(NA_real_)
+  sum(x[ok] * w[ok]) / sum(w[ok])
+}
+
+##' Water-column volume per box and time [b, t] (m3), sediment excluded.
+nc_box_water_volume <- function(nc, info = NULL) {
+  vol <- tryCatch(nc_volume(nc), error = function(e) NULL)
+  if (is.null(vol) || length(dim(vol)) != 3) return(NULL)
+  if (is.null(info)) info <- tryCatch(atlantis_layer_info(nc), error = function(e) NULL)
+  if (!is.null(info) && isTRUE(info$has_sediment)) vol[info$n_z, , ] <- 0
+  apply(vol, c(2, 3), sum, na.rm = TRUE)
+}
+
 ##' Box-level series for the Spatial map / time series.
 spatial_box_values <- function(nc, grp, kind = "biomass", fg_code = NULL,
                                tracer = NULL, layer_key = "integrated",
@@ -858,9 +894,23 @@ spatial_box_values <- function(nc, grp, kind = "biomass", fg_code = NULL,
              Variable = "Biomass", stringsAsFactors = FALSE)
 }
 
-spatial_ts_values <- function(values, scope = "box", box = 0L, boxes = NULL) {
+spatial_ts_values <- function(values, scope = "box", box = 0L, boxes = NULL,
+                              weights = NULL) {
   if (is.null(values) || nrow(values) == 0) return(values)
   scope <- as.character(scope)[1]
+  if (identical(scope, "system") && !is.null(weights)) {
+    ## Concentrations are intensive: whole-system value is the volume-weighted
+    ## mean over boxes, not the sum (validation D18). weights is [b, t].
+    w <- weights[cbind(as.integer(values$Box) + 1L, as.integer(values$Time))]
+    tt <- sort(unique(values$Time))
+    agg <- data.frame(Time = tt, Value = vapply(tt, function(t) {
+      k <- values$Time == t
+      ra_weighted_mean(values$Value[k], w[k])
+    }, numeric(1)))
+    agg$Box <- -1L
+    agg$Variable <- values$Variable[1]
+    return(agg)
+  }
   if (identical(scope, "system")) {
     agg <- stats::aggregate(Value ~ Time, data = values, sum, na.rm = TRUE)
     agg$Box <- -1L
@@ -1660,6 +1710,7 @@ physics_long <- function(nc, varname, box = NULL, info = NULL, inf_box = NULL) {
     n_z <- d[1]
     n_b <- d[2]
     n_t <- d[3]
+    vol3 <- tryCatch(nc_volume(nc), error = function(e) NULL)
     boxes <- if (is.null(box)) seq_len(n_b) - 1L else as.integer(box)
     rows <- list()
     for (b in boxes) {
@@ -1672,6 +1723,7 @@ physics_long <- function(nc, varname, box = NULL, info = NULL, inf_box = NULL) {
         rows[[length(rows) + 1]] <- data.frame(
           Time = seq_len(n_t), Layer = z - 1L, Box = b,
           Value = as.numeric(arr[z, b1, ]),
+          Vol = if (!is.null(vol3) && all(dim(vol3) == d)) as.numeric(vol3[z, b1, ]) else NA_real_,
           LayerLab = lab_for(z),
           stringsAsFactors = FALSE
         )

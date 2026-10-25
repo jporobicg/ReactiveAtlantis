@@ -87,6 +87,10 @@ compare <- function(nc.out.current, nc.out.old = NULL, grp.csv, bgm.file, cum.de
     grp     <- utils::read.csv(grp.csv)
     inf.box <- boxes.prop(bgm.file,  cum.depths)
     nc.cur  <- ncdf4::nc_open(nc.out.current)
+    on.exit(ncdf4::nc_close(nc.cur), add = TRUE)
+    ## Cell volumes and box areas from the NetCDF itself: boxes.prop()
+    ## volumes did not match Atlantis (validation D19).
+    inf.box <- .nc_geometry_into(inf.box, nc.cur)
     ## Time Vector
     Time <- time_calc(nc.cur)
     if(!is.null(nc.out.old)){
@@ -387,7 +391,6 @@ bio.pool <- function(pol.grp, nc.out, ctg, mg2t, x.cn, box.info, Time){
             biom <- apply(biom, 2, sum, na.rm = TRUE)
         }
         biom    <- biom * mg2t * x.cn
-        biom[1] <- biom[2]
         grp.bio <- rbind(grp.bio, data.frame(Time = Time, FG = paste0(as.character(pol.grp$longname[pool]), ' (', as.character(pol.grp$code[pool]), ')'), Biomass  = biom, Simulation = ctg))
     }
     return(grp.bio)
@@ -494,6 +497,29 @@ boxes.prop <- function(bgm.file, depths){
 ##' @param polnum number by polygons
 ##' @return List witht he weight (reserve and structural), total biomass (tons) and number
 ##' @author Demiurgo
+##' Replace boxes.prop() volumes and areas by the NetCDF geometry
+##' (volume [z, b] at the first time step; area = volume / dz of the sediment
+##' layer, dz = 1 m). The result keeps the boxes.prop() orientation.
+##' @param inf.box output of boxes.prop()
+##' @param nc.out open ncdf4 handle
+##' @return inf.box with Vol, VolInf and info$Area from the NetCDF
+.nc_geometry_into <- function(inf.box, nc.out) {
+    vars <- names(nc.out$var)
+    if (!all(c("volume", "dz") %in% vars)) return(inf.box)
+    vol <- ncdf4::ncvar_get(nc.out, "volume", start = c(1, 1, 1), count = c(-1, -1, 1))
+    dz  <- ncdf4::ncvar_get(nc.out, "dz", start = c(1, 1, 1), count = c(-1, -1, 1))
+    if (length(dim(vol)) != 2 || !all(dim(vol) == dim(dz))) return(inf.box)
+    area <- ifelse(is.finite(dz[nrow(dz), ]) & dz[nrow(dz), ] > 0,
+                   vol[nrow(vol), ] / dz[nrow(dz), ], NA_real_)
+    area[!is.finite(area)] <- 0
+    if (!is.null(inf.box$Vol) && all(dim(inf.box$Vol) == dim(vol))) {
+        inf.box$Vol    <- vol
+        inf.box$VolInf <- vol
+    }
+    if (length(inf.box$info$Area) == length(area)) inf.box$info$Area <- area
+    inf.box
+}
+
 nitro.weight <- function(nc.out, grp, FG, By = 'Total', box.info, mg2t, x.cn, polnum = NULL){
     ## Age classes
     pos.fg <- which(grp$code == FG)
@@ -557,7 +583,7 @@ nitro.weight <- function(nc.out, grp, FG, By = 'Total', box.info, mg2t, x.cn, po
                 biom <- apply(biom, 2, sum, na.rm = TRUE)
             }
         }
-        Bio <- biom
+        Bio <- biom * mg2t * x.cn   ## mg N -> tonnes (validation D31)
         type <- 'BioPool'
     } else if(grp[pos.fg, 'numcohorts'] > 1 & grp[pos.fg, 'grouptype']  %in% c('PWN', 'PRAWNS', 'PRAWN', 'CEP', 'MOB_EP_OTHER', 'SEAGRASS', 'CORAL', 'MANGROVE', 'MANGROVES', 'SPONGE')){
         ## Some model use Agestructured biomass pools
@@ -573,7 +599,7 @@ nitro.weight <- function(nc.out, grp, FG, By = 'Total', box.info, mg2t, x.cn, po
             if(By == 'Total'){
                 biom <- apply(biom, 2, sum, na.rm = TRUE)
             }
-            Bio[[coh]] <- biom
+            Bio[[coh]] <- biom * mg2t * x.cn
         }
         if(By ==  'Total'){
             Bio <- rowSums(matrix(unlist(Bio), ncol = n.coh))

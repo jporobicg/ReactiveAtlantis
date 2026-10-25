@@ -177,12 +177,26 @@ recruitment_server <- function(id, project = NULL) {
         )
       }
       df <- do.call(rbind, rows)
-      pal <- c(`Atlantis YOY` = "#0B3C5D", Larvae = "#A33B20",
-               `New larvae` = "#1D7874", `New YOY` = "#C4A35A")
-      p <- ggplot2::ggplot(df, ggplot2::aes(x = Time, y = Value, colour = Series))
-      p <- p + ggplot2::geom_line(linewidth = 0.9, na.rm = TRUE)
-      p <- p + ggplot2::geom_point(size = 1.6, na.rm = TRUE)
+      ## Expectations are drawn first and dashed; Atlantis output is drawn last
+      ## so it is never hidden (validation N6). "Larvae" is the Beverton-Holt
+      ## expectation from the run's spawn.
+      df$Series[df$Series == "Larvae"] <- "Beverton-Holt expected"
+      df$Series[df$Series == "New larvae"] <- "Beverton-Holt, new alpha/beta"
+      df$Series[df$Series == "New YOY"] <- "YOY scaled to new alpha/beta"
+      lev <- c("Beverton-Holt expected", "Beverton-Holt, new alpha/beta",
+               "YOY scaled to new alpha/beta", "Atlantis YOY")
+      df$Series <- factor(df$Series, levels = lev[lev %in% df$Series])
+      df <- df[order(df$Series), ]
+      pal <- c(`Atlantis YOY` = "#0B3C5D", `Beverton-Holt expected` = "#A33B20",
+               `Beverton-Holt, new alpha/beta` = "#1D7874", `YOY scaled to new alpha/beta` = "#C4A35A")
+      lt <- c(`Atlantis YOY` = "solid", `Beverton-Holt expected` = "dashed",
+              `Beverton-Holt, new alpha/beta` = "dashed", `YOY scaled to new alpha/beta` = "dotted")
+      p <- ggplot2::ggplot(df, ggplot2::aes(x = Time, y = Value, colour = Series, linetype = Series))
+      p <- p + ggplot2::geom_line(ggplot2::aes(linewidth = Series == "Atlantis YOY"), na.rm = TRUE)
+      p <- p + ggplot2::scale_linewidth_manual(values = c(`FALSE` = 0.7, `TRUE` = 1.2), guide = "none")
+      p <- p + ggplot2::geom_point(data = df[df$Series == "Atlantis YOY", ], size = 1.6, na.rm = TRUE)
       p <- p + ggplot2::scale_color_manual(values = pal)
+      p <- p + ggplot2::scale_linetype_manual(values = lt)
       p <- p + ggplot2::labs(
         title = paste("YOY and larvae —", fg_yoy_d()),
         subtitle = paste("YOY column", yoy$column, "·", length(yoy$original), "time steps"),
@@ -289,7 +303,8 @@ recruitment_server <- function(id, project = NULL) {
 
     output$plot_sr_scatter <- renderPlot({
       plot_or_message("Load YOY.txt and SSB.txt to plot the stock-recruit scatter", {
-        df <- sr_table()
+        dat <- ps()$data
+        df <- recruit_ssb_pairs(dat$yoy, dat$ssb, fg_yoy_d())
         if (is.null(df) || nrow(df) == 0) {
           plot_message(attr(df, "reason") %||%
                          "Load YOY.txt and SSB.txt to plot the stock-recruit scatter")
@@ -308,7 +323,8 @@ recruitment_server <- function(id, project = NULL) {
                                                })
         p <- p + ggplot2::labs(
           title = paste("Recruits vs spawning stock —", fg_yoy_d()),
-          x = "SSB", y = "Recruits (YOY.txt)"
+          subtitle = "Each recruitment paired with the latest spawning stock before it",
+          x = "SSB at the preceding spawning (SSB.txt)", y = "Recruits (YOY.txt)"
         )
         p + theme_reactiveatlantis()
       })
@@ -478,7 +494,9 @@ recruitment_overlay <- function(yoy, spawn_ssb, alpha0, beta0, alpha_n, beta_n,
       unlist(BH.rec(spawn_ssb$spawn, alpha0, beta0, spawn_ssb$ssb, spawn_ssb$ver)),
       rec_row
     )
-    if (is.finite(alpha_n) && is.finite(beta_n)) {
+    edited <- is.finite(alpha_n) && is.finite(beta_n) &&
+      !(isTRUE(all.equal(alpha_n, alpha0)) && isTRUE(all.equal(beta_n, beta0)))
+    if (edited) {
       bh_new <- larvae_to_yoy_units(
         unlist(BH.rec(spawn_ssb$spawn, alpha_n, beta_n, spawn_ssb$ssb, spawn_ssb$ver)),
         rec_row
