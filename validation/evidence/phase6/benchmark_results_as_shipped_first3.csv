@@ -1,0 +1,8 @@
+"id","cat","seconds","must_hit","must_n","must_not_hit","pass","mode","n_citations","nav","citations","answer"
+"F01","fact",93.3,0,1,0,FALSE,"",0,"Feeding","","I could not reach the local language model. Failed to perform HTTP request. Existing calibration tools are unaffected."
+"F02","fact",90.9,0,2,0,FALSE,"",0,"Feeding, Overview, Compare, Physics, Recruitment, Mortality","","I could not reach the local language model. Failed to perform HTTP request. Existing calibration tools are unaffected."
+"F03","fact",90.2,0,1,0,FALSE,"",0,"Feeding, Overview, Compare, Physics, Recruitment, Mortality","","I could not reach the local language model. Failed to perform HTTP request. Existing calibration tools are unaffected."
+"F04","fact",90.2,0,2,0,FALSE,"",0,"Predation, Feeding, Overview, Compare, Consumption, Physics","","I could not reach the local language model. Failed to perform HTTP request. Existing calibration tools are unaffected."
+"F05","fact",90.2,0,3,0,FALSE,"",0,"Predation, Feeding, Overview, Compare, Consumption, Physics","","I could not reach the local language model. Failed to perform HTTP request. Existing calibration tools are unaffected."
+"F06","fact",90.2,0,2,0,FALSE,"",0,"Consumption, Predation, Feeding, Overview, Compare, Spatial","","I could not reach the local language model. Failed to perform HTTP request. Existing calibration tools are unaffected."
+"F07","fact",90.4,0,2,0,FALSE,"",0,"Feeding","","I could not reach the local language model. Failed to perform HTTP request. Existing calibration tools are unaffected."
