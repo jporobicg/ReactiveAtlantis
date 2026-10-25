@@ -33,6 +33,10 @@ Independent audit of ReactiveAtlantis before public release. It covers scientifi
 - Ollama 0.40.11 with `qwen3.5:4b` and `nomic-embed-text`.
 - Large working data (NetCDF, index, synthetic files) is kept outside the repository, in `~/whacamole_nesp/ra_audit_data/`.
 
+## Screenshots
+
+The screenshots referenced in these reports, under `visual_design/screenshots/` and `evidence/phase3/launch/` (105 PNG, 26 MB), are **not in the repository**. They are kept on the audit machine in `~/whacamole_nesp/ra_audit_data/screenshots/` with the same subfolders. Their timing and app-log files are in `evidence/screenshot_runs/`.
+
 ## Files
 
 - `audit_plan.md`: scope, phases, acceptance criteria, Phase 1 risk assessment

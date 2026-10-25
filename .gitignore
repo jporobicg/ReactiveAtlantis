@@ -4,3 +4,6 @@
 
 # CSIRO Atlantis user-guide PDFs (copyright CSIRO; download locally, never commit)
 inst/ai/corpus/
+# Screenshots stay on the audit machine (~/whacamole_nesp/ra_audit_data/screenshots)
+validation/visual_design/screenshots/
+validation/evidence/phase3/launch/
