@@ -828,16 +828,15 @@ pressure_vs_dietcheck <- function(press, diet, pred, prey) {
 
 pressure_equation_note <- function() {
   paste(
-    "Expected predation pressure is the implied prey-biomass loss rate",
-    "from the Atlantis feeding equations, not a DietCheck proportion.",
-    "Availability: B* = pPREY x prey concentration x gape (KLP/KUP knife-edge)",
-    "x spatial overlap (same box). Type II (predcase 0):",
-    "I = C A / (1 + C/mum x sum(E B*)), then Gr = I x predator scale x (B*_j / A).",
-    "Gr is the predation-mortality flux on the prey (mg N d-1, reported as t/day).",
-    "Biomass may come from init.nc or output.nc at a chosen time step.",
-    "Cited: User Guide Part I §10.2, §10.2.2, Table 18, §10.2.5;",
-    "atecology/atbiology.c box_bio_process; Murray and Parslow 1997.",
-    "KDENR is recruitment in the current manuals and is not used here."
+    "Expected consumption from the Atlantis feeding equations at the selected time:",
+    "each predator cohort in each water cell clears C / (1 + C sum(E a) / mum)",
+    "per unit predator (capped at mum / E with flag_satiation), where",
+    "a = pPREY x prey density x size window (hard, humped or bi-logistic as in",
+    "the run's prm). Rates are per individual (flagfishrates 0) or per mg N.",
+    "Prey loss is consumption / prey biomass in the selected boxes.",
+    "Not included: Q10, habitat refuge, pSTOCK; output snapshots miss",
+    "day-night vertical movement. Source: atprocess.c (Eat),",
+    "atvertprocesses.c (prey window); User Guide Part I section 10.2."
   )
 }
 

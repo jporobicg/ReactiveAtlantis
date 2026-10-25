@@ -60,8 +60,9 @@ feeding_ui <- function(id) {
           textOutput(ns("pressure_time_lab")),
           selectInput(ns("pressure_box"), "Boxes", choices = c("All boxes" = "all")),
           p(class = "ra-muted",
-            "Holling Type I/II/III from biology.prm (C, mum, E, predcase, KLP/KUP).",
-            "System-wide sums per-box calculations. Output uses biomass at the selected time step.")
+            "Atlantis feeding equations per predator cohort and water cell (C, mum, E, predcase,",
+            "KLP/KUP, size window, satiation) at the selected time step. Computed once per",
+            "run and time step, then cached.")
         ),
         conditionalPanel(
           "input.view_type == 'diagnostics'", ns = ns,
@@ -269,7 +270,10 @@ feeding_server <- function(id, project = NULL) {
       time_i <- if (is.null(input$pressure_time_i)) 1L else as.integer(input$pressure_time_i)[1]
       if (!is.finite(time_i) || time_i < 1) time_i <- 1L
       box <- if (is.null(input$pressure_box)) "all" else input$pressure_box
-      stocks <- tryCatch(pressure_stocks(), error = function(e) NULL)
+      ## Stage stocks are no longer needed: the cohort/cell calculation reads
+      ## the NetCDF directly.
+      stocks <- list(n_box = if (!is.null(info$nc$dim$b)) info$nc$dim$b$len else 1L,
+                     volume = NA_real_, groups = list(), notes = character())
       ra_progress("Expected predation pressure", {
         expected_predation_pressure(
           ava, grp, prm, info$nc, box = box, time_i = time_i,
