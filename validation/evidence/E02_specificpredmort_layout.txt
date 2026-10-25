@@ -1,0 +1,24 @@
+# E02 SpecificPredMort header + first row (NESP v8c) and Atlantis writer
+Time Group Cohort Stock WHH WHR WHB WHD WHO SAF SLF SBA SBS SBG SBW SBL SBP SBR SBN FTS FTB FTM FTO FVS FPL FPA FPS FPB FVY FMN FMM FBM FBW FPW FKG FHC FMP FFH FSW FBL FGA FSN FGF FWH FMG FDH FSR FTD FDO FDR FBG FBV FLG FRI FDD FDC FOD FRG FVL SHP SHD SHG SHS SHE SHU SHK SHW SHN SSK SQN SQG SQO BGA 
+0.000000e+00 WHH 0 0 0.000000e+00 0.000000e+00 0.000000e+00 0.000000e+00 0.000000e+00 0.000000e+00 0.000000e+00 0.000000
+
+--- atbiolmessage.c 2000-2016
+
+    for (sp=0; sp<totnum; sp++) {
+        flag_sp = (int) (FunctGroupArray[sp].speciesParams[flag_id]);
+        if (flag_sp) {
+            for(cohort=0; cohort<FunctGroupArray[sp].numCohortsXnumGenes; cohort++) {
+        		for(stock=0; stock<FunctGroupArray[sp].numStocks; stock++){
+                    /* Write time */
+                    fprintf(fid,"%e %s %d %d", bm->dayt, FunctGroupArray[sp].groupCode, cohort, stock);
+
+        			/* Write natural mortality values */
+        			for (pred=0; pred<totnum; pred++) {
+                        flag_sppred = (int) (FunctGroupArray[pred].speciesParams[flag_id]);
+                        if (flag_sppred) {
+                            fprintf(fid," %e", bm->calcTrackedPredMort[sp][cohort][stock][pred][final_id]);
+                        }
+        			}
+        			fprintf(fid,"\n");
+--- atprocess.c 2346
+	bm->calcTrackedPredMort[prey][prey_chrt][preystock][guildcase][ongoing_id] += (mortality_scalar * GRAZEinfo[prey][prey_chrt][habitat] * biomass_correction * FunctGroupArray[prey].speciesParams[Mdt_id]);

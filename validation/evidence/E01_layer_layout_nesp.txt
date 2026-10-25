@@ -1,0 +1,8 @@
+# E01 layer layout, NESP v8c_base_2y output.nc (Atlantis BethAtlantis_fix 16792e4)
+dims {'t': 26, 'b': 147, 'z': 7}
+box 1 numlayers 2 dz by z [0.0, 0.0, 0.0, 0.0, 25.0, 20.0, 1.0] z with volume>0 [4, 5, 6]
+box 5 numlayers 4 dz by z [0.0, 0.0, 56.0, 50.0, 30.0, 20.0, 1.0] z with volume>0 [2, 3, 4, 5, 6]
+box 20 numlayers 3 dz by z [0.0, 0.0, 0.0, 25.0, 30.0, 20.0, 1.0] z with volume>0 [3, 4, 5, 6]
+box 60 numlayers 3 dz by z [0.0, 0.0, 0.0, 12.0, 30.0, 20.0, 1.0] z with volume>0 [3, 4, 5, 6]
+box 6 numlayers 6 dz by z [781.0, 450.0, 150.0, 50.0, 30.0, 20.0, 1.0] z with volume>0 [0, 1, 2, 3, 4, 5, 6]
+boxes by numlayers {np.int16(0): np.int64(6), np.int16(1): np.int64(16), np.int16(2): np.int64(28), np.int16(3): np.int64(57), np.int16(4): np.int64(18), np.int16(5): np.int64(1), np.int16(6): np.int64(21)}

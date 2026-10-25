@@ -1,0 +1,19 @@
+# E03 spawn: RA recruitment_module.R 583-589 vs Atlantis atdemography.c 571-580
+        rat <- (rsl + ssl) - wspi
+        rat[rat < 0] <- 0
+        spawn <- ((wspi * fsp - kspa) - rat)
+        spawn[spawn < 0] <- 0
+        spawn_tot[j] <- spawn_tot[j] + sum(spawn * fspb * nsl, na.rm = TRUE)
+        ssb_tot[j] <- ssb_tot[j] + sum((rsl + ssl) * nsl, na.rm = TRUE)
+      }
+---
+        WforS = (1.0 + X_RS) * SN;
+        Wgt = SN + RN;
+        Spwn = FSP_SP * WforS - KSPA_SP;
+        Wgtcheck = FSPB_SP * RN;
+        if (Wgt < WforS)
+            Spwn = Spwn - (WforS - Wgt);
+        if (Spwn < 0.0)
+            Spwn = 0.0;
+
+        if (Wgtcheck > RN) {
