@@ -163,6 +163,14 @@ mortality_server <- function(id, project = NULL) {
         plot_message("No predation mortality for this age class.")
         return(invisible(NULL))
       }
+      ## Keep predators that kill this group at some time; the file has a
+      ## column for every group, mostly zero.
+      tot <- tapply(long$Value, long$Predator, sum, na.rm = TRUE)
+      long <- long[long$Predator %in% names(tot)[is.finite(tot) & tot > 0], , drop = FALSE]
+      if (nrow(long) == 0) {
+        plot_message("No predator killed this group in SpecificPredMort.txt.")
+        return(invisible(NULL))
+      }
       origin <- ra_run_origin(ps)
       long$Date <- days_as_date(long$Time, origin)
       pal <- get_fg_colors(unique(long$Predator), ps()$data$fg_palette)
