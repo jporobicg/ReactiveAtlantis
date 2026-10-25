@@ -221,10 +221,14 @@ recruitment.cal <- function(ini.nc.file, out.nc.file, yoy.file, grp.file, prm.fi
                 nums    <- nums * mask
                 rn      <- ncdf4::ncvar_get(nc.out, paste0(name.fg, '_ResN'))[, , time.stp] * mask
                 sn      <- ncdf4::ncvar_get(nc.out, paste0(name.fg, '_StructN'))[, , time.stp] * mask
-                wspi    <- sn * (1 + xrs)       ## minimum weigth for spawning
-                rat     <- ((rn  + sn ) - wspi) ## weight deficit
-                rat[(rat < 0)]   <- 0
-                spawn            <- ((wspi * FSP - KSPA)  -  rat)
+                ## Atlantis Ecology_Age_Structured_Spawn (atdemography.c:571-592):
+                ## subtract the weight deficit below (1 + X_RS) SN, cap at RN.
+                wspi    <- sn * (1 + xrs)       ## minimum weight for spawning
+                deficit <- wspi - (rn + sn)
+                deficit[!is.finite(deficit) | deficit < 0] <- 0
+                spawn   <- (wspi * FSP - KSPA) - deficit
+                over    <- is.finite(rn) & spawn > rn
+                spawn[over] <- rn[over]
                 SSB.tmp <- (ncdf4::ncvar_get(nc.out, paste0(name.fg, '_ResN'))[, , time.stp]  +
                             ncdf4::ncvar_get(nc.out, paste0(name.fg, '_StructN'))[, , time.stp])  *
                     ncdf4::ncvar_get(nc.out, paste0(name.fg, '_Nums'))[, , time.stp]

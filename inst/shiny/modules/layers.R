@@ -262,23 +262,19 @@ biomass_cell_array <- function(nc, grp, fg_code, mg2t = 0.00000002, x.cn = 5.7) 
     if (is.null(acc)) return(NULL)
     return(acc * mg2t * x.cn)
   }
-  vname <- if (n.coh > 1 && gtype %in% AGE_SPECIAL) {
-    paste0(name, "_N1")
-  } else {
-    paste0(name, "_N")
-  }
-  if (!vname %in% vars && paste0(name, "_N") %in% vars) vname <- paste0(name, "_N")
-  if (!vname %in% vars) return(NULL)
-  biom <- nc_get(nc, vname)
-  if (is.null(biom) || length(dim(biom)) < 3) return(NULL)
   vol <- nc_volume(nc)
-  if (!is.null(vol) && length(dim(vol)) == 2) {
-    biom <- sweep(biom, c(1, 2), vol, "*")
-  } else if (!is.null(vol) && length(dim(vol)) == 3 &&
-             length(dim(biom)) == 3 && all(dim(biom) == dim(vol))) {
-    biom <- biom * vol
+  for (vname in pool_var_names(vars, name, n.coh, gtype)) {
+    biom <- nc_get(nc, vname)
+    if (is.null(biom) || length(dim(biom)) < 3) next
+    if (!is.null(vol) && length(dim(vol)) == 2) {
+      biom <- sweep(biom, c(1, 2), vol, "*")
+    } else if (!is.null(vol) && length(dim(vol)) == 3 && all(dim(biom) == dim(vol))) {
+      biom <- biom * vol
+    }
+    acc <- add_nc_arrays(acc, biom)
   }
-  biom * mg2t * x.cn
+  if (is.null(acc)) return(NULL)
+  acc * mg2t * x.cn
 }
 
 ##' Biomass by box for one display layer (or integrated)

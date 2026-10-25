@@ -532,10 +532,15 @@ biomass_health <- function(biomindx, grp) {
   }
   first <- as.numeric(unlist(biomindx[1, codes, with = FALSE], use.names = FALSE))
   last <- as.numeric(unlist(biomindx[nrow(biomindx), codes, with = FALSE], use.names = FALSE))
-  ratio <- last / pmax(first, 1e-12)
-  flag <- ifelse(!is.finite(ratio), "No data",
-          ifelse(ratio < 0.01, "Extinct (<1%)",
-          ifelse(ratio > 10, "Exploding (>10x)", "OK")))
+  ## Screening rules on final / initial biomass, not ecological diagnoses.
+  ## A ratio needs a positive, finite initial value; otherwise it is
+  ## "Undefined" (validation D22: DL and DR start at 0 in NESP BiomIndx).
+  ok_base <- is.finite(first) & first > 0
+  ratio <- ifelse(ok_base & is.finite(last), last / ifelse(ok_base, first, 1), NA_real_)
+  flag <- ifelse(!ok_base, "Undefined (initial \u2264 0 or missing)",
+          ifelse(!is.finite(ratio), "No data",
+          ifelse(ratio < 0.01, "Collapsed (< 1% of initial)",
+          ifelse(ratio > 10, "Increased (> 10\u00d7 initial)", "OK"))))
   longname <- if ("longname" %in% names(grp)) {
     grp$longname[match(codes, grp$code)]
   } else codes

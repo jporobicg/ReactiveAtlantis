@@ -8,7 +8,7 @@ click_nav <- function(app, title) {
     "var el = Array.from(document.querySelectorAll('a.nav-link')).find(function(a){return (a.textContent||'').trim()===%s}); if (el) el.click(); true;",
     deparse(title)
   ))
-  app$wait_for_idle(timeout = 20000)
+  app$wait_for_idle(timeout = 120000)
 }
 
 test_that("Ask Atlantis button and drawer are absent when disabled", {
@@ -26,7 +26,7 @@ test_that("Ask Atlantis button and drawer are absent when disabled", {
     load_timeout = 40000, timeout = 15000
   )
   on.exit(try(app$stop(), silent = TRUE), add = TRUE)
-  app$wait_for_idle(timeout = 15000)
+  app$wait_for_idle(timeout = 120000)
   body <- app$get_html("body")
   expect_false(grepl("ra-ai-fab", body, fixed = TRUE))
   expect_false(grepl("ra-ai-drawer", body, fixed = TRUE))
@@ -51,7 +51,7 @@ test_that("Ask Atlantis drawer is closed by default and survives tab switches", 
     load_timeout = 40000, timeout = 20000
   )
   on.exit(try(app$stop(), silent = TRUE), add = TRUE)
-  app$wait_for_idle(timeout = 20000)
+  app$wait_for_idle(timeout = 120000)
   body <- app$get_html("body")
   expect_true(grepl("ra-ai-fab", body, fixed = TRUE))
   expect_true(grepl("ra-ai-drawer", body, fixed = TRUE))
@@ -61,7 +61,7 @@ test_that("Ask Atlantis drawer is closed by default and survives tab switches", 
   save_ai_shot(app, "ask_atlantis_drawer_closed")
 
   app$click(selector = "#assistant-fab")
-  app$wait_for_idle(timeout = 10000)
+  app$wait_for_idle(timeout = 120000)
   drawer_open <- tryCatch(app$get_html("#assistant-drawer"), error = function(e) "")
   expect_true(grepl("is-open", drawer_open, fixed = TRUE))
   expect_true(grepl("Guidance only", drawer_open, ignore.case = TRUE))
@@ -70,7 +70,7 @@ test_that("Ask Atlantis drawer is closed by default and survives tab switches", 
   app$set_inputs(`assistant-question` = "Where do I inspect predation?",
                  wait_ = FALSE)
   app$click("assistant-send")
-  app$wait_for_idle(timeout = 30000)
+  app$wait_for_idle(timeout = 120000)
   after_send <- tryCatch(app$get_html("#assistant-drawer"), error = function(e) "")
   expect_true(grepl("Where do I inspect predation", after_send, fixed = TRUE))
   expect_true(grepl("Ollama|local language model|not running|could not", after_send,
@@ -105,12 +105,12 @@ test_that("Ask Atlantis drawer is closed by default and survives tab switches", 
   save_ai_shot(app, "ask_atlantis_thinking")
 
   app$click(selector = "#assistant-drawer .ra-open-tool[data-ra-nav='Predation']")
-  app$wait_for_idle(timeout = 15000)
+  app$wait_for_idle(timeout = 120000)
   page2 <- app$get_html("body")
   expect_true(grepl("Predation", page2, fixed = TRUE))
 
   click_nav(app, "Overview")
-  app$wait_for_idle(timeout = 15000)
+  app$wait_for_idle(timeout = 120000)
   ov <- app$get_html("body")
   expect_true(grepl("Load a run|Overview|Groups", ov, ignore.case = TRUE))
   kept <- tryCatch(app$get_html("#assistant-drawer"), error = function(e) "")

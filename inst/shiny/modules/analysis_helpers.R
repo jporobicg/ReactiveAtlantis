@@ -1181,6 +1181,43 @@ add_nc_arrays <- function(acc, arr) {
   acc
 }
 
+##' Box area (m2) from the NetCDF: an `area` variable when present, otherwise
+##' volume / dz of each box's sediment layer (dz = 1 m in Atlantis), falling
+##' back to the largest volume / dz over its layers. Time step 1.
+nc_box_area <- function(nc) {
+  if (is.null(nc)) return(NULL)
+  vars <- names(nc$var)
+  if ("area" %in% vars) {
+    a <- nc_get(nc, "area")
+    return(as.numeric(if (is.null(dim(a))) a else a[, 1]))
+  }
+  if (!all(c("volume", "dz") %in% vars)) return(NULL)
+  vol <- nc_get(nc, "volume")
+  dz <- nc_get(nc, "dz")
+  if (length(dim(vol)) == 3) vol <- vol[, , 1]
+  if (length(dim(dz)) == 3) dz <- dz[, , 1]
+  if (length(dim(vol)) != 2 || !all(dim(vol) == dim(dz))) return(NULL)
+  ratio <- ifelse(is.finite(dz) & dz > 0, vol / dz, NA_real_)
+  sed <- ratio[nrow(ratio), ]
+  alt <- apply(ratio, 2, function(x) if (any(is.finite(x))) max(x, na.rm = TRUE) else NA_real_)
+  out <- ifelse(is.finite(sed) & sed > 0, sed, alt)
+  out[!is.finite(out)] <- 0
+  as.numeric(out)
+}
+
+##' NetCDF variables holding a biomass pool: <Name>_N, or <Name>_N1..N<n>
+##' for multi-cohort pool groups (PWN, CEP and similar; all cohorts).
+pool_var_names <- function(vars, name, n_coh = 1L, gtype = "") {
+  multi <- paste0(name, "_N", seq_len(max(1L, as.integer(n_coh))))
+  multi <- multi[multi %in% vars]
+  if (length(multi) && (as.integer(n_coh) > 1L || !paste0(name, "_N") %in% vars)) {
+    return(multi)
+  }
+  single <- paste0(name, "_N")
+  if (single %in% vars) return(single)
+  multi
+}
+
 biomass_by_box <- function(nc, grp, fg_code, mg2t = 0.00000002, x.cn = 5.7) {
   path <- tryCatch(nc$filename, error = function(e) "anon")
   ck <- paste("bbox", file_cache_key(path, fg_code), mg2t, x.cn, sep = "|")
@@ -1211,27 +1248,35 @@ biomass_by_box <- function(nc, grp, fg_code, mg2t = 0.00000002, x.cn = 5.7) {
     if (is.null(acc)) return(empty)
     acc <- acc * mg2t * x.cn
   } else {
-    vname <- if (n.coh > 1 && gtype %in% AGE_SPECIAL) {
-      paste0(name, "_N1")
-    } else {
-      paste0(name, "_N")
-    }
-    if (!vname %in% vars && paste0(name, "_N") %in% vars) vname <- paste0(name, "_N")
-    if (!vname %in% vars) return(empty)
-    biom <- nc_get(nc, vname)
+    vnames <- pool_var_names(vars, name, n.coh, gtype)
+    if (!length(vnames)) return(empty)
     vol <- nc_volume(nc)
-    if (!is.null(vol) && length(dim(biom)) == 3) {
-      if (length(dim(vol)) == 2) {
-        nt <- dim(biom)[3]
-        acc <- apply(sweep(biom, c(1, 2), vol, "*"), c(2, 3), sum, na.rm = TRUE)
-      } else if (length(dim(vol)) == 3) {
-        acc <- apply(biom * vol, c(2, 3), sum, na.rm = TRUE)
+    for (vname in vnames) {
+      biom <- nc_get(nc, vname)
+      bt <- NULL
+      if (length(dim(biom)) == 3) {
+        ## water-column pool: mg N m-3 x cell volume, summed over layers
+        if (!is.null(vol) && length(dim(vol)) == 2) {
+          bt <- apply(sweep(biom, c(1, 2), vol, "*"), c(2, 3), sum, na.rm = TRUE)
+        } else if (!is.null(vol) && length(dim(vol)) == 3) {
+          bt <- apply(biom * vol, c(2, 3), sum, na.rm = TRUE)
+        } else {
+          bt <- sum_layers_to_box_time(biom)
+        }
+      } else if (length(dim(biom)) == 2) {
+        ## epibenthic pool [b, t]: mg N m-2 x box area (atbiolmessage.c:499)
+        area <- nc_box_area(nc)
+        if (is.null(area) || length(area) != nrow(biom)) {
+          stop("Box area is needed for ", fg_code,
+               " (mg N m-2) but the NetCDF has no area, volume or dz.")
+        }
+        bt <- sweep(biom, 1, area, "*")
       } else {
-        acc <- sum_layers_to_box_time(biom)
+        next
       }
-    } else {
-      acc <- sum_layers_to_box_time(biom)
+      acc <- if (is.null(acc)) bt else acc + bt
     }
+    if (is.null(acc)) return(empty)
     acc <- acc * mg2t * x.cn
   }
   n_box <- nrow(acc)
@@ -1299,28 +1344,110 @@ prod_eat_name <- function(nc_vars, code, name, n_cohorts = 1, grouptype = NULL) 
   vars[1]
 }
 
+## Assimilation efficiency on live prey, E_<code>, from the biology prm lines.
+prm_group_E <- function(prm, code) {
+  if (is.null(prm) || !length(prm)) return(NA_real_)
+  hit <- grep(paste0("^[[:space:]]*E_", code, "([[:space:]]|$)"), prm, value = TRUE)
+  if (!length(hit)) return(NA_real_)
+  val <- suppressWarnings(as.numeric(strsplit(trimws(hit[1]), "[[:space:]]+")[[1]][2]))
+  if (is.finite(val) && val > 0) val else NA_real_
+}
+
+nc_t_days <- function(nc) {
+  t <- tryCatch(as.numeric(ncdf4::ncvar_get(nc, "t")), error = function(e) NULL)
+  if (is.null(t)) return(NULL)
+  units <- tryCatch(ncdf4::ncatt_get(nc, "t", "units")$value, error = function(e) "")
+  if (is.character(units) && grepl("second", units, ignore.case = TRUE)) t <- t / 86400
+  t
+}
+
+##' Atlantis realised food intake of an age-structured group, by cohort.
+##'
+##' Atlantis grows each individual by E x intake from live prey, and writes
+##' that growth as <Name><cohort>_Growth (mg N per individual per day) in
+##' outputPROD.nc. Intake = Nums x Growth / E_<code>, summed over boxes.
+##' This reproduced an independent per-cell Holling calculation within 4 % on
+##' NESP (validation/phase4). Groups that also eat plants or detritus with a
+##' different efficiency (EPlant, EDL, EDR) are approximated with E.
+##' The <Name><cohort>_Eat tracer is not used: its units do not convert to a
+##' mass (validation D16).
+##' @return data.frame(Time = days, Cohort = 0-based, Intake = t per day),
+##'   or NULL when PROD Growth, numbers or E are missing.
+realised_intake_by_cohort <- function(nc_prod, nc_out, grp, prm, fg_code,
+                                      mg2t = 0.00000002, x.cn = 5.7) {
+  if (is.null(nc_prod) || is.null(nc_out) || is.null(grp)) return(NULL)
+  row <- grp[grp$code == fg_code, , drop = FALSE]
+  if (nrow(row) == 0) return(NULL)
+  name <- as.character(row$name[1])
+  n.coh <- if ("numcohorts" %in% names(row)) as.integer(row$numcohorts[1]) else 1L
+  gtype <- if ("grouptype" %in% names(row)) as.character(row$grouptype[1]) else ""
+  if (!prod_is_age_structured(n.coh, gtype)) return(NULL)
+  E <- prm_group_E(prm, fg_code)
+  if (!is.finite(E)) return(NULL)
+  t_days <- nc_t_days(nc_out)
+  if (is.null(t_days)) return(NULL)
+  rows <- list()
+  for (coh in seq_len(n.coh)) {
+    g_var <- paste0(name, coh, "_Growth")
+    n_var <- paste0(name, coh, "_Nums")
+    if (!g_var %in% names(nc_prod$var) || !n_var %in% names(nc_out$var)) next
+    growth <- nc_get(nc_prod, g_var)                  # [b, t] in Atlantis, mg N ind-1 d-1
+    if (length(dim(growth)) == 3) growth <- apply(growth, c(2, 3), sum, na.rm = TRUE)
+    nums <- nc_get(nc_out, n_var)                     # [z, b, t]
+    nums_bt <- if (length(dim(nums)) == 3) apply(nums, c(2, 3), sum, na.rm = TRUE) else nums
+    if (length(dim(growth)) != 2 || length(dim(nums_bt)) != 2) next
+    n_t <- min(ncol(growth), ncol(nums_bt), length(t_days))
+    n_b <- min(nrow(growth), nrow(nums_bt))
+    g <- growth[seq_len(n_b), seq_len(n_t), drop = FALSE]
+    g[!is.finite(g)] <- 0
+    n <- nums_bt[seq_len(n_b), seq_len(n_t), drop = FALSE]
+    n[!is.finite(n)] <- 0
+    intake <- colSums(n * g) / E * mg2t * x.cn
+    rows[[length(rows) + 1]] <- data.frame(Time = t_days[seq_len(n_t)],
+                                           Cohort = coh - 1L, Intake = intake)
+  }
+  if (!length(rows)) return(NULL)
+  do.call(rbind, rows)
+}
+
+##' Food consumed by one group (t per day) over time.
+##'
+##' Age-structured groups: Atlantis realised intake from PROD Growth
+##' (realised_intake_by_cohort), method "growth_over_E". Other groups keep the
+##' previous PROD Grazing x volume calculation, flagged method "unverified".
 consumed_tonnes <- function(nc_prod, nc_out, grp, fg_code,
-                            mg2t = 0.00000002, x.cn = 5.7) {
+                            mg2t = 0.00000002, x.cn = 5.7, prm = NULL) {
   prod_path <- tryCatch(nc_prod$filename, error = function(e) "anon")
-  ck <- paste("eat", file_cache_key(prod_path, fg_code), mg2t, x.cn, sep = "|")
+  ck <- paste("eat2", file_cache_key(prod_path, fg_code), mg2t, x.cn,
+              length(prm), sep = "|")
   hit <- ra_cache_get(ck)
   if (!is.null(hit)) return(hit)
   row <- grp[grp$code == fg_code, , drop = FALSE]
   if (nrow(row) == 0) stop("Unknown functional group: ", fg_code)
+  coh <- realised_intake_by_cohort(nc_prod, nc_out, grp, prm, fg_code, mg2t, x.cn)
+  if (!is.null(coh) && nrow(coh) > 0) {
+    tot <- stats::aggregate(Intake ~ Time, data = coh, sum)
+    out <- list(variable = "Growth/E", variables = "Growth/E",
+                tonnes = as.numeric(tot$Intake), time = as.numeric(tot$Time),
+                by_cohort = coh, unit = "t/day", method = "growth_over_E")
+    ra_cache_set(ck, out)
+    return(out)
+  }
   name <- as.character(row$name[1])
   n.coh <- if ("numcohorts" %in% names(row)) as.integer(row$numcohorts[1]) else 1L
   gtype <- if ("grouptype" %in% names(row)) as.character(row$grouptype[1]) else ""
+  if (prod_is_age_structured(n.coh, gtype)) {
+    stop("Cannot compute intake for ", fg_code, ": needs ", name,
+         "<cohort>_Growth in outputPROD.nc, numbers in output.nc and E_",
+         fg_code, " in the biology prm.")
+  }
   vns <- prod_consume_vars(names(nc_prod$var), name, n.coh, gtype, row$code[1])
   if (length(vns) == 0) {
-    stop("No consumption tracer for ", fg_code,
-         ". Looked for ", name, "1_Eat … ", name, n.coh, "_Eat or ",
+    stop("No consumption tracer for ", fg_code, ". Looked for ",
          name, "Grazing (groups CSV Name, case-sensitive).")
   }
   eat <- NULL
-  for (vn in vns) {
-    arr <- nc_get(nc_prod, vn)
-    eat <- add_nc_arrays(eat, arr)
-  }
+  for (vn in vns) eat <- add_nc_arrays(eat, nc_get(nc_prod, vn))
   vol <- nc_volume(nc_prod)
   if (is.null(vol)) vol <- nc_volume(nc_out)
   if (!is.null(vol) && length(dim(eat)) == 3 && length(dim(vol)) %in% c(2, 3)) {
@@ -1334,12 +1461,65 @@ consumed_tonnes <- function(nc_prod, nc_out, grp, fg_code,
   } else {
     tonnes <- sum_space(eat) * mg2t * x.cn
   }
-  out <- list(variable = vns[1], variables = vns, tonnes = as.numeric(tonnes))
+  t_days <- nc_t_days(nc_prod)
+  out <- list(variable = vns[1], variables = vns, tonnes = as.numeric(tonnes),
+              time = if (length(t_days) >= length(tonnes)) t_days[seq_along(tonnes)] else seq_along(tonnes),
+              by_cohort = NULL, unit = "t/day", method = "unverified")
   ra_cache_set(ck, out)
   out
 }
 
-consumption_by_prey <- function(tonnes, diet_time, predator, stock = NULL) {
+## DietCheck rows for one predator, keyed by Time and 0-based Cohort,
+## averaged over stocks. Prey columns only.
+diet_by_cohort <- function(diet_full, predator) {
+  if (is.null(diet_full) || nrow(diet_full) == 0) return(NULL)
+  dt <- data.table::as.data.table(diet_full)
+  if (!"Predator" %in% names(dt)) return(NULL)
+  dt <- dt[as.character(Predator) == as.character(predator)]
+  if (nrow(dt) == 0) return(NULL)
+  if (!"Cohort" %in% names(dt)) dt[, Cohort := 0L]
+  prey_cols <- setdiff(names(dt), c("Time", "Predator", "Stock", "Cohort", "Updated"))
+  dt <- dt[, lapply(.SD, function(x) mean(as.numeric(x), na.rm = TRUE)),
+           by = c("Time", "Cohort"), .SDcols = prey_cols]
+  as.data.frame(dt)
+}
+
+## Match each intake time to the nearest DietCheck time (within half a step).
+match_diet_time <- function(t_intake, t_diet) {
+  td <- sort(unique(as.numeric(t_diet)))
+  if (!length(td)) return(rep(NA_real_, length(t_intake)))
+  step <- if (length(td) > 1) stats::median(diff(td)) else Inf
+  vapply(t_intake, function(t) {
+    i <- which.min(abs(td - t))
+    if (abs(td[i] - t) <= step / 2) td[i] else NA_real_
+  }, numeric(1))
+}
+
+##' Consumption of each prey by one predator (t per day):
+##' sum over cohorts of cohort intake x that cohort's DietCheck proportion.
+consumption_by_prey_cohort <- function(intake_coh, diet_full, predator) {
+  empty <- data.frame(Time = numeric(), Prey = character(), Tonnes = numeric(),
+                      stringsAsFactors = FALSE)
+  if (is.null(intake_coh) || !nrow(intake_coh)) return(empty)
+  d <- diet_by_cohort(diet_full, predator)
+  if (is.null(d)) return(empty)
+  prey_cols <- setdiff(names(d), c("Time", "Cohort"))
+  ic <- intake_coh
+  ic$DietTime <- match_diet_time(ic$Time, d$Time)
+  m <- merge(ic, d, by.x = c("DietTime", "Cohort"), by.y = c("Time", "Cohort"))
+  if (!nrow(m)) return(empty)
+  long <- data.table::melt(data.table::as.data.table(m),
+                           id.vars = c("Time", "Cohort", "Intake"),
+                           measure.vars = prey_cols, variable.name = "Prey",
+                           value.name = "prop", variable.factor = FALSE)
+  long <- long[, .(Tonnes = sum(Intake * as.numeric(prop), na.rm = TRUE)), by = .(Time, Prey)]
+  as.data.frame(long[Tonnes > 0])
+}
+
+##' Previous whole-predator form, kept for groups without cohort intake.
+##' Uses the cohort-mean diet (shares sum to 1), not the cohort sum.
+consumption_by_prey <- function(tonnes, diet_time, predator, stock = NULL,
+                                time = NULL) {
   empty <- data.frame(Time = numeric(), Prey = character(), Tonnes = numeric(),
                       stringsAsFactors = FALSE)
   if (is.null(diet_time) || nrow(diet_time) == 0) return(empty)
@@ -1353,26 +1533,31 @@ consumption_by_prey <- function(tonnes, diet_time, predator, stock = NULL) {
   if (nrow(dt) == 0) return(empty)
   prey_cols <- setdiff(names(dt), c("Time", "Predator", "Stock", "Cohort"))
   if (length(prey_cols) == 0) return(empty)
-  times <- as.numeric(dt$Time)
-  n <- min(length(tonnes), length(unique(times)))
   long <- data.table::melt(
     data.table::as.data.table(dt)[, c("Time", prey_cols), with = FALSE],
     id.vars = "Time", variable.name = "Prey", value.name = "prop",
     variable.factor = FALSE
   )
   long$prop <- as.numeric(long$prop)
-  t_index <- match(long$Time, sort(unique(long$Time)))
-  long$Tonnes <- long$prop * tonnes[pmin(t_index, length(tonnes))]
-  as.data.frame(long[, c("Time", "Prey", "Tonnes")])
+  if (!is.null(time) && length(time) == length(tonnes)) {
+    idx <- match(match_diet_time(long$Time, time), time)
+    long$Tonnes <- long$prop * tonnes[idx]
+  } else {
+    t_index <- match(long$Time, sort(unique(long$Time)))
+    long$Tonnes <- long$prop * tonnes[pmin(t_index, length(tonnes))]
+  }
+  as.data.frame(long[is.finite(long$Tonnes), c("Time", "Prey", "Tonnes")])
 }
 
 consumption_as_prey <- function(nc_prod, nc_out, grp, prey_code, diet_time,
-                                mg2t = 0.00000002, x.cn = 5.7) {
+                                mg2t = 0.00000002, x.cn = 5.7, prm = NULL,
+                                diet_full = NULL) {
   empty <- data.frame(Time = numeric(), Predator = character(), Tonnes = numeric(),
                       stringsAsFactors = FALSE)
   if (is.null(diet_time) || !prey_code %in% names(diet_time)) return(empty)
   prod_path <- tryCatch(nc_prod$filename, error = function(e) "anon")
-  ck <- paste("asprey", file_cache_key(prod_path, prey_code), mg2t, x.cn, sep = "|")
+  ck <- paste("asprey2", file_cache_key(prod_path, prey_code), mg2t, x.cn,
+              length(prm), sep = "|")
   hit <- ra_cache_get(ck)
   if (!is.null(hit)) return(hit)
   dt <- data.table::as.data.table(diet_time)
@@ -1381,16 +1566,18 @@ consumption_as_prey <- function(nc_prod, nc_out, grp, prey_code, diet_time,
                                             as.numeric(prop_col) > 0]))
   rows <- list()
   for (pr in preds) {
-    tot <- tryCatch(consumed_tonnes(nc_prod, nc_out, grp, pr, mg2t, x.cn),
+    tot <- tryCatch(consumed_tonnes(nc_prod, nc_out, grp, pr, mg2t, x.cn, prm = prm),
                     error = function(e) NULL)
     if (is.null(tot)) next
-    slice <- dt[Predator == pr, c("Time", "Predator", prey_code), with = FALSE]
-    data.table::setnames(slice, prey_code, "prop")
-    if (nrow(slice) == 0) next
-    t_index <- match(slice$Time, sort(unique(dt$Time)))
-    slice$Tonnes <- as.numeric(slice$prop) * tot$tonnes[pmin(t_index, length(tot$tonnes))]
+    long <- if (!is.null(tot$by_cohort) && !is.null(diet_full)) {
+      consumption_by_prey_cohort(tot$by_cohort, diet_full, pr)
+    } else {
+      consumption_by_prey(tot$tonnes, diet_time, pr, time = tot$time)
+    }
+    long <- long[long$Prey == prey_code, , drop = FALSE]
+    if (!nrow(long)) next
     rows[[length(rows) + 1]] <- data.frame(
-      Time = slice$Time, Predator = pr, Tonnes = slice$Tonnes,
+      Time = long$Time, Predator = pr, Tonnes = long$Tonnes,
       stringsAsFactors = FALSE
     )
   }

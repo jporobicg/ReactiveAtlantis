@@ -208,7 +208,7 @@ compare_server <- function(id, project = NULL) {
       if (isTRUE(input$scaled)) {
         rmv <- which(sapply(total_data, function(x) length(x) == 0 || is.null(x) || is.character(x)))
         total.tmp <- total_data[-rmv]
-        total.tmp <- lapply(total.tmp, function(x) x / x[1])
+        total.tmp <- lapply(total.tmp, ra_rel_to_first)
         total_data[-rmv] <- total.tmp
       }
       p <- plot_total_data(total_data, dat$time_dates, FALSE, FALSE,
@@ -239,7 +239,7 @@ compare_server <- function(id, project = NULL) {
       if (isTRUE(input$scaled_age)) {
         rmv <- which(sapply(coho, function(x) length(x) == 0 || is.null(x) || is.character(x)))
         coho.tmp <- coho[-rmv]
-        coho.tmp <- lapply(coho.tmp, function(x) lapply(x, function(x) x / x[1]))
+        coho.tmp <- lapply(coho.tmp, function(x) lapply(x, ra_rel_to_first))
         coho[-rmv] <- coho.tmp
       }
       n.coh <- dat$grp$numcohorts[dat$grp$code == fg_age_d()]
@@ -400,6 +400,45 @@ nc_facet_biomass <- function(dat) {
   out
 }
 
+## Series relative to its first value; NA when that value is zero or not
+## finite, so an undefined ratio is never drawn (validation D22).
+ra_rel_to_first <- function(x) {
+  x <- as.numeric(x)
+  if (!length(x) || !is.finite(x[1]) || x[1] <= 0) return(rep(NA_real_, length(x)))
+  x / x[1]
+}
+
+##' Pool biomass in tonnes per box and time [b, t] from one NetCDF variable:
+##' 3-D (mg N m-3) x cell volume from the NetCDF, summed over layers;
+##' 2-D epibenthic (mg N m-2) x box area. Uses the NetCDF geometry, not the
+##' BGM-derived volumes (validation D19b, D31).
+pool_mass_box_time <- function(nc.out, vname, mg2t, x.cn) {
+  biom <- nc_get(nc.out, vname)
+  if (length(dim(biom)) == 3) {
+    vol <- nc_volume(nc.out)
+    if (is.null(vol)) stop("output.nc has no volume variable for ", vname)
+    if (length(dim(vol)) == 2) {
+      m <- apply(sweep(biom, c(1, 2), vol, "*"), c(2, 3), sum, na.rm = TRUE)
+    } else {
+      n <- min(dim(biom)[3], dim(vol)[3])
+      m <- apply(biom[, , seq_len(n), drop = FALSE] * vol[, , seq_len(n), drop = FALSE],
+                 c(2, 3), sum, na.rm = TRUE)
+    }
+  } else {
+    area <- nc_box_area(nc.out)
+    if (is.null(area) || length(area) != nrow(biom)) stop("Box area is unavailable for ", vname)
+    m <- sweep(biom, 1, area, "*")
+  }
+  m * mg2t * x.cn
+}
+
+## Boxes counted in system totals: BiomIndx excludes boundary boxes.
+inner_boxes <- function(box.info, n_box) {
+  db <- tryCatch(box.info$info$Depth_Bound, error = function(e) NULL)
+  if (is.null(db) || length(db) != n_box) return(rep(TRUE, n_box))
+  db > 0
+}
+
 bio.age <- function(age.grp, nc.out, ctg, mg2t, x.cn, inf.box, Time){
   bound <- ifelse(inf.box$info$Depth_Bound > 0, 1, 0)
   grp.bio <- NULL
@@ -427,29 +466,14 @@ bio.age <- function(age.grp, nc.out, ctg, mg2t, x.cn, inf.box, Time){
 
 bio.pool <- function(pol.grp, nc.out, ctg, mg2t, x.cn, box.info, Time){
   grp.bio <- NULL
-  
   for(pool in 1:nrow(pol.grp)){
-    name.fg <- paste0(pol.grp$name[pool], '_N')
-    biom <- nc_get(nc.out, name.fg)
-    
-    if(length(dim(biom)) == 3){
-      if(pol.grp$grouptype[pool] == 'LG_INF'){
-        biom <- apply(biom, 3, '*', box.info$VolInf)
-      } else {
-        biom <- apply(biom, 3, '*', box.info$Vol)
-      }
-      biom <- apply(biom, 2, sum, na.rm = TRUE)
-    } else {
-      biom <- apply(biom, 2, function(x) x * box.info$info$Area)
-      biom <- apply(biom, 2, sum, na.rm = TRUE)
-    }
-    
-    biom <- biom * mg2t * x.cn
-    biom[1] <- biom[2]
+    m <- pool_mass_box_time(nc.out, paste0(pol.grp$name[pool], '_N'), mg2t, x.cn)
+    keep <- inner_boxes(box.info, nrow(m))
+    biom <- colSums(m[keep, , drop = FALSE], na.rm = TRUE)
     grp.bio <- rbind(grp.bio, data.frame(
       Time = Time, 
       FG = paste0(as.character(pol.grp$longname[pool]), ' (', as.character(pol.grp$code[pool]), ')'),
-      Biomass = biom, 
+      Biomass = biom[seq_along(Time)], 
       Simulation = ctg
     ))
   }
@@ -458,25 +482,18 @@ bio.pool <- function(pol.grp, nc.out, ctg, mg2t, x.cn, box.info, Time){
 
 bio.pwn <- function(pwn.grp, nc.out, ctg, mg2t, x.cn, box.info, Time){
   grp.bio <- NULL
-  
   for(pwn in 1:nrow(pwn.grp)){
-    cohort <- NULL
+    tot <- 0
     for(coh in 1:pwn.grp[pwn, 'numcohorts']){
-      name.fg <- paste0(pwn.grp$name[pwn], '_N', coh)
-      b.coh <- nc_get(nc.out, name.fg) * mg2t * x.cn
-      
-      if(length(dim(b.coh)) > 2){
-        b.coh <- apply(b.coh, 3, '*', box.info$Vol)
-      } else {
-        b.coh <- apply(b.coh, 2, '*', box.info$info$Area)
-      }
-      b.coh <- apply(b.coh, 2, sum, na.rm = TRUE)
-      cohort <- cbind(cohort, b.coh)
+      vn <- paste0(pwn.grp$name[pwn], '_N', coh)
+      if (!vn %in% names(nc.out$var)) next
+      m <- pool_mass_box_time(nc.out, vn, mg2t, x.cn)
+      tot <- tot + colSums(m[inner_boxes(box.info, nrow(m)), , drop = FALSE], na.rm = TRUE)
     }
     grp.bio <- rbind(grp.bio, data.frame(
       Time = Time,
       FG = paste0(as.character(pwn.grp$longname[pwn]), ' (', as.character(pwn.grp$code[pwn]), ')'),
-      Biomass = rowSums(cohort, na.rm = TRUE), 
+      Biomass = tot[seq_along(Time)], 
       Simulation = ctg
     ))
   }
@@ -486,7 +503,9 @@ bio.pwn <- function(pwn.grp, nc.out, ctg, mg2t, x.cn, box.info, Time){
 relative <- function(df, biomass = TRUE, Vec = NULL){
   if(biomass) vector <- df$Biomass
   if(!is.null(Vec)) vector <- df[Vec]
-  df$Relative <- vector / vector[1]
+  base <- vector[1]
+  ## B/B0 is undefined when B0 is zero or not finite (validation D22).
+  df$Relative <- if (is.finite(base) && base > 0) vector / base else NA_real_
   return(df)
 }
 
@@ -540,46 +559,20 @@ nitro.weight <- function(nc.out, grp, FG, By = 'Total', box.info, mg2t, x.cn, po
       Num <- rowSums(matrix(unlist(Num), ncol = n.coh))
     }
     type <- 'AgeClass'
-  } else if (grp[pos.fg, 'numcohorts'] == 1){
-    name.fg <- paste0(grp$name[pos.fg], '_N')
-    biom <- nc_get(nc.out, name.fg)
-    
-    if(length(dim(biom)) == 3){
-      if(grp$grouptype[pos.fg] == 'LG_INF'){
-        biom <- apply(biom, 3, '*', box.info$VolInf)
-      } else {
-        biom <- apply(biom, 3, '*', box.info$Vol)
-      }
-      if(By == 'Total'){
-        biom <- apply(biom, 2, sum, na.rm = TRUE)
-      }
-    } else {
-      biom <- apply(biom, 2, function(x) x * box.info$info$Area)
-      if(By == 'Total'){
-        biom <- apply(biom, 2, sum, na.rm = TRUE)
-      }
+  } else {
+    ## Pools (one cohort) and multi-cohort pools (PWN, CEP, ...): tonnes from
+    ## NetCDF volume / area, boundary boxes excluded as in BiomIndx (D31, D19b).
+    vnames <- pool_var_names(names(nc.out$var), grp$name[pos.fg],
+                             grp[pos.fg, 'numcohorts'], grp$grouptype[pos.fg])
+    if (!length(vnames)) stop("No biomass pool variable for ", FG)
+    m <- NULL
+    for (vn in vnames) {
+      x <- pool_mass_box_time(nc.out, vn, mg2t, x.cn)
+      m <- if (is.null(m)) x else m + x
     }
-    Bio <- biom
-    type <- 'BioPool'
-  } else if(grp[pos.fg, 'numcohorts'] > 1 & grp[pos.fg, 'grouptype'] %in% c('PWN', 'PRAWNS', 'PRAWN', 'CEP', 'MOB_EP_OTHER', 'SEAGRASS', 'CORAL', 'MANGROVE', 'MANGROVES', 'SPONGE')){
-    n.coh <- grp[pos.fg, 'numcohorts']
-    for(coh in 1:n.coh){
-      name.fg <- paste0(grp$name[pos.fg],'_N', coh)
-      biom <- nc_get(nc.out, name.fg)
-      if(length(dim(biom)) > 2){
-        biom <- apply(biom, 3, '*', box.info$Vol)
-      } else {
-        biom <- apply(biom, 2, function(x) x * box.info$info$Area)
-      }
-      if(By == 'Total'){
-        biom <- apply(biom, 2, sum, na.rm = TRUE)
-      }
-      Bio[[coh]] <- biom
-    }
-    if(By == 'Total'){
-      Bio <- rowSums(matrix(unlist(Bio), ncol = n.coh))
-    }
-    type <- 'AgeBioPool'
+    keep <- inner_boxes(box.info, nrow(m))
+    Bio <- if (By == 'Total') colSums(m[keep, , drop = FALSE], na.rm = TRUE) else m
+    type <- if (length(vnames) > 1) 'AgeBioPool' else 'BioPool'
   }
   
   return(list(Biomass = Bio, Numbers = Num, Structural = SN, Reserve = RN, Type = type))

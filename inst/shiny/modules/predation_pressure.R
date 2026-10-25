@@ -2,6 +2,15 @@
 ## ~ Expected predation pressure (t0 diagnostic) ~ ##
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
 ##
+## SCREENING INDEX, NOT ATLANTIS INTAKE. Compared with Atlantis this
+## calculation uses box totals instead of box x layer cells, stage-mean C and
+## mum instead of per-cohort rates, a knife-edge window even when
+## UseHardFeedingWindow = 0, one Holling denominator per pPREY row, and no
+## Q10, satiation cap (flag_satiation), habitat refuge or pSTOCK. On NESP
+## (adult FTM, box 94, day 930) it was about 35x the realised intake from
+## Atlantis Growth / E (validation D05). Use it to rank links, not to read
+## consumption; the realised intake is shown next to the selected pair.
+##
 ## Independent implementation of the Atlantis consumer-feeding
 ## calculation at initial conditions. Not copied from atlantistools.
 ##
@@ -146,11 +155,14 @@ prey_e_class <- function(code, grouptype = "") {
   if (code %in% c("DR", "DRsed") || grepl("REF_DET|REFRACT", gt)) {
     return("refractory")
   }
-  if (code %in% c("DL", "DC", "DLsed", "DCsed") ||
-      grepl("LAB_DET|CARRION|DETRIT", gt)) {
+  ## Carrion is eaten as live prey with E (atprocess.c:519-522).
+  if (code %in% c("DC", "DCsed") || grepl("CARRION", gt)) return("live")
+  if (code %in% c("DL", "DLsed") || grepl("LAB_DET|DETRIT", gt)) {
     return("detritus")
   }
-  if (grepl("PHY|PLANT|SEAGRASS|MACROAL|DINO|MICROPHY|LG_PHY|SM_PHY", gt)) {
+  ## Plant types use EPlant, including turf and microphytobenthos
+  ## (atprocess.c:497-503; Atlantis spells MICROPHTYBENTHOS).
+  if (grepl("PHY|PLANT|SEAGRASS|MACROAL|DINO|MICROPH|TURF|LG_PHY|SM_PHY", gt)) {
     return("plant")
   }
   "live"
@@ -163,7 +175,8 @@ gape_size_scalar <- function(sn_pred, sn_prey, klp, kup) {
   }
   lo <- if (is.finite(klp)) klp * sn_pred else 0
   hi <- if (is.finite(kup)) kup * sn_pred else Inf
-  if (sn_prey > lo && sn_prey < hi) 1 else 0
+  ## Atlantis hard window is inclusive (atvertprocesses.c:557-560).
+  if (sn_prey >= lo && sn_prey <= hi) 1 else 0
 }
 
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
@@ -179,7 +192,7 @@ gape_size_scalar <- function(sn_pred, sn_prey, klp, kup) {
 ##' @param pred_scale numbers (absolute) or predator mg N (mass-specific)
 ##' @param predcase 0 = Type II, 1 = Type I, 2 = Type III
 holling_ingest_mgn_day <- function(C, mum, avail, e_times_avail, pred_scale,
-                                   predcase = 0) {
+                                   predcase = 0, e_live = NA_real_) {
   n <- length(avail)
   z <- rep(0, n)
   C <- as.numeric(C)[1]
@@ -208,7 +221,9 @@ holling_ingest_mgn_day <- function(C, mum, avail, e_times_avail, pred_scale,
   if (!is.finite(A) || A <= 0) return(z)
 
   if (identical(predcase, 1L)) {
-    e_eff <- sum(e_use) / A
+    ## Atlantis caps type I intake at mum / E of live prey (atprocess.c:840-845).
+    e_eff <- as.numeric(e_live)[1]
+    if (!is.finite(e_eff) || e_eff <= 0) e_eff <- sum(e_use) / A
     if (!is.finite(e_eff) || e_eff <= 0) e_eff <- 1
     gmax <- if (is.finite(mum) && mum > 0) mum / e_eff else Inf
     ingest_unit <- min(C * A, gmax)
@@ -236,7 +251,7 @@ empty_stage_stock <- function(n_box) {
   )
 }
 
-box_slice_t0 <- function(arr, time_i = 1L) {
+box_slice_t0 <- function(arr, time_i = 1L, n_t = NULL) {
   if (is.null(arr)) return(NULL)
   d <- dim(arr)
   if (is.null(d)) return(as.numeric(arr))
@@ -246,7 +261,15 @@ box_slice_t0 <- function(arr, time_i = 1L) {
     if (t > d[3]) t <- d[3]
     return(arr[, , t, drop = TRUE])
   }
-  if (length(d) == 2L) return(arr)
+  ## A 2-D [b, t] array (epibenthos in output.nc) is sliced on t; a 2-D
+  ## [z, b] array (one time step, t dropped) is returned whole.
+  if (length(d) == 2L) {
+    if (!is.null(n_t) && n_t > 1L && d[2] == n_t) {
+      if (t > d[2]) t <- d[2]
+      return(as.numeric(arr[, t]))
+    }
+    return(arr)
+  }
   as.numeric(arr)
 }
 
@@ -271,8 +294,9 @@ weighted_sn <- function(sn_arr, nums_arr) {
 
 ##' Volume per box at t0 (m3).
 init_box_volume <- function(nc, time_i = 1L) {
+  n_t <- if (!is.null(nc$dim$t)) as.integer(nc$dim$t$len) else 1L
   vol <- tryCatch(nc_volume(nc), error = function(e) NULL)
-  sl <- box_slice_t0(vol, time_i)
+  sl <- box_slice_t0(vol, time_i, n_t)
   out <- sum_z_to_box(sl)
   if (!length(out)) return(numeric())
   out[!is.finite(out)] <- 0
@@ -319,6 +343,8 @@ init_stage_stocks <- function(nc, grp, prm, time_i = 1L,
 
   out_groups <- list()
   notes <- character()
+  n_t <- if (!is.null(nc$dim$t)) as.integer(nc$dim$t$len) else 1L
+  box_area <- nc_box_area(nc)
   codes <- as.character(grp$code)
   for (i in seq_len(nrow(grp))) {
     code <- codes[i]
@@ -341,12 +367,12 @@ init_stage_stocks <- function(nc, grp, prm, time_i = 1L,
         r_var <- paste0(name, coh, "_ResN")
         s_var <- paste0(name, coh, "_StructN")
         if (!all(c(n_var, r_var, s_var) %in% vars)) next
-        nums <- sum_z_to_box(box_slice_t0(nc_get(nc, n_var), time_i))
-        resn <- box_slice_t0(nc_get(nc, r_var), time_i)
-        strn <- box_slice_t0(nc_get(nc, s_var), time_i)
-        mass <- sum_z_to_box((resn + strn) * box_slice_t0(nc_get(nc, n_var), time_i))
-        sn_w <- weighted_sn(strn, box_slice_t0(nc_get(nc, n_var), time_i))
-        if (coh < age_mat) {
+        nums <- sum_z_to_box(box_slice_t0(nc_get(nc, n_var), time_i, n_t))
+        resn <- box_slice_t0(nc_get(nc, r_var), time_i, n_t)
+        strn <- box_slice_t0(nc_get(nc, s_var), time_i, n_t)
+        mass <- sum_z_to_box((resn + strn) * box_slice_t0(nc_get(nc, n_var), time_i, n_t))
+        sn_w <- weighted_sn(strn, box_slice_t0(nc_get(nc, n_var), time_i, n_t))
+        if ((coh - 1L) < age_mat) {
           juv <- add_stage_stock(juv, mass, nums, sn_w)
         } else {
           adl <- add_stage_stock(adl, mass, nums, sn_w)
@@ -355,29 +381,32 @@ init_stage_stocks <- function(nc, grp, prm, time_i = 1L,
         found <- TRUE
       }
     } else {
-      vname <- if (n_coh > 1L && gtype %in% AGE_SPECIAL) {
-        paste0(name, "_N1")
-      } else {
-        paste0(name, "_N")
-      }
-      if (!vname %in% vars && paste0(name, "_N") %in% vars) {
-        vname <- paste0(name, "_N")
-      }
-      if (vname %in% vars) {
-        biom <- box_slice_t0(nc_get(nc, vname), time_i)
-        vol2 <- box_slice_t0(tryCatch(nc_volume(nc), error = function(e) NULL),
-                             time_i)
-        if (!is.null(vol2) && !is.null(dim(biom)) && length(dim(biom)) == 2L &&
-            length(dim(vol2)) == 2L && all(dim(biom) == dim(vol2))) {
-          mass <- sum_z_to_box(biom * vol2)
-        } else {
-          mass <- sum_z_to_box(biom)
-          if (length(vol) == length(mass) && any(is.finite(vol) & vol > 0)) {
-            mass <- mass * vol
+      vnames <- pool_var_names(vars, name, n_coh, gtype)
+      if (length(vnames)) {
+        mass <- rep(0, n_box)
+        for (vname in vnames) {
+          biom <- box_slice_t0(nc_get(nc, vname), time_i, n_t)
+          vol2 <- box_slice_t0(tryCatch(nc_volume(nc), error = function(e) NULL),
+                               time_i, n_t)
+          if (!is.null(dim(biom)) && length(dim(biom)) == 2L) {
+            ## water-column pool, mg N m-3 x cell volume
+            if (!is.null(vol2) && length(dim(vol2)) == 2L && all(dim(biom) == dim(vol2))) {
+              m <- sum_z_to_box(biom * vol2)
+            } else {
+              m <- sum_z_to_box(biom)
+              if (length(vol) == length(m) && any(is.finite(vol) & vol > 0)) m <- m * vol
+            }
+          } else {
+            ## epibenthic pool, mg N m-2 x box area (atbiolmessage.c:499)
+            m <- as.numeric(biom)
+            if (length(box_area) == length(m)) m <- m * box_area
           }
+          m[!is.finite(m)] <- 0
+          if (length(m) == n_box) mass <- mass + m
         }
+        ## Atlantis feeds on pools as prey stage 0 only (pPREY1 rows;
+        ## atprocess.c:372), so pools are not an adult-stage prey.
         juv <- add_stage_stock(juv, mass, rep(0, n_box), NA_real_)
-        adl <- add_stage_stock(adl, mass, rep(0, n_box), NA_real_)
         pool <- add_stage_stock(pool, mass, rep(0, n_box), NA_real_)
         found <- TRUE
       }
@@ -471,8 +500,10 @@ e_for_prey <- function(par, prey_code, prey_type) {
 cohort_in_stage <- function(coh, age_mat, stage_int, n_coh) {
   if (is.na(stage_int)) return(TRUE)
   if (!is.finite(age_mat) || age_mat < 1) age_mat <- max(1, ceiling(n_coh / 2))
-  if (as.integer(stage_int) == 1L) return(coh < age_mat)
-  if (as.integer(stage_int) == 2L) return(coh >= age_mat)
+  ## Atlantis: adult when the 0-based cohort >= age_mat (atbiolsetup.c:542-562).
+  ## coh here is 1-based.
+  if (as.integer(stage_int) == 1L) return((coh - 1L) < age_mat)
+  if (as.integer(stage_int) == 2L) return((coh - 1L) >= age_mat)
   TRUE
 }
 
@@ -591,6 +622,7 @@ expected_predation_pressure <- function(pprey, grp, prm, init_nc,
   if (!is.finite(habitat_refuge)) habitat_refuge <- 1
 
   prey_mass_used <- matrix(0, nrow(pprey), ncol(pprey), dimnames = dimnames(pprey))
+  unsupported <- character()
 
   for (ri in seq_len(nrow(pprey))) {
     pred_code <- meta$pred_code[ri]
@@ -604,6 +636,11 @@ expected_predation_pressure <- function(pprey, grp, prm, init_nc,
     n_coh <- pred_g$n_coh
     age_mat <- pred_g$age_mat
     predcase <- par$predcase
+    if (is.finite(as.numeric(predcase)) && !as.integer(predcase) %in% 0:2) {
+      ## Only Holling I, II and III are implemented here (D06).
+      unsupported <- c(unsupported, pred_code)
+      next
+    }
     absolute <- identical(as.integer(par$flagfishrates), 0L) && n_coh > 1L
 
     cons_row <- rep(0, ncol(pprey))
@@ -667,7 +704,7 @@ expected_predation_pressure <- function(pprey, grp, prm, init_nc,
         e_av[pj] <- e_for_prey(par, prey_codes[pj], prey_type[pj]) * avail[pj]
       }
       eaten <- holling_ingest_mgn_day(
-        C_use, mum_use, avail, e_av, pred_scale, predcase
+        C_use, mum_use, avail, e_av, pred_scale, predcase, e_live = par$E_live
       )
       cons_row <- cons_row + eaten
       prey_mass_row <- prey_mass_row + prey_mass_b
@@ -681,6 +718,16 @@ expected_predation_pressure <- function(pprey, grp, prm, init_nc,
     gape_mat[ri, ] <- ifelse(gape_n > 0, gape_row / pmax(gape_n, 1), 0)
   }
 
+  if (length(unsupported)) {
+    notes <- c(notes, paste0(
+      "Not computed (functional response predcase other than 0, 1 or 2): ",
+      paste(unique(unsupported), collapse = ", "), "."
+    ))
+  }
+  notes <- c(notes, paste(
+    "Screening index, not Atlantis intake: box totals, stage-mean rates and no",
+    "Q10, satiation cap or refuge. Compare with the realised intake shown for the selected pair."
+  ))
   frac[!is.finite(frac)] <- 0
   cons[!is.finite(cons)] <- 0
   year <- frac * 365
@@ -994,7 +1041,7 @@ pressure_pair_by_box <- function(pprey, grp, prm, nc,
       e_av[j] <- e_for_prey(par, prey_codes[j], prey_type[j]) * avail[j]
     }
     eaten <- holling_ingest_mgn_day(
-      C_use, mum_use, avail, e_av, pred_scale, par$predcase
+      C_use, mum_use, avail, e_av, pred_scale, par$predcase, e_live = par$E_live
     )
     cons <- if (length(eaten) >= pj) eaten[pj] else 0
     frac <- if (prey_mass > 0) cons / prey_mass else 0
@@ -1012,49 +1059,67 @@ pressure_pair_by_box <- function(pprey, grp, prm, nc,
   do.call(rbind, out)
 }
 
-##' Prey production (t/day) from outputPROD.nc Growth / Prodn.
+##' Prey production (t/day) at one time step.
+##'
+##' Age-structured prey: sum over cohorts and boxes of Nums x Growth, where
+##' <Name><c>_Growth is mg N per individual per day (PROD units) and Nums
+##' comes from output.nc. Pools: <Name>Prodn (mg N m-3 d-1) x cell volume.
 prey_production_t_day <- function(nc_prod, nc_out, grp, prey_code,
                                   time_i = 1L, mg2t = MG2T_DEFAULT,
                                   x.cn = XCN_DEFAULT) {
   if (is.null(nc_prod) || is.null(grp) || pprey_is_none(prey_code)) {
     return(NA_real_)
   }
-  if (!is.null(grp)) names(grp) <- tolower(names(grp))
+  names(grp) <- tolower(names(grp))
   row <- grp[as.character(grp$code) == as.character(prey_code)[1], , drop = FALSE]
   if (nrow(row) == 0) return(NA_real_)
   name <- as.character(row$name[1])
   n.coh <- as.integer(row$numcohorts[1])
   gtype <- as.character(row$grouptype[1])
-  vns <- tryCatch(
-    prod_growth_vars(names(nc_prod$var), name, n.coh, gtype),
-    error = function(e) character()
-  )
-  if (!length(vns)) return(NA_real_)
-  acc <- NULL
-  for (vn in vns) {
-    arr <- tryCatch(nc_get(nc_prod, vn), error = function(e) NULL)
-    acc <- add_nc_arrays(acc, arr)
+  t <- max(1L, as.integer(time_i)[1])
+  if (prod_is_age_structured(n.coh, gtype)) {
+    if (is.null(nc_out)) return(NA_real_)
+    tot <- 0
+    found <- FALSE
+    for (coh in seq_len(n.coh)) {
+      g_var <- paste0(name, coh, "_Growth")
+      n_var <- paste0(name, coh, "_Nums")
+      if (!g_var %in% names(nc_prod$var) || !n_var %in% names(nc_out$var)) next
+      g <- nc_get(nc_prod, g_var)
+      n <- nc_get(nc_out, n_var)
+      if (length(dim(g)) == 3) g <- apply(g, c(2, 3), sum, na.rm = TRUE)
+      if (length(dim(n)) == 3) n <- apply(n, c(2, 3), sum, na.rm = TRUE)
+      if (length(dim(g)) != 2 || length(dim(n)) != 2) next
+      tt <- min(t, ncol(g), ncol(n))
+      nb <- min(nrow(g), nrow(n))
+      tot <- tot + sum(n[seq_len(nb), tt] * g[seq_len(nb), tt], na.rm = TRUE)
+      found <- TRUE
+    }
+    if (!found) return(NA_real_)
+    return(tot * mg2t * x.cn)
   }
-  if (is.null(acc)) return(NA_real_)
-  sl <- box_slice_t0(acc, time_i)
+  vn <- paste0(name, "Prodn")
+  if (!vn %in% names(nc_prod$var)) return(NA_real_)
+  arr <- nc_get(nc_prod, vn)
   vol <- tryCatch(nc_volume(nc_prod), error = function(e) NULL)
-  if (is.null(vol) && !is.null(nc_out)) {
-    vol <- tryCatch(nc_volume(nc_out), error = function(e) NULL)
+  if (is.null(vol) && !is.null(nc_out)) vol <- tryCatch(nc_volume(nc_out), error = function(e) NULL)
+  if (length(dim(arr)) == 3 && !is.null(vol) && length(dim(vol)) == 3) {
+    tt <- min(t, dim(arr)[3], dim(vol)[3])
+    return(sum(arr[, , tt] * vol[, , tt], na.rm = TRUE) * mg2t * x.cn)
   }
-  vol_sl <- box_slice_t0(vol, time_i)
-  if (!is.null(sl) && !is.null(vol_sl) && !is.null(dim(sl)) &&
-      length(dim(sl)) == 2L && length(dim(vol_sl)) == 2L &&
-      all(dim(sl) == dim(vol_sl))) {
-    mass <- sum(sl * vol_sl, na.rm = TRUE)
-  } else {
-    mass <- sum(as.numeric(sl), na.rm = TRUE)
+  if (length(dim(arr)) == 2) {
+    area <- if (!is.null(nc_out)) nc_box_area(nc_out) else nc_box_area(nc_prod)
+    tt <- min(t, ncol(arr))
+    if (length(area) == nrow(arr)) return(sum(arr[, tt] * area, na.rm = TRUE) * mg2t * x.cn)
   }
-  mass * mg2t * x.cn
+  NA_real_
 }
 
 ##' DietCheck, SpecificPredMort and production next to expected pressure.
 pressure_vs_realised <- function(press, diet, pred_mort, pred, prey,
-                                 production_t_day = NA_real_) {
+                                 production_t_day = NA_real_,
+                                 realised_pred_t_day = NA_real_,
+                                 realised_pair_t_day = NA_real_) {
   empty <- data.frame(
     Source = character(), Value = numeric(), Note = character(),
     stringsAsFactors = FALSE
@@ -1087,7 +1152,8 @@ pressure_vs_realised <- function(press, diet, pred_mort, pred, prey,
     )
     if (!is.null(pm) && nrow(pm) > 0) {
       mort_val <- mean(pm$Value, na.rm = TRUE)
-      mort_note <- "SpecificPredMort mean predation mortality on this prey from this predator."
+      mort_note <- paste("Mean over prey age classes and output periods of the fraction of",
+                         "the prey's numbers killed by this predator per output period (not per day).")
     } else {
       mort_note <- attr(pm, "reason")
       if (is.null(mort_note) || !nzchar(mort_note)) {
@@ -1106,18 +1172,23 @@ pressure_vs_realised <- function(press, diet, pred_mort, pred, prey,
   }
   data.frame(
     Source = c(
-      "Expected consumption (t/day)",
-      "Expected prey loss / day",
-      "Expected share of predator consumption",
+      "Screening index: consumption (t/day)",
+      "Screening index: prey loss / day",
+      "Screening index: share of predator consumption",
+      "Atlantis realised intake of predator (t/day)",
+      "Atlantis realised intake of this prey (t/day)",
       "DietCheck mean proportion",
-      "SpecificPredMort mean",
+      "SpecificPredMort mean (fraction per output period)",
       "Prey production (t/day)"
     ),
-    Value = c(pair_t, pair_f, share, diet_val, mort_val, production_t_day),
+    Value = c(pair_t, pair_f, share, realised_pred_t_day, realised_pair_t_day,
+              diet_val, mort_val, production_t_day),
     Note = c(
-      "Holling Gr_j, system-wide.",
+      "Holling Gr_j summed over boxes. Not Atlantis intake (validation D05).",
       "Gr_j / prey biomass.",
       "Gr_prey / sum Gr.",
+      "Sum over cohorts and boxes of Nums x Growth / E from output.nc and outputPROD.nc.",
+      "Cohort intake x that cohort's DietCheck proportion, summed.",
       diet_note,
       mort_note,
       prod_note

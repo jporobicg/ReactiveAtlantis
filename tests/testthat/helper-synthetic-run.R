@@ -1,7 +1,13 @@
 ## Shared synthetic Atlantis run used by unit tests and shinytest2 e2e.
 
 ra_pkg_root <- function() {
-  cand <- c(getwd(), file.path(getwd(), "..", ".."), file.path(getwd(), ".."))
+  ## Source checkout (devtools::test, testthat::test_dir) or R CMD check,
+  ## which runs tests in <pkg>.Rcheck/tests/testthat and keeps the unpacked
+  ## source tree in <pkg>.Rcheck/00_pkg_src/<pkg>.
+  wd <- getwd()
+  cand <- c(wd, file.path(wd, ".."), file.path(wd, "..", ".."),
+            file.path(wd, "..", "..", "00_pkg_src", "ReactiveAtlantis"),
+            file.path(wd, "..", "00_pkg_src", "ReactiveAtlantis"))
   for (p in cand) {
     if (file.exists(file.path(p, "inst", "shiny", "app.R"))) {
       return(normalizePath(p))
@@ -210,13 +216,15 @@ write_synthetic_atlantis_run <- function(dir) {
     COD.0.S0.M2 = 0.3, COD.1.S0.M2 = 0.28
   )
   utils::write.table(mort, file.path(dir, "SpecificMort.txt"), row.names = FALSE, quote = FALSE)
+  ## Atlantis layout: Group/Cohort/Stock are the PREY, one column per PREDATOR.
+  ## COD eats PHY (pool, cohort 0) and its own juveniles (cohort 0).
   pred_mort <- data.frame(
-    Time = rep(c(0, 365, 730), each = 2),
-    Group = "COD",
-    Cohort = rep(0:1, times = 3),
+    Time = rep(c(0, 365, 730), each = 3),
+    Group = rep(c("PHY", "COD", "COD"), times = 3),
+    Cohort = rep(c(0, 0, 1), times = 3),
     Stock = 0,
-    COD = c(0.05, 0.02, 0.06, 0.03, 0.04, 0.02),
-    PHY = c(0.25, 0.26, 0.22, 0.24, 0.20, 0.21),
+    COD = c(0.25, 0.05, 0, 0.22, 0.06, 0, 0.20, 0.04, 0),
+    PHY = 0,
     stringsAsFactors = FALSE
   )
   utils::write.table(pred_mort, file.path(dir, "SpecificPredMort.txt"),

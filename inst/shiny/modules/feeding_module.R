@@ -138,7 +138,7 @@ feeding_server <- function(id, project = NULL) {
     output$matrix_caption <- renderUI({
       if (identical(input$view_type, "pressure")) {
         p(class = "ra-muted",
-          "Every predator x prey cell is the expected predation pressure from the Atlantis feeding equations at the selected biomass time. Hover for consumption (t/day) and prey loss. Click to select. The map below is that pair per box.")
+          "Screening index, not Atlantis intake: each cell is a simplified Holling calculation from pPREY, C, mum and biomass at the selected time (box totals, no Q10, satiation cap or refuge). Use it to rank links. On NESP it ran about 35x above the intake Atlantis realised, which is shown in the table for the selected pair.")
       } else {
         p(class = "ra-muted",
           "Every predator x prey cell is drawn, including zeros. Scroll or zoom if the matrix is large.")
@@ -579,10 +579,11 @@ feeding_server <- function(id, project = NULL) {
         attr(out, "reason") <- "Load outputPROD.nc to plot consumed biomass."
         return(out)
       }
-      tot <- tryCatch(consumed_tonnes(dat$nc_prod, dat$nc_out, dat$grp, pred),
+      tot <- tryCatch(consumed_tonnes(dat$nc_prod, dat$nc_out, dat$grp, pred,
+                                      prm = dat$prm_bio),
                       error = function(e) NULL)
       diet <- if (!is.null(dat$diet_time)) dat$diet_time else dat$diet_full
-      consumed_pair_series(if (is.null(tot)) NULL else tot$tonnes, diet, pred, prey)
+      consumed_pair_series(tot, diet, pred, prey, diet_full = dat$diet_full)
     })
 
     output$diet_prop_plot <- renderPlot({
@@ -783,8 +784,21 @@ feeding_server <- function(id, project = NULL) {
           if (is.finite(prod) && is.data.frame(tab) && "Prey" %in% names(tab)) {
             tab <- pressure_flag_vs_production(tab, input$prey_group, prod)
           }
+          real <- tryCatch({
+            tot <- consumed_tonnes(dat$nc_prod, dat$nc_out, dat$grp, input$pred_group,
+                                   prm = dat$prm_bio)
+            t_days <- nc_t_days(dat$nc_out)
+            t_sel <- if (length(t_days) >= time_i) t_days[time_i] else NA_real_
+            i <- which.min(abs(tot$time - t_sel))
+            pair <- consumed_pair_series(tot, dat$diet_time, input$pred_group,
+                                         input$prey_group, diet_full = dat$diet_full)
+            j <- if (nrow(pair)) which.min(abs(pair$Time - t_sel)) else integer()
+            c(pred = if (length(i)) tot$tonnes[i] else NA_real_,
+              pair = if (length(j)) pair$Tonnes[j] else NA_real_)
+          }, error = function(e) c(pred = NA_real_, pair = NA_real_))
           pressure_vs_realised(
-            press, diet, pred_mort, input$pred_group, input$prey_group, prod
+            press, diet, pred_mort, input$pred_group, input$prey_group, prod,
+            realised_pred_t_day = real[["pred"]], realised_pair_t_day = real[["pair"]]
           )
         }, error = function(e) NULL)
         if (!is.null(cmp) && nrow(cmp) > 0 &&
@@ -915,7 +929,7 @@ feed_bio_struct <- function(nc.file, groups.csv){
         if(length(dim(Numb)) > 2){
           Numb <- Numb[, , 1]
         }
-        Biom.N[code, cohort] <- sum(StructN + ReservN * Numb, na.rm = TRUE)
+        Biom.N[code, cohort] <- sum((StructN + ReservN) * Numb, na.rm = TRUE)
         Struct[code, cohort] <- max(StructN, na.rm = TRUE)
       }
     }
@@ -958,8 +972,12 @@ gape.func <- function(groups.csv, Struct, Biom.N, prm){
                      adult.Min = NA, adult.Max = NA, juv.Min = NA,
                      juv.Max = NA, JminS = NA, JmaxS = NA, AminS = NA, AmaxS = NA)
   Gape <- dplyr::left_join(Gape, age, by = 'FG')
-  Gape$Age.Young <- Gape$Age.Adult - 1
-  Gape$Age.Young <- ifelse(Gape$Age.Young == 0, 1, Gape$Age.Young)
+  ## Atlantis: adult when the 0-based cohort >= age_mat, so the first adult
+
+  ## cohort (1-based) is age_mat + 1 and the last juvenile is age_mat (D08).
+
+  Gape$Age.Young <- pmax(1, Gape$Age.Adult)
+  Gape$Age.Adult <- Gape$Age.Adult + 1
   Biom.N <- Biom.N[order(row.names(Biom.N)), , drop = FALSE]
   Struct <- data.frame(as.factor(row.names(Struct)), Struct)
   names(Struct) <- c('FG', paste0('Age_', 1:(ncol(Struct) - 1)))
@@ -970,7 +988,7 @@ gape.func <- function(groups.csv, Struct, Biom.N, prm){
     if(all(is.na(Gape[i, ages.pos]))) next()
     Gape$adult.Min[i] <- Gape[i, ages.pos[Gape$Age.Adult[i]]] * Gape$KLP[i]
     Gape$adult.Max[i] <- Gape[i, ages.pos[sum(!is.na(Gape[i, ages.pos]))]] * Gape$KUP[i]
-    Gape$juv.Max[i] <- Gape[i, ages.pos[Gape$Age.Young[i]]] * Gape$KLP[i]
+    Gape$juv.Max[i] <- Gape[i, ages.pos[Gape$Age.Young[i]]] * Gape$KUP[i]
     Gape$JminS[i] <- Gape[i, ages.pos[1]]
     Gape$AminS[i] <- Gape[i, ages.pos[Gape$Age.Adult[i]]]
     Gape$JmaxS[i] <- Gape[i, ages.pos[Gape$Age.Young[i]]]

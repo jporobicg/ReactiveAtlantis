@@ -1,14 +1,6 @@
 ## Expected predation pressure from Atlantis feeding equations.
 
-find_pkg_root <- function() {
-  cand <- c(getwd(), file.path(getwd(), "..", ".."), file.path(getwd(), ".."))
-  for (p in cand) {
-    if (file.exists(file.path(p, "inst", "shiny", "modules", "analysis_helpers.R"))) {
-      return(normalizePath(p))
-    }
-  }
-  stop("Cannot find package root")
-}
+find_pkg_root <- function() ra_pkg_root()
 
 root <- find_pkg_root()
 mod <- file.path(root, "inst", "shiny", "modules")
@@ -206,9 +198,10 @@ test_that("realised compare and production flags use DietCheck and SpecificPredM
   expect_true(is.finite(prod) && prod > 0)
   cmp <- pressure_vs_realised(press, diet, pred_mort, "COD", "PHY", prod)
   expect_true("DietCheck mean proportion" %in% cmp$Source)
-  expect_true("SpecificPredMort mean" %in% cmp$Source)
+  expect_true("SpecificPredMort mean (fraction per output period)" %in% cmp$Source)
+  expect_true("Atlantis realised intake of predator (t/day)" %in% cmp$Source)
   expect_true(is.finite(cmp$Value[cmp$Source == "DietCheck mean proportion"]))
-  expect_true(is.finite(cmp$Value[cmp$Source == "SpecificPredMort mean"]))
+  expect_true(is.finite(cmp$Value[cmp$Source == "SpecificPredMort mean (fraction per output period)"]))
   expect_equal(cmp$Value[cmp$Source == "Prey production (t/day)"], prod)
   flagged <- pressure_flag_vs_production(press$cells, "PHY", 0)
   expect_true(any(flagged$Flag == "loss > prey production / day"))

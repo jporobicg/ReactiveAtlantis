@@ -90,7 +90,7 @@ mortality_missing_message <- function(status, view = "source") {
 pred_mort_is_trunk <- function(df) {
   if (is.null(df) || ncol(df) < 2) return(FALSE)
   nms <- tolower(names(df))
-  any(nms %in% c("group", "predator", "pred")) &&
+  any(nms %in% c("group", "prey", "predator", "pred")) &&
     any(nms %in% c("cohort", "agecl", "age"))
 }
 
@@ -102,9 +102,12 @@ pred_mort_is_specific_mort_style <- function(df) {
 }
 
 pred_mort_rename_ids <- function(df) {
+  ## Atlantis writes SpecificPredMort.txt as Time, Group, Cohort, Stock and
+  ## one column per PREDATOR; Group/Cohort/Stock identify the PREY
+  ## (atbiolmessage.c: calcTrackedPredMort[prey][cohort][stock][pred]).
   nms <- names(df)
   low <- tolower(nms)
-  if (any(low == "group")) names(df)[low == "group"] <- "Predator"
+  if (any(low == "group") && !any(low == "prey")) names(df)[low == "group"] <- "Prey"
   if (any(low == "predator")) names(df)[low == "predator"] <- "Predator"
   if (any(low == "pred")) names(df)[low == "pred"] <- "Predator"
   if (any(low == "cohort")) names(df)[low == "cohort"] <- "Cohort"
@@ -113,20 +116,23 @@ pred_mort_rename_ids <- function(df) {
     names(df)[low == "age"] <- "Cohort"
   }
   if (any(low == "time")) names(df)[low == "time"] <- "Time"
-  if (any(low == "prey") && !"Prey" %in% names(df)) {
-    names(df)[low == "prey"] <- "Prey"
-  }
+  if (any(low == "stock")) names(df)[low == "stock"] <- "Stock"
   if (any(low %in% c("atoutput", "value", "mort")) && !"Value" %in% names(df)) {
     names(df)[match(low[low %in% c("atoutput", "value", "mort")][1], low)] <- "Value"
   }
   df
 }
 
-##' Predation mortality on a prey group, by predator and age.
+##' Predation mortality on a prey group, by predator and prey age class.
 ##'
-##' Trunk SpecificPredMort.txt is Time, Group, Cohort, Stock plus one
-##' column per prey. Wide SpecificMort-style files cannot be split by
-##' predator; those return an empty table with a reason attribute.
+##' Atlantis SpecificPredMort.txt is Time, Group, Cohort, Stock plus one
+##' column per predator. Group and Cohort are the prey and its age class
+##' (atbiolmessage.c, calcTrackedPredMort[prey][cohort][stock][pred]).
+##' Values are the fraction of the prey's start-of-period numbers killed by
+##' each predator over the accounting period, not a daily rate.
+##' A long file with explicit Predator, Prey and Value columns is also read.
+##' Wide SpecificMort-style files cannot be split by predator; those return
+##' an empty table with a reason attribute.
 parse_pred_mort_by_predator <- function(pred_mort, prey_code, pred_code = NULL) {
   empty <- data.frame(
     Time = numeric(), Predator = character(), Age = character(),
@@ -138,25 +144,33 @@ parse_pred_mort_by_predator <- function(pred_mort, prey_code, pred_code = NULL) 
   }
   prey_code <- as.character(prey_code)[1]
   df <- pred_mort_rename_ids(pred_mort)
-  if (pred_mort_is_trunk(df)) {
-    id <- intersect(c("Time", "Predator", "Cohort", "Stock", "Prey"), names(df))
-    if ("Value" %in% names(df) && "Prey" %in% names(df)) {
-      long <- df[, c(intersect(c("Time", "Predator", "Cohort", "Prey", "Value"),
-                               names(df))), drop = FALSE]
+  if (pred_mort_is_trunk(pred_mort)) {
+    if (all(c("Value", "Prey", "Predator") %in% names(df))) {
+      long <- df[, intersect(c("Time", "Predator", "Cohort", "Prey", "Value"),
+                             names(df)), drop = FALSE]
     } else {
-      prey_cols <- setdiff(names(df), c("Time", "Predator", "Cohort", "Stock"))
-      if (length(prey_cols) == 0) {
-        attr(empty, "reason") <- "SpecificPredMort.txt has no prey columns."
+      ids <- intersect(c("Time", "Prey", "Cohort", "Stock"), names(df))
+      pred_cols <- setdiff(names(df), ids)
+      if (length(pred_cols) == 0 || !"Prey" %in% names(df)) {
+        attr(empty, "reason") <- "SpecificPredMort.txt has no predator columns."
+        return(empty)
+      }
+      rows <- df[as.character(df$Prey) == prey_code, , drop = FALSE]
+      if (nrow(rows) == 0) {
+        attr(empty, "reason") <- paste(
+          "No predation mortality on", prey_code, "in SpecificPredMort.txt."
+        )
         return(empty)
       }
       long <- reshape2::melt(
-        df[, c(intersect(c("Time", "Predator", "Cohort"), names(df)), prey_cols),
-           drop = FALSE],
-        id.vars = intersect(c("Time", "Predator", "Cohort"), names(df)),
-        variable.name = "Prey", value.name = "Value",
+        rows[, c(intersect(c("Time", "Prey", "Cohort"), names(rows)), pred_cols),
+             drop = FALSE],
+        id.vars = intersect(c("Time", "Prey", "Cohort"), names(rows)),
+        variable.name = "Predator", value.name = "Value",
         factorsAsStrings = TRUE
       )
     }
+    long$Predator <- as.character(long$Predator)
     long$Prey <- as.character(long$Prey)
     long$Value <- as.numeric(long$Value)
     long <- long[long$Prey == prey_code & is.finite(long$Value), , drop = FALSE]
@@ -184,7 +198,7 @@ parse_pred_mort_by_predator <- function(pred_mort, prey_code, pred_code = NULL) 
   if (pred_mort_is_specific_mort_style(df)) {
     attr(empty, "reason") <- paste(
       "SpecificPredMort.txt has SpecificMort-style columns (CODE.age.S0.M1/M2/F).",
-      "Atlantis trunk writes Time, Group, Cohort, Stock and one column per prey."
+      "Atlantis writes Time, Group (prey), Cohort, Stock and one column per predator."
     )
     return(empty)
   }
@@ -318,15 +332,24 @@ dietcheck_pair_series <- function(diet_time, pred, prey) {
   agg
 }
 
-##' Consumed tonnes of one prey by one predator (Eat/Grazing x DietCheck).
-consumed_pair_series <- function(tonnes, diet_time, pred, prey) {
+##' Consumption of one prey by one predator (t/day): cohort intake x cohort
+##' DietCheck proportion when available (see consumed_tonnes), else the total
+##' intake x cohort-mean diet. `tot` is a consumed_tonnes() result or a
+##' numeric series.
+consumed_pair_series <- function(tot, diet_time, pred, prey, diet_full = NULL) {
   empty <- data.frame(Time = numeric(), Tonnes = numeric(),
                       stringsAsFactors = FALSE)
+  tonnes <- if (is.list(tot)) tot$tonnes else tot
   if (is.null(tonnes) || !length(tonnes)) {
     attr(empty, "reason") <- "Load outputPROD.nc to plot consumed biomass."
     return(empty)
   }
-  long <- consumption_by_prey(as.numeric(tonnes), diet_time, pred)
+  long <- if (is.list(tot) && !is.null(tot$by_cohort) && !is.null(diet_full)) {
+    consumption_by_prey_cohort(tot$by_cohort, diet_full, pred)
+  } else {
+    consumption_by_prey(as.numeric(tonnes), diet_time, pred,
+                        time = if (is.list(tot)) tot$time else NULL)
+  }
   if (nrow(long) == 0) {
     attr(empty, "reason") <- paste(
       "No DietCheck proportions for", pred, "to split consumed biomass."

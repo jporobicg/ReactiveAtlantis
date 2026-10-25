@@ -53,8 +53,8 @@ overview_server <- function(id, project) {
       ## Cards stay cheap: BiomIndx health only. Problem-cohort counts wait for the table.
       sm <- summarise_run(dat$grp, dat$nc_out, dat$biomindx, dat$time_dates)
       flags <- tryCatch(health(), error = function(e) NULL)
-      n_ext <- if (is.null(flags)) NA else sum(flags$Flag == "Extinct (<1%)")
-      n_exp <- if (is.null(flags)) NA else sum(flags$Flag == "Exploding (>10x)")
+      n_ext <- if (is.null(flags)) NA else sum(startsWith(flags$Flag, "Collapsed"))
+      n_exp <- if (is.null(flags)) NA else sum(startsWith(flags$Flag, "Increased"))
       n_coh <- NA
 
       bslib::layout_column_wrap(
@@ -79,12 +79,12 @@ overview_server <- function(id, project) {
           theme = "secondary"
         ),
         bslib::value_box(
-          title = "Extinct (<1%)",
+          title = "Collapsed (< 1%)",
           value = ifelse(is.na(n_ext), "—", n_ext),
           theme = if (!is.na(n_ext) && n_ext > 0) "danger" else "success"
         ),
         bslib::value_box(
-          title = "Exploding (>10x)",
+          title = "Increased (> 10\u00d7)",
           value = ifelse(is.na(n_exp), "—", n_exp),
           theme = if (!is.na(n_exp) && n_exp > 0) "warning" else "success"
         ),

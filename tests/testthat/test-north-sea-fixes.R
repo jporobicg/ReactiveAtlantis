@@ -2,16 +2,7 @@
 ## ~  North Sea naming, colours, and scaling     ~ ##
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
 
-find_pkg_root <- function() {
-  cand <- c(getwd(), file.path(getwd(), "..", ".."), file.path(getwd(), ".."))
-  for (p in cand) {
-    catch_path <- file.path(p, "inst", "shiny", "modules", "catch_module.R")
-    if (file.exists(catch_path)) {
-      return(normalizePath(p))
-    }
-  }
-  stop("Cannot find package root")
-}
+find_pkg_root <- function() ra_pkg_root()
 
 root <- find_pkg_root()
 mod <- file.path(root, "inst", "shiny", "modules")
@@ -486,8 +477,8 @@ test_that("biomass_health flags extinct and exploding groups", {
                     stringsAsFactors = FALSE)
   biom <- data.frame(Time = c(0, 100), COD = c(100, 0.4), HAD = c(10, 200), PHY = c(50, 55))
   tbl <- biomass_health(biom, grp)
-  expect_equal(tbl$Flag[tbl$Code == "COD"], "Extinct (<1%)")
-  expect_equal(tbl$Flag[tbl$Code == "HAD"], "Exploding (>10x)")
+  expect_equal(tbl$Flag[tbl$Code == "COD"], "Collapsed (< 1% of initial)")
+  expect_equal(tbl$Flag[tbl$Code == "HAD"], "Increased (> 10\u00d7 initial)")
   expect_equal(tbl$Flag[tbl$Code == "PHY"], "OK")
 })
 
@@ -528,7 +519,7 @@ test_that("overview_server shows health after a run is loaded", {
 
   shiny::testServer(overview_server, args = list(project = proj), {
     cards <- paste(as.character(output$cards$html), collapse = " ")
-    expect_true(grepl("Extinct", cards) || grepl("Groups on", cards) || nchar(cards) > 0)
+    expect_true(grepl("Collapsed", cards) || grepl("Groups on", cards) || nchar(cards) > 0)
     tbl <- output$health_table
     expect_true(!is.null(tbl))
   })
@@ -816,12 +807,22 @@ test_that("cod1_Eat and diatomsGrazing become tonnes split by DietCheck", {
   )
   expect_true(all(c("volume", "nominal_dz", "dz", "topk", "numlayers",
                     "is_boundary", "cod1_Growth", "diatomsProdn") %in% names(nc_prod$var)))
-  tot <- consumed_tonnes(nc_prod, nc_out, grp, "COD")
-  expect_equal(tot$variables, c("cod1_Eat", "cod2_Eat"))
+  ## Age-structured intake needs E (validation D16): without it, a clear error.
+  expect_error(consumed_tonnes(nc_prod, nc_out, grp, "COD"), "E_COD")
+  tot <- consumed_tonnes(nc_prod, nc_out, grp, "COD", prm = "E_COD 0.5")
+  expect_equal(tot$method, "growth_over_E")
+  expect_equal(tot$unit, "t/day")
   expect_equal(length(tot$tonnes), 3)
-  expect_true(all(tot$tonnes > 0))
-  ## PROD volume (2e6) is used, not biology output volume (1e6)
-  expect_equal(tot$tonnes[1], 2 * 3 * 2e6 * 1.5 * 0.00000002 * 5.7, tolerance = 1e-8)
+  ## Independent of the helper: sum(Nums x Growth) / E x X_CN x mg2t
+  manual <- 0
+  for (c in 1:2) {
+    nums <- ncdf4::ncvar_get(nc_out, paste0("cod", c, "_Nums"))
+    gr <- ncdf4::ncvar_get(nc_prod, paste0("cod", c, "_Growth"))
+    nb <- apply(nums, c(2, 3), sum)
+    gb <- if (length(dim(gr)) == 3) apply(gr, c(2, 3), sum) else gr
+    manual <- manual + sum(nb[, 1] * gb[, 1])
+  }
+  expect_equal(tot$tonnes[1], manual / 0.5 * 5.7 * 0.00000002, tolerance = 1e-10)
   phy <- consumed_tonnes(nc_prod, nc_out, grp, "PHY")
   expect_equal(phy$variables, "diatomsGrazing")
   diet <- data.table::data.table(
@@ -832,11 +833,11 @@ test_that("cod1_Eat and diatomsGrazing become tonnes split by DietCheck", {
     COD = 0,
     PHY = 1
   )
-  by_prey <- consumption_by_prey(tot$tonnes, diet, "COD")
+  by_prey <- consumption_by_prey(tot$tonnes, diet, "COD", time = tot$time)
   expect_true("PHY" %in% by_prey$Prey)
   expect_equal(sum(by_prey$Tonnes[by_prey$Prey == "PHY"]), sum(tot$tonnes),
                tolerance = 1e-8)
-  as_prey <- consumption_as_prey(nc_prod, nc_out, grp, "PHY", diet)
+  as_prey <- consumption_as_prey(nc_prod, nc_out, grp, "PHY", diet, prm = "E_COD 0.5")
   expect_true("COD" %in% as_prey$Predator)
   expect_true(all(as_prey$Tonnes > 0))
 })

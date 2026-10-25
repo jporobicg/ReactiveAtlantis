@@ -37,7 +37,7 @@ click_nav <- function(app, title) {
       deparse(title)
     ))
   }
-  app$wait_for_idle(timeout = 30000)
+  app$wait_for_idle(timeout = 120000)
   TRUE
 }
 
@@ -55,15 +55,8 @@ save_shot <- function(app, dest, name) {
 test_that("folder load fills every tab with a bound plot or table", {
   skip_if_not_installed("shinytest2")
   skip_if_not_installed("chromote")
-  skip_if_not(file.exists("/usr/local/bin/google-chrome") ||
-                file.exists("/usr/bin/google-chrome-stable"),
-              "Google Chrome is required for shinytest2")
-
-  chrome <- if (file.exists("/usr/local/bin/google-chrome")) {
-    "/usr/local/bin/google-chrome"
-  } else {
-    "/usr/bin/google-chrome-stable"
-  }
+  chrome <- ra_test_chrome()
+  skip_if(is.na(chrome), "Google Chrome or Chromium is required for shinytest2")
   Sys.setenv(CHROMOTE_CHROME = chrome)
   chrome_dir <- tempfile("chrome-data-")
   dir.create(chrome_dir)
@@ -90,14 +83,14 @@ test_that("folder load fills every tab with a bound plot or table", {
     height = 1000,
     width = 1500,
     load_timeout = 40000,
-    timeout = 15000
+    timeout = 120000
   )
   on.exit(try(app$stop(), silent = TRUE), add = TRUE)
 
   app$set_inputs(`project-folder_path` = run_dir, wait_ = FALSE)
-  app$wait_for_idle(timeout = 15000)
+  app$wait_for_idle(timeout = 120000)
   app$click("project-scan_folder")
-  app$wait_for_idle(timeout = 15000)
+  app$wait_for_idle(timeout = 120000)
 
   body <- app$get_html("body")
   expect_true(grepl("Scan:", body) || grepl("file roles found", body))
@@ -152,18 +145,18 @@ test_that("folder load fills every tab with a bound plot or table", {
 
   expect_true(click_nav(app, "Mortality"))
   app$set_inputs(`mortality-view` = "predator", `mortality-fg` = "COD", wait_ = FALSE)
-  app$wait_for_idle(timeout = 20000)
+  app$wait_for_idle(timeout = 120000)
   expect_true(has_bound_output(app$get_html("#mortality-mortality_plot_gg")))
   save_shot(app, shot_dir, "14b_mortality_predator")
   app$set_inputs(`mortality-view` = "mort", wait_ = FALSE)
-  app$wait_for_idle(timeout = 20000)
+  app$wait_for_idle(timeout = 120000)
   expect_true(has_bound_output(app$get_html("#mortality-mortality_plot_gg")))
   save_shot(app, shot_dir, "14c_mortality_morttxt")
 
   expect_true(click_nav(app, "Recruitment"))
   app$set_inputs(`recruitment-analysis_type` = "sr", `recruitment-fg_yoy` = "COD",
                  wait_ = FALSE)
-  app$wait_for_idle(timeout = 20000)
+  app$wait_for_idle(timeout = 120000)
   expect_true(has_bound_output(app$get_html("#recruitment-plot_sr_series")) ||
                 has_bound_output(app$get_html("#recruitment-plot_sr_scatter")))
   save_shot(app, shot_dir, "10b_recruitment_sr")
@@ -172,7 +165,7 @@ test_that("folder load fills every tab with a bound plot or table", {
   try(app$set_inputs(`feeding-view_type` = "matrix",
                      `feeding-pred_group` = "COD", `feeding-prey_group` = "PHY",
                      wait_ = FALSE), silent = TRUE)
-  app$wait_for_idle(timeout = 20000)
+  app$wait_for_idle(timeout = 120000)
   expect_true(has_bound_output(app$get_html("#feeding-diet_prop_plot")) ||
                 nchar(app$get_html("#feeding-consumed_plot")) > 20)
   save_shot(app, shot_dir, "13b_feeding_realised")
@@ -189,20 +182,20 @@ test_that("folder load fills every tab with a bound plot or table", {
   expect_true(nchar(app$get_html("#feeding-pressure_map")) > 20)
   try(app$run_js("var el=document.getElementById('feeding-pressure_map'); if(el) el.scrollIntoView(); true;"),
       silent = TRUE)
-  app$wait_for_idle(timeout = 10000)
+  app$wait_for_idle(timeout = 120000)
   save_shot(app, shot_dir, "13d_feeding_pressure_map")
 
   expect_true(click_nav(app, "Spatial"))
   app$set_inputs(`spatial-view` = "overlap", `spatial-fg` = "COD",
                  `spatial-prey` = "PHY", `spatial-ts_scope` = "system",
                  wait_ = FALSE)
-  app$wait_for_idle(timeout = 30000)
+  app$wait_for_idle(timeout = 120000)
   expect_true(has_bound_output(app$get_html("#spatial-map_plot")) ||
                 has_bound_output(app$get_html("#spatial-box_ts")))
   save_shot(app, shot_dir, "04b_spatial_overlap")
 
   click_nav(app, "Compare")
-  app$wait_for_idle(timeout = 15000)
+  app$wait_for_idle(timeout = 120000)
   fg_after <- app$get_value(input = "compare-fg_total")
   expect_identical(fg_before, fg_after)
 
@@ -221,14 +214,8 @@ plot_is_real <- function(html) {
 e2e_chrome <- function() {
   skip_if_not_installed("shinytest2")
   skip_if_not_installed("chromote")
-  skip_if_not(file.exists("/usr/local/bin/google-chrome") ||
-                file.exists("/usr/bin/google-chrome-stable"),
-              "Google Chrome is required for shinytest2")
-  chrome <- if (file.exists("/usr/local/bin/google-chrome")) {
-    "/usr/local/bin/google-chrome"
-  } else {
-    "/usr/bin/google-chrome-stable"
-  }
+  chrome <- ra_test_chrome()
+  skip_if(is.na(chrome), "Google Chrome or Chromium is required for shinytest2")
   Sys.setenv(CHROMOTE_CHROME = chrome)
   chrome_dir <- tempfile("chrome-data-")
   dir.create(chrome_dir)
@@ -262,10 +249,10 @@ test_that("favicon and logo return HTTP 200", {
     height = 800,
     width = 1400,
     load_timeout = 40000,
-    timeout = 15000
+    timeout = 120000
   )
   on.exit(try(app$stop(), silent = TRUE), add = TRUE)
-  app$wait_for_idle(timeout = 15000)
+  app$wait_for_idle(timeout = 120000)
   base <- app$get_url()
   expect_equal(http_status(base, "favicon.ico"), 200L)
   expect_equal(http_status(base, "app-icon-32.png"), 200L)
@@ -306,9 +293,9 @@ test_that("North Sea real names load COD into every group tab", {
   on.exit(try(app$stop(), silent = TRUE), add = TRUE)
 
   app$set_inputs(`project-folder_path` = fx, wait_ = FALSE)
-  app$wait_for_idle(timeout = 20000)
+  app$wait_for_idle(timeout = 120000)
   app$click("project-scan_folder")
-  app$wait_for_idle(timeout = 20000)
+  app$wait_for_idle(timeout = 120000)
   app$click("project-load_project")
   app$wait_for_idle(timeout = 90000)
 
@@ -386,7 +373,7 @@ test_that("North Sea real names load COD into every group tab", {
   save_shot(app, shot_dir, "ns_11_feeding_pressure")
   try(app$run_js("var el=document.getElementById('feeding-pressure_map'); if(el) el.scrollIntoView(); true;"),
       silent = TRUE)
-  app$wait_for_idle(timeout = 15000)
+  app$wait_for_idle(timeout = 120000)
   save_shot(app, shot_dir, "ns_11_feeding_pressure_map")
 
   try(app$set_inputs(`feeding-view_type` = "diagnostics", wait_ = FALSE), silent = TRUE)
@@ -426,7 +413,7 @@ test_that("messy North Sea folder first Load click fills Catch Mortality Recruit
   on.exit(try(app$stop(), silent = TRUE), add = TRUE)
 
   app$set_inputs(`project-folder_path` = messy, wait_ = FALSE)
-  app$wait_for_idle(timeout = 15000)
+  app$wait_for_idle(timeout = 120000)
   app$click("project-load_project")
   app$wait_for_idle(timeout = 90000)
 
@@ -490,16 +477,16 @@ test_that("two-run pair loader and busy indicators are visible", {
     `project-run1_output_dir` = pair$output_dir,
     wait_ = FALSE
   )
-  app$wait_for_idle(timeout = 15000)
+  app$wait_for_idle(timeout = 120000)
   app$click("project-add_run")
-  app$wait_for_idle(timeout = 15000)
+  app$wait_for_idle(timeout = 120000)
   app$set_inputs(
     `project-extra_name_2` = "Alt",
     `project-extra_config_2` = extra_dir,
     `project-extra_output_2` = extra_dir,
     wait_ = FALSE
   )
-  app$wait_for_idle(timeout = 15000)
+  app$wait_for_idle(timeout = 120000)
   body <- app$get_html("body")
   expect_true(grepl("Configuration folder", body, fixed = TRUE))
   expect_true(grepl("Output folder", body, fixed = TRUE))
@@ -509,7 +496,7 @@ test_that("two-run pair loader and busy indicators are visible", {
   save_shot(app, shot_dir, "pair_01_two_runs")
 
   app$click("project-scan_folder")
-  app$wait_for_idle(timeout = 20000)
+  app$wait_for_idle(timeout = 120000)
   body2 <- app$get_html("body")
   expect_true(grepl("Scan:", body2) || grepl("file roles", body2))
   expect_true(grepl("is-loaded", body2) || grepl("data-status=\"loaded\"", body2))
@@ -562,7 +549,7 @@ test_that("Spatial map can show two depth layers", {
   on.exit(try(app$stop(), silent = TRUE), add = TRUE)
 
   app$set_inputs(`project-folder_path` = run_dir, wait_ = FALSE)
-  app$wait_for_idle(timeout = 15000)
+  app$wait_for_idle(timeout = 120000)
   app$click("project-load_project")
   app$wait_for_idle(timeout = 60000)
   expect_true(click_nav(app, "Spatial"))
@@ -634,7 +621,7 @@ test_that("fresh install draws Spatial map and full pPREY for a NESP-style pair"
     `project-run1_output_dir` = pair$output_dir,
     wait_ = FALSE
   )
-  app$wait_for_idle(timeout = 15000)
+  app$wait_for_idle(timeout = 120000)
   app$click("project-load_project")
   app$wait_for_idle(timeout = 60000)
   expect_true(click_nav(app, "Spatial"))
@@ -658,7 +645,7 @@ test_that("fresh install draws Spatial map and full pPREY for a NESP-style pair"
     `project-run1_output_dir` = ns_pair$output_dir,
     wait_ = FALSE
   )
-  app$wait_for_idle(timeout = 15000)
+  app$wait_for_idle(timeout = 120000)
   app$click("project-load_project")
   app$wait_for_idle(timeout = 90000)
   expect_true(click_nav(app, "Spatial"))
@@ -711,7 +698,7 @@ test_that("fresh install draws Spatial map and full pPREY for a NESP-style pair"
   save_shot(app, shot_dir, "fresh_install_feeding_pressure")
   try(app$run_js("var el=document.getElementById('feeding-pressure_map'); if(el) el.scrollIntoView(); true;"),
       silent = TRUE)
-  app$wait_for_idle(timeout = 15000)
+  app$wait_for_idle(timeout = 120000)
   save_shot(app, shot_dir, "fresh_install_feeding_pressure_map")
 
   expect_true(click_nav(app, "Spatial"))

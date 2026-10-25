@@ -40,17 +40,22 @@ consumption_server <- function(id, project = NULL) {
       req(dat$nc_prod, dat$grp, fg_d(), view_d())
       fg <- fg_d()
       if (identical(view_d(), "predator")) {
-        tot <- consumed_tonnes(dat$nc_prod, dat$nc_out, dat$grp, fg)
+        tot <- consumed_tonnes(dat$nc_prod, dat$nc_out, dat$grp, fg, prm = dat$prm_bio)
         if (is.null(dat$diet_time)) {
-          return(data.frame(Time = seq_along(tot$tonnes), series = "Total",
+          return(data.frame(Time = tot$time, series = "Total",
                             Tonnes = tot$tonnes, stringsAsFactors = FALSE))
         }
-        long <- consumption_by_prey(tot$tonnes, dat$diet_time, fg)
+        long <- if (!is.null(tot$by_cohort) && !is.null(dat$diet_full)) {
+          consumption_by_prey_cohort(tot$by_cohort, dat$diet_full, fg)
+        } else {
+          consumption_by_prey(tot$tonnes, dat$diet_time, fg, time = tot$time)
+        }
         long <- bucket_top_n(long, "Prey", "Tonnes", top_n_d())
         agg <- stats::aggregate(Tonnes ~ Time + series, data = long, sum)
         return(agg)
       }
-      long <- consumption_as_prey(dat$nc_prod, dat$nc_out, dat$grp, fg, dat$diet_time)
+      long <- consumption_as_prey(dat$nc_prod, dat$nc_out, dat$grp, fg, dat$diet_time,
+                                  prm = dat$prm_bio, diet_full = dat$diet_full)
       if (nrow(long) == 0) {
         return(long)
       }
@@ -71,14 +76,14 @@ consumption_server <- function(id, project = NULL) {
       pal <- c(pal, Other = "#8D99AE", Total = "#0B3C5D")
       df$series <- factor(df$series, levels = spread_series_levels(df$series, pal))
       title <- if (identical(view_d(), "predator")) {
-        paste("Tonnes consumed by", fg_d())
+        paste("Food consumed by", fg_d(), "(Atlantis intake, by prey)")
       } else {
-        paste("Tonnes of", fg_d(), "consumed by predators")
+        paste(fg_d(), "consumed, by predator (Atlantis intake)")
       }
       p <- ggplot2::ggplot(df, ggplot2::aes(x = Date, y = Tonnes, fill = series))
       p <- p + ggplot2::geom_area(position = "stack", alpha = 0.92)
       p <- p + ggplot2::scale_fill_manual(values = pal, name = NULL)
-      p <- p + ggplot2::labs(title = title, x = "Year", y = "Consumption (tons)")
+      p <- p + ggplot2::labs(title = title, x = "Year", y = "Consumption (t/day)")
       p <- p + theme_reactiveatlantis()
       ra_scale_x_year(p, df$Date)
     }

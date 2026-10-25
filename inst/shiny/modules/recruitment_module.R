@@ -579,17 +579,30 @@ spawn_from_nc <- function(nc, grp, rec_row, fg_code, fspb_vec = NULL) {
         nsl <- nsl * mask
         rsl <- rsl * mask
         ssl <- ssl * mask
-        wspi <- ssl * (1 + xrs)
-        rat <- (rsl + ssl) - wspi
-        rat[rat < 0] <- 0
-        spawn <- ((wspi * fsp - kspa) - rat)
-        spawn[spawn < 0] <- 0
+        spawn <- atlantis_ind_spawn(ssl, rsl, fsp, kspa, xrs)
         spawn_tot[j] <- spawn_tot[j] + sum(spawn * fspb * nsl, na.rm = TRUE)
         ssb_tot[j] <- ssb_tot[j] + sum((rsl + ssl) * nsl, na.rm = TRUE)
       }
     }
   }
   list(time = time[idx], spawn = spawn_tot, ssb = ssb_tot)
+}
+
+##' Spawn per individual (mg N), as Atlantis Ecology_Age_Structured_Spawn
+##' (atdemography.c:571-592, flag_repcostSpawn = 0):
+##' WforS = (1 + X_RS) SN; Spwn = FSP WforS - KSPA, minus the weight deficit
+##' (WforS - (SN + RN)) when the fish is below WforS; floored at 0 and capped
+##' at RN. Validation D03: the previous code subtracted the weight surplus.
+atlantis_ind_spawn <- function(SN, RN, FSP, KSPA, X_RS) {
+  wfors <- (1 + X_RS) * SN
+  wgt <- SN + RN
+  spwn <- FSP * wfors - KSPA
+  deficit <- wfors - wgt
+  spwn <- spwn - ifelse(is.finite(deficit) & deficit > 0, deficit, 0)
+  spwn[!is.finite(spwn) | spwn < 0] <- 0
+  over <- is.finite(RN) & spwn > RN
+  spwn[over] <- RN[over]
+  spwn
 }
 
 bh_version <- function(rec_row) {
@@ -619,15 +632,8 @@ spawn_ssb_for_fg <- function(dat, rec_row, fg_code, fspb_vec = NULL) {
     nc_spawn$ver <- ver
     return(nc_spawn)
   }
-  from_ssb <- table_ssb(dat$ssb, fg_code)
-  if (!is.null(from_ssb)) {
-    from_ssb$ver <- ver
-    return(from_ssb)
-  }
-  from_bio <- table_ssb(dat$biomindx, fg_code)
-  if (!is.null(from_bio)) {
-    from_bio$ver <- ver
-    return(from_bio)
-  }
+  ## No fallback to SSB.txt or BiomIndx: those are tonnes, while spawn and
+  ## BHbeta are mg N, so a Beverton-Holt curve built from them is wrong
+  ## (validation D04). The caller shows Atlantis YOY without the BH line.
   NULL
 }

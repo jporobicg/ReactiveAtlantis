@@ -141,28 +141,34 @@ save_ai_shot <- function(app, name) {
   if (dir.exists(art) && file.exists(shot)) {
     file.copy(shot, file.path(art, paste0(name, ".png")), overwrite = TRUE)
   }
+  ## Refresh the README figure only when asked; tests must not edit the source tree.
   man_fig <- file.path(ra_pkg_root(), "man", "figures")
-  if (identical(name, "ask_atlantis_drawer_open") && dir.exists(man_fig) &&
+  if (identical(Sys.getenv("RA_UPDATE_FIGURES"), "true") &&
+      identical(name, "ask_atlantis_drawer_open") && dir.exists(man_fig) &&
       file.exists(shot)) {
     file.copy(shot, file.path(man_fig, "ask_atlantis.png"), overwrite = TRUE)
   }
   shot
 }
 
+##' Chrome for browser tests: CHROMOTE_CHROME, then common install paths,
+##' then chromote's own detection. NA when none is found.
+ra_test_chrome <- function() {
+  cand <- c(Sys.getenv("CHROMOTE_CHROME"),
+            "/usr/local/bin/google-chrome", "/usr/bin/google-chrome-stable",
+            "/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser")
+  cand <- cand[nzchar(cand) & file.exists(cand)]
+  if (length(cand)) return(cand[[1]])
+  found <- tryCatch(chromote::find_chrome(), error = function(e) NULL)
+  if (length(found) && nzchar(found) && file.exists(found)) return(found)
+  NA_character_
+}
+
 ai_e2e_chrome <- function() {
   testthat::skip_if_not_installed("shinytest2")
   testthat::skip_if_not_installed("chromote")
-  testthat::skip_if_not(file.exists("/usr/local/bin/google-chrome") ||
-                          file.exists("/usr/bin/google-chrome-stable") ||
-                          file.exists("/usr/bin/google-chrome"),
-                        "Google Chrome is required for shinytest2")
-  chrome <- if (file.exists("/usr/local/bin/google-chrome")) {
-    "/usr/local/bin/google-chrome"
-  } else if (file.exists("/usr/bin/google-chrome-stable")) {
-    "/usr/bin/google-chrome-stable"
-  } else {
-    "/usr/bin/google-chrome"
-  }
+  chrome <- ra_test_chrome()
+  testthat::skip_if(is.na(chrome), "Google Chrome or Chromium is required for shinytest2")
   Sys.setenv(CHROMOTE_CHROME = chrome)
   chrome_dir <- tempfile("chrome-data-")
   dir.create(chrome_dir)

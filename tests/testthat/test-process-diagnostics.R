@@ -1,14 +1,6 @@
 ## Mortality by predator, recruits vs SSB, realised diet, spatial overlap.
 
-find_pkg_root <- function() {
-  cand <- c(getwd(), file.path(getwd(), "..", ".."), file.path(getwd(), ".."))
-  for (p in cand) {
-    if (file.exists(file.path(p, "inst", "shiny", "modules", "analysis_helpers.R"))) {
-      return(normalizePath(p))
-    }
-  }
-  stop("Cannot find package root")
-}
+find_pkg_root <- function() ra_pkg_root()
 
 root <- find_pkg_root()
 mod <- file.path(root, "inst", "shiny", "modules")
@@ -32,23 +24,37 @@ source(file.path(mod, "mortality_module.R"), local = TRUE)
 source(file.path(mod, "recruitment_module.R"), local = TRUE)
 source(file.path(mod, "feeding_module.R"), local = TRUE)
 source(file.path(mod, "spatial_module.R"), local = TRUE)
+source(file.path(mod, "predation_module.R"), local = TRUE)
+source(file.path(mod, "nc_cache.R"), local = TRUE)
 
-test_that("trunk SpecificPredMort parses predation by predator", {
+test_that("SpecificPredMort rows are prey and columns are predators (Atlantis layout)", {
+  ## Regression for D01. Atlantis writes Time, Group, Cohort, Stock, then one
+  ## column per predator; Group/Cohort are the prey (atbiolmessage.c,
+  ## calcTrackedPredMort[prey][cohort][stock][pred]). Shape of the NESP case:
+  ## southern bluefin tuna (FTM) are eaten by white sharks (SHW) and a little
+  ## by FVL; FTM itself eats sardine (FPS).
   pred <- data.frame(
-    Time = c(0, 0, 365, 365),
-    Group = "COD",
-    Cohort = c(0, 1, 0, 1),
+    Time = c(0, 0, 0, 365, 365, 365),
+    Group = c("FTM", "FTM", "FPS", "FTM", "FTM", "FPS"),
+    Cohort = c(0, 1, 0, 0, 1, 0),
     Stock = 0,
-    COD = c(0.05, 0.02, 0.06, 0.03),
-    PHY = c(0.25, 0.26, 0.22, 0.24),
+    SHW = c(0.30, 0.10, 0, 0.32, 0.12, 0),
+    FVL = c(0.01, 0, 0, 0.02, 0, 0),
+    FTM = c(0, 0, 0.40, 0, 0, 0.45),
     stringsAsFactors = FALSE
   )
-  long <- parse_pred_mort_by_predator(pred, "PHY")
-  expect_equal(nrow(long), 4)
-  expect_equal(unique(long$Predator), "COD")
-  expect_equal(unique(long$Prey), "PHY")
-  expect_equal(sort(unique(long$Age)), c("Age01", "Age02"))
-  expect_equal(sum(long$Value), sum(pred$PHY))
+  on_ftm <- parse_pred_mort_by_predator(pred, "FTM")
+  on_ftm <- on_ftm[on_ftm$Value > 0, ]
+  expect_setequal(unique(on_ftm$Predator), c("SHW", "FVL"))
+  expect_equal(unique(on_ftm$Prey), "FTM")
+  expect_equal(sum(on_ftm$Value[on_ftm$Predator == "SHW"]), 0.30 + 0.10 + 0.32 + 0.12)
+  expect_equal(sort(unique(on_ftm$Age)), c("Age01", "Age02"))
+  on_fps <- parse_pred_mort_by_predator(pred, "FPS")
+  on_fps <- on_fps[on_fps$Value > 0, ]
+  expect_equal(unique(on_fps$Predator), "FTM")
+  expect_equal(sum(on_fps$Value), 0.85)
+  only_shw <- parse_pred_mort_by_predator(pred, "FTM", pred_code = "SHW")
+  expect_equal(unique(only_shw$Predator), "SHW")
   none <- parse_pred_mort_by_predator(pred, "HAD")
   expect_equal(nrow(none), 0)
   expect_true(grepl("No predation", attr(none, "reason")))
@@ -102,6 +108,81 @@ test_that("DietCheck and consumed tonnes follow the selected pair", {
   expect_equal(cons$Tonnes, c(8, 14, 18))
   miss <- dietcheck_pair_series(diet, "HAD", "PHY")
   expect_equal(nrow(miss), 0)
+})
+
+test_that("consumption uses Atlantis intake Nums x Growth / E per cohort (D16, D15)", {
+  ## Two cohorts, two boxes, two times. Hand-computed reference.
+  ## Cohort 1: Nums box0 = 10, box1 = 30; Growth 2 and 4 mg N/ind/day
+  ## Cohort 2: Nums box0 = 5,  box1 = 0;  Growth 10 and 10
+  ## E = 0.5 -> intake mg N/day: c1 (10*2 + 30*4)/0.5 = 280; c2 (5*10)/0.5 = 100
+  tmp <- tempfile("intake_"); dir.create(tmp); on.exit(unlink(tmp, recursive = TRUE), add = TRUE)
+  dz <- ncdf4::ncdim_def("z", "", 1:1); db <- ncdf4::ncdim_def("b", "", 1:2)
+  dt <- ncdf4::ncdim_def("t", "seconds since 2000-01-01", c(0, 86400 * 30))
+  vo <- lapply(1:2, function(c) ncdf4::ncvar_def(paste0("Fish", c, "_Nums"), "", list(dz, db, dt)))
+  nco <- ncdf4::nc_create(file.path(tmp, "out.nc"), vo)
+  ncdf4::ncvar_put(nco, "Fish1_Nums", array(c(10, 30, 10, 30), c(1, 2, 2)))
+  ncdf4::ncvar_put(nco, "Fish2_Nums", array(c(5, 0, 5, 0), c(1, 2, 2)))
+  ncdf4::nc_close(nco)
+  vp <- lapply(1:2, function(c) ncdf4::ncvar_def(paste0("Fish", c, "_Growth"), "mg N d-1", list(db, dt)))
+  ncp <- ncdf4::nc_create(file.path(tmp, "prod.nc"), vp)
+  ncdf4::ncvar_put(ncp, "Fish1_Growth", matrix(c(2, 4, 2, 4), 2))
+  ncdf4::ncvar_put(ncp, "Fish2_Growth", matrix(c(10, 10, 10, 10), 2))
+  ncdf4::nc_close(ncp)
+  nco <- ncdf4::nc_open(file.path(tmp, "out.nc")); ncp <- ncdf4::nc_open(file.path(tmp, "prod.nc"))
+  on.exit({ ncdf4::nc_close(nco); ncdf4::nc_close(ncp) }, add = TRUE)
+  grp <- data.frame(code = "FSH", name = "Fish", numcohorts = 2, grouptype = "FISH")
+  k <- 5.7 * 0.00000002
+  coh <- realised_intake_by_cohort(ncp, nco, grp, "E_FSH 0.5", "FSH")
+  expect_equal(coh$Time, c(0, 30, 0, 30))
+  expect_equal(coh$Intake[coh$Cohort == 0], c(280, 280) * k)
+  expect_equal(coh$Intake[coh$Cohort == 1], c(100, 100) * k)
+  tot <- consumed_tonnes(ncp, nco, grp, "FSH", prm = "E_FSH 0.5")
+  expect_equal(tot$tonnes, c(380, 380) * k)
+  ## Per-cohort diet: cohort 0 eats 100 % ZOO; cohort 1 eats 50 % ZOO, 50 % SQD.
+  ## Intake-weighted: ZOO = 280 + 50 = 330, SQD = 50 (not 1.5 x 380 from summing).
+  diet_full <- data.frame(Time = c(0, 0, 30, 30), Predator = "FSH", Stock = 0,
+                          Cohort = c(0, 1, 0, 1), ZOO = c(1, 0.5, 1, 0.5), SQD = c(0, 0.5, 0, 0.5))
+  by <- consumption_by_prey_cohort(coh, diet_full, "FSH")
+  expect_equal(by$Tonnes[by$Prey == "ZOO" & by$Time == 0], 330 * k)
+  expect_equal(by$Tonnes[by$Prey == "SQD" & by$Time == 30], 50 * k)
+  expect_equal(sum(by$Tonnes[by$Time == 0]), 380 * k)
+})
+
+test_that("predator diet shares sum to 1 after cohort aggregation (D15)", {
+  raw <- data.frame(Time = 30, Predator = "FSH", Cohort = c(0, 1, 2), Stock = 0, Updated = 0,
+                    ZOO = c(1, 0.5, 0), SQD = c(0, 0.5, 0))
+  agg <- preaggregate_diet(raw)$diet_time
+  expect_equal(agg$ZOO + agg$SQD, 1)
+  expect_equal(agg$ZOO, 0.75)
+  expect_false("Updated" %in% names(agg))
+})
+
+test_that("health flags: exact thresholds and undefined initial values (D22)", {
+  first <- c(A = 100, B = 100, C = 100, D = 100, E = 0, F = 0, G = NA, I = Inf, J = 100, K = -5)
+  last  <- c(A = 1,   B = 0.999, C = 1000, D = 1000.001, E = 0, F = 5, G = 50, I = 10, J = 0, K = 5)
+  bi <- rbind(data.frame(Time = 0, t(first)), data.frame(Time = 365, t(last)))
+  grp <- data.frame(code = names(first), longname = names(first), grouptype = "FISH")
+  h <- biomass_health(bi, grp)
+  f <- setNames(h$Flag, h$Code)
+  expect_equal(f[["A"]], "OK")                                   # exactly 1 %
+  expect_equal(f[["B"]], "Collapsed (< 1% of initial)")
+  expect_equal(f[["C"]], "OK")                                   # exactly 10x
+  expect_equal(f[["D"]], "Increased (> 10\u00d7 initial)")
+  expect_equal(f[["J"]], "Collapsed (< 1% of initial)")
+  for (k in c("E", "F", "G", "I", "K")) expect_true(startsWith(f[[k]], "Undefined"), info = k)
+  expect_true(all(is.na(h$Ratio[h$Code %in% c("E", "F", "G", "I", "K")])))
+})
+
+test_that("individual spawn follows Atlantis (deficit subtracted, cap at RN) (D03)", {
+  ## Ecology_Age_Structured_Spawn, atdemography.c:571-592. X_RS 2.65 so
+  ## WforS = 3.65 SN. Hand values with SN = 10 (WforS = 36.5):
+  ## well fed RN 30: 0.5*36.5 - 1 = 17.25 (no deficit)
+  ## thin RN 20 (weight 30, deficit 6.5): 17.25 - 6.5 = 10.75
+  ## very thin RN 5 (deficit 21.5): below 0 -> 0
+  ## cap: FSP 1, KSPA 0, RN 2 (deficit 24.5): 36.5 - 24.5 = 12 > RN -> 2
+  sp <- atlantis_ind_spawn(SN = c(10, 10, 10), RN = c(30, 20, 5), FSP = 0.5, KSPA = 1, X_RS = 2.65)
+  expect_equal(sp, c(17.25, 10.75, 0))
+  expect_equal(atlantis_ind_spawn(10, 2, 1, 0, 2.65), 2)
 })
 
 test_that("spatial overlap is Schoener D and local 0-1 per box", {

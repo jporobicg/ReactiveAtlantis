@@ -650,7 +650,7 @@ Bio.func <- function(nc.file, groups.csv, numlayers){
                     over.sp    <- cbind(over.sp, new.sp)
                     names.temp <- c(names.temp, paste(FGN[code], cohort, sep = '_'))
                 }
-                Biom.N[code, cohort] <- sum(StructN + ReservN * Numb, na.rm = TRUE)
+                Biom.N[code, cohort] <- sum((StructN + ReservN) * Numb, na.rm = TRUE)
                 Struct[code, cohort] <- max(StructN, na.rm = TRUE)
             }
         }
@@ -764,8 +764,10 @@ gape.func <- function(groups.csv, Struct, Biom.N, prm){
     Gape            <- data.frame(FG = as.factor(KLP$FG), KLP = KLP$Value, KUP = KUP$Value, adult.Min = NA, adult.Max = NA, juv.Min = NA,
                                   juv.Max = NA, JminS = NA, JmaxS = NA, AminS = NA, AmaxS = NA)
     Gape            <- dplyr::left_join(Gape, age, by = 'FG')
-    Gape$Age.Young  <- Gape$Age.Adult - 1
-    Gape$Age.Young  <- ifelse(Gape$Age.Young == 0,  1, Gape$Age.Young)
+    ## Atlantis: adult when the 0-based cohort >= age_mat, so the first adult
+    ## cohort (1-based) is age_mat + 1 and the last juvenile is age_mat (D08).
+    Gape$Age.Young  <- pmax(1, Gape$Age.Adult)
+    Gape$Age.Adult  <- Gape$Age.Adult + 1
     ## Pre-Calculations
     Biom.N        <- Biom.N[order(row.names(Biom.N)), ]
     Struct        <- data.frame(as.factor(row.names(Struct)), Struct)
@@ -778,7 +780,7 @@ gape.func <- function(groups.csv, Struct, Biom.N, prm){
         ## Gape limitation as a predator
         Gape$adult.Min[i]  <- Gape[i, ages.pos[Gape$Age.Adult[i]]] * Gape$KLP[i]
         Gape$adult.Max[i]  <- Gape[i, ages.pos[sum(!is.na(Gape[i, ages.pos]))]] * Gape$KUP[i]
-        Gape$juv.Max[i]    <- Gape[i, ages.pos[Gape$Age.Young[i]]] * Gape$KLP[i]
+        Gape$juv.Max[i]    <- Gape[i, ages.pos[Gape$Age.Young[i]]] * Gape$KUP[i]
         ## Gape limitation as prey
         Gape$JminS[i]      <- Gape[i, ages.pos[1]]
         Gape$AminS[i]      <- Gape[i, ages.pos[Gape$Age.Adult[i]]]

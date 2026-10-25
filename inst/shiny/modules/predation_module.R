@@ -190,7 +190,13 @@ preaggregate_diet <- function(diet_raw) {
   data.table::setkeyv(diet_full, intersect(c("Predator", "Stock", "Time"), names(diet_full)))
   
   if (length(extra) == 1) {
-    diet_time <- dt[, lapply(.SD, function(x) sum(as.numeric(x), na.rm = TRUE)),
+    ## DietCheck proportions sum to 1 within each cohort. Average over the
+    ## cohorts that fed so a predator's shares sum to 1 (summing gave
+    ## n_cohorts; validation D15). This is an unweighted cohort mean; the
+    ## Consumption tab weights each cohort by its own intake instead.
+    fed <- rowSums(as.matrix(dt[, prey_cols, with = FALSE]), na.rm = TRUE) > 0
+    dt <- dt[fed]
+    diet_time <- dt[, lapply(.SD, function(x) mean(as.numeric(x), na.rm = TRUE)),
                     by = meta, .SDcols = prey_cols]
   } else {
     diet_time <- dt[, c(meta, prey_cols), with = FALSE]
