@@ -214,3 +214,51 @@ test_that("realised compare and production flags use DietCheck and SpecificPredM
   expect_true("Value" %in% names(mapped))
   expect_true(any(is.finite(mapped$Value)))
 })
+
+test_that("expected consumption follows Atlantis per cohort and cell (D05 rebuild)", {
+  ## One box: z1 deep water (200 m3), z2 surface water (100 m3), z3 sediment.
+  ## Juvenile PRD (cohort 1): 4 fish in deep water; adult PRD (cohort 2):
+  ## 2 fish at the surface. Pool prey ZOO: 1 mg N m-3 deep, 3 at the surface.
+  ## E = 0.5; C = (2, 4); mum = (10, 20); age_mat 1 (cohort 2 is adult).
+  ## Juvenile: sp 0.02, A 0.5, clearance 2 / (1 + 2*0.5*0.5/10) = 1.904762,
+  ##   eaten 0.02 * 1.904762 * 0.5 * 200 = 3.809524 mg N/day
+  ## Adult: sp 0.02, A 2.4, clearance 4 / (1 + 4*0.5*2.4/20) = 3.225806,
+  ##   eaten 0.02 * 3.225806 * 2.4 * 100 = 15.48387 mg N/day
+  tmp <- tempfile(fileext = ".nc")
+  dz <- ncdf4::ncdim_def("z", "", 1:3); db <- ncdf4::ncdim_def("b", "", 1:1)
+  dt <- ncdf4::ncdim_def("t", "seconds since 2000-01-01", c(0, 86400))
+  mk <- function(n) ncdf4::ncvar_def(n, "", list(dz, db, dt))
+  vv <- c(lapply(c("volume", "dz", "Predator1_Nums", "Predator1_StructN", "Predator1_ResN",
+                   "Predator2_Nums", "Predator2_StructN", "Predator2_ResN", "Zoo_N"), mk),
+          list(ncdf4::ncvar_def("numlayers", "", list(db))))
+  nc <- ncdf4::nc_create(tmp, vv)
+  put <- function(n, x) ncdf4::ncvar_put(nc, n, array(rep(x, 2), c(3, 1, 2)))
+  put("volume", c(200, 100, 1)); put("dz", c(20, 10, 1))
+  put("Predator1_Nums", c(4, 0, 0)); put("Predator1_StructN", c(10, 10, 0)); put("Predator1_ResN", c(20, 20, 0))
+  put("Predator2_Nums", c(0, 2, 0)); put("Predator2_StructN", c(30, 30, 0)); put("Predator2_ResN", c(60, 60, 0))
+  put("Zoo_N", c(1, 3, 0)); ncdf4::ncvar_put(nc, "numlayers", 2)
+  ncdf4::nc_close(nc)
+  nc <- ncdf4::nc_open(tmp); on.exit({ ncdf4::nc_close(nc); unlink(tmp) }, add = TRUE)
+  ra_cache_clear()
+  grp <- data.frame(code = c("PRD", "ZOO"), name = c("Predator", "Zoo"),
+                    numcohorts = c(2, 1), grouptype = c("FISH", "MED_ZOO"))
+  prm <- c("pPREY1PRD1 2", "0 0.5", "pPREY1PRD2 2", "0 0.8", "pPREY2PRD2 2", "0 0",
+           "C_PRD 2", "2 4", "mum_PRD 2", "10 20", "E_PRD 0.5", "PRD_age_mat 1",
+           "flagfishrates 0", "UseHardFeedingWindow 1", "flag_satiation 0")
+  ava <- read_pprey_matrix(prm); colnames(ava) <- c("PRD", "ZOO")
+  r <- atlantis_feeding_rates(ava, grp, prm, nc, time_i = 1)
+  expect_equal(r$cons["pPREY1PRD1", "ZOO"], 3.809524, tolerance = 1e-6)
+  expect_equal(r$cons["pPREY1PRD2", "ZOO"], 15.48387, tolerance = 1e-6)
+  expect_equal(r$cons["pPREY2PRD2", "ZOO"], 0)
+  ## prey mass: 1*200 + 3*100 = 500 mg N (stage 1, pool)
+  expect_equal(r$prey_mass["1", "ZOO"], 500)
+  ## Satiation cap (flag_satiation 1): C x100 makes the juvenile clearance
+  ## 200 / (1 + 200*0.25/10) = 33.33 > mum / E = 20, so it is capped at 20:
+  ## eaten 0.02 * 20 * 0.5 * 200 = 40 (66.67 without the cap).
+  prm2 <- sub("^2 4$", "200 400", prm)
+  r_off <- atlantis_feeding_rates(ava, grp, prm2, nc, time_i = 1)
+  r_on <- atlantis_feeding_rates(ava, grp, sub("flag_satiation 0", "flag_satiation 1", prm2), nc, time_i = 1)
+  expect_equal(r_off$cons["pPREY1PRD1", "ZOO"], 0.02 * (200 / 6) * 0.5 * 200, tolerance = 1e-6)
+  expect_equal(r_on$cons["pPREY1PRD1", "ZOO"], 40, tolerance = 1e-9)
+  ra_cache_clear()
+})

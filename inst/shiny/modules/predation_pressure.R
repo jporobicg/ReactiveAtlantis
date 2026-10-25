@@ -2,14 +2,9 @@
 ## ~ Expected predation pressure (t0 diagnostic) ~ ##
 ## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
 ##
-## SCREENING INDEX, NOT ATLANTIS INTAKE. Compared with Atlantis this
-## calculation uses box totals instead of box x layer cells, stage-mean C and
-## mum instead of per-cohort rates, a knife-edge window even when
-## UseHardFeedingWindow = 0, one Holling denominator per pPREY row, and no
-## Q10, satiation cap (flag_satiation), habitat refuge or pSTOCK. On NESP
-## (adult FTM, box 94, day 930) it was about 35x the realised intake from
-## Atlantis Growth / E (validation D05). Use it to rank links, not to read
-## consumption; the realised intake is shown next to the selected pair.
+## The calculation itself is atlantis_feeding_rates() at the end of this file
+## (per predator cohort and water cell; validation D05). The older
+## stage-level code below is kept for pressure_pair_by_box fallbacks only.
 ##
 ## Independent implementation of the Atlantis consumer-feeding
 ## calculation at initial conditions. Not copied from atlantistools.
@@ -624,100 +619,23 @@ expected_predation_pressure <- function(pprey, grp, prm, init_nc,
   prey_mass_used <- matrix(0, nrow(pprey), ncol(pprey), dimnames = dimnames(pprey))
   unsupported <- character()
 
+  if (is.null(nc)) return(empty_pressure_result(pprey))
+  res <- cached_feeding_rates(pprey, grp, prm, nc, time_i = time_i)
+  sel <- boxes[boxes <= res$n_box]
+  cons_mg <- apply(res$cons_box[, , sel, drop = FALSE], c(1, 2), sum)
+  dimnames(cons_mg) <- dimnames(pprey)
+  pmass_sel <- apply(res$prey_mass_box[, , sel, drop = FALSE], c(1, 2), sum)
   for (ri in seq_len(nrow(pprey))) {
-    pred_code <- meta$pred_code[ri]
-    pred_stage <- meta$pred_stage[ri]
-    prey_stage <- meta$prey_stage[ri]
-    par <- params[[pred_code]]
-    if (is.null(par)) next
-    pred_g <- stocks$groups[[pred_code]]
-    if (is.null(pred_g)) next
-
-    n_coh <- pred_g$n_coh
-    age_mat <- pred_g$age_mat
-    predcase <- par$predcase
-    if (is.finite(as.numeric(predcase)) && !as.integer(predcase) %in% 0:2) {
-      ## Only Holling I, II and III are implemented here (D06).
-      unsupported <- c(unsupported, pred_code)
-      next
-    }
-    absolute <- identical(as.integer(par$flagfishrates), 0L) && n_coh > 1L
-
-    cons_row <- rep(0, ncol(pprey))
-    prey_mass_row <- rep(0, ncol(pprey))
-    gape_row <- rep(0, ncol(pprey))
-    gape_n <- rep(0, ncol(pprey))
-
-    cohs <- if (n_coh > 1L && !pred_g$grouptype %in% AGE_SPECIAL) {
-      seq_len(n_coh)
-    } else {
-      1L
-    }
-    cohs <- cohs[vapply(cohs, function(c) {
-      cohort_in_stage(c, age_mat, pred_stage, n_coh)
-    }, logical(1))]
-    if (!length(cohs)) cohs <- 1L
-
-    for (b in boxes) {
-      pred_st <- stock_stage(stocks, pred_code, pred_stage)
-      if (is.null(pred_st)) next
-      if (absolute) {
-        pred_scale <- pred_st$nums[b]
-      } else {
-        pred_scale <- pred_st$mass_mgn[b]
-      }
-      if (!is.finite(pred_scale) || pred_scale <= 0) next
-
-      C_use <- if (length(par$C)) mean(par$C[pmin(cohs, length(par$C))]) else NA_real_
-      mum_use <- if (length(par$mum)) mean(par$mum[pmin(cohs, length(par$mum))]) else NA_real_
-      if (length(cohs) == 1L) {
-        C_use <- pick_rate(par$C, cohs)
-        mum_use <- pick_rate(par$mum, cohs)
-      }
-      sn_pred <- pred_st$sn
-      if (!is.finite(sn_pred) || sn_pred <= 0) sn_pred <- NA_real_
-
-      avail <- rep(0, ncol(pprey))
-      e_av <- rep(0, ncol(pprey))
-      gape_b <- rep(0, ncol(pprey))
-      prey_mass_b <- rep(0, ncol(pprey))
-
-      for (pj in seq_len(ncol(pprey))) {
-        pval <- as.numeric(pprey[ri, pj])
-        if (!is.finite(pval) || pval <= 0) next
-        pry <- stock_stage(stocks, prey_codes[pj], prey_stage)
-        if (is.null(pry)) {
-          ## Detritus sediment columns have no group row.
-          pry <- empty_stage_stock(n_box)
-        }
-        mass <- pry$mass_mgn[b]
-        if (!is.finite(mass) || mass <= 0) next
-        prey_mass_b[pj] <- mass
-        conc <- if (use_conc && is.finite(vol[b]) && vol[b] > 0) {
-          mass / vol[b]
-        } else {
-          mass
-        }
-        gape <- gape_size_scalar(sn_pred, pry$sn, par$klp, par$kup)
-        gape_b[pj] <- gape
-        avail[pj] <- pval * conc * gape * habitat_refuge
-        e_av[pj] <- e_for_prey(par, prey_codes[pj], prey_type[pj]) * avail[pj]
-      }
-      eaten <- holling_ingest_mgn_day(
-        C_use, mum_use, avail, e_av, pred_scale, predcase, e_live = par$E_live
-      )
-      cons_row <- cons_row + eaten
-      prey_mass_row <- prey_mass_row + prey_mass_b
-      gape_row <- gape_row + gape_b
-      gape_n <- gape_n + as.numeric(gape_b > 0 | avail > 0 | prey_mass_b > 0)
-    }
-
-    cons[ri, ] <- cons_row * mg2t * x.cn
-    prey_mass_used[ri, ] <- prey_mass_row
-    frac[ri, ] <- ifelse(prey_mass_row > 0, cons_row / prey_mass_row, 0)
-    gape_mat[ri, ] <- ifelse(gape_n > 0, gape_row / pmax(gape_n, 1), 0)
+    st <- meta$prey_stage[ri]
+    if (!is.finite(st)) st <- 1L
+    prey_mass_used[ri, ] <- pmass_sel[st, ]
   }
-
+  cons_row_mg <- cons_mg
+  gape_mat[] <- res$window
+  notes <- c(notes, res$notes)
+  cons <- cons_row_mg * mg2t * x.cn
+  frac <- ifelse(prey_mass_used > 0, cons_row_mg / prey_mass_used, 0)
+  dim(frac) <- dim(cons); dimnames(frac) <- dimnames(cons)
   if (length(unsupported)) {
     notes <- c(notes, paste0(
       "Not computed (functional response predcase other than 0, 1 or 2): ",
@@ -725,8 +643,11 @@ expected_predation_pressure <- function(pprey, grp, prm, init_nc,
     ))
   }
   notes <- c(notes, paste(
-    "Screening index, not Atlantis intake: box totals, stage-mean rates and no",
-    "Q10, satiation cap or refuge. Compare with the realised intake shown for the selected pair."
+    "Expected consumption from the Atlantis feeding equations, per predator cohort",
+    "and water cell at this output time. Approximate: output snapshots miss",
+    "day-night vertical movement and Q10 is not applied; on NESP it was within",
+    "~10% of Atlantis's realised intake in most boxes and 0.3-4x system-wide.",
+    "The realised intake is shown for the selected pair."
   ))
   frac[!is.finite(frac)] <- 0
   cons[!is.finite(cons)] <- 0
@@ -735,10 +656,9 @@ expected_predation_pressure <- function(pprey, grp, prm, init_nc,
                                 prey_codes, params, prey_mass_used, mg2t, x.cn)
   flag_n <- sum(cells$Flag != "OK", na.rm = TRUE)
   notes <- c(notes, paste0(
-    "Modified Holling from User Guide Part I §10.2 / Table 18; ",
-    "gape knife-edge §10.2.5 (KLP, KUP). Time step ", time_i,
-    ". Boxes used: ",
-    paste(boxes - 1L, collapse = ","), "."
+    "Holling functional response as in atprocess.c (User Guide Part I §10.2); ",
+    "size window per atvertprocesses.c. Time step ", time_i,
+    ". Boxes: ", if (length(boxes) == res$n_box) "all" else paste(boxes - 1L, collapse = ","), "."
   ))
   if (flag_n) {
     notes <- c(notes, paste0(flag_n, " cells flagged (loss > 5% of prey per day, or more than the standing stock)."))
@@ -963,100 +883,38 @@ pressure_pair_by_box <- function(pprey, grp, prm, nc,
   )
   if (is.null(pprey) || !is.matrix(pprey)) return(empty)
   if (pprey_is_none(pred) || pprey_is_none(prey)) return(empty)
-  prm <- prm_with_index(prm)
+  handle <- nc
+  if (!inherits(handle, "ncdf4")) handle <- tryCatch(nc_handle(nc), error = function(e) NULL)
+  if (is.null(handle)) return(empty)
   if (!is.null(grp)) names(grp) <- tolower(names(grp))
-  if (is.null(stocks)) {
-    handle <- nc
-    if (!inherits(handle, "ncdf4")) {
-      handle <- tryCatch(nc_handle(nc), error = function(e) NULL)
-    }
-    if (is.null(handle)) return(empty)
-    stocks <- init_stage_stocks(handle, grp, prm, time_i = time_i,
-                                mg2t = mg2t, x.cn = x.cn)
-  }
   meta <- parse_pprey_rownames(rownames(pprey))
   rows <- pprey_match_rows(meta, pred, pred_stage)
   if (!identical(pprey_stage_wanted(prey_stage), "all")) {
     rows <- intersect(rows, pprey_match_prey_stage(meta, prey_stage))
   }
-  if (!length(rows) || !prey %in% colnames(pprey)) return(empty)
-  ri <- rows[1]
-  pj <- which(colnames(pprey) == as.character(prey))[1]
-  params <- read_predator_feed_params(prm, grp)
-  par <- params[[as.character(pred)]]
-  if (is.null(par)) return(empty)
-  pred_g <- stocks$groups[[as.character(pred)]]
-  if (is.null(pred_g)) return(empty)
-  n_box <- max(1L, as.integer(stocks$n_box))
-  vol <- stocks$volume
-  if (length(vol) < n_box) vol <- c(vol, rep(NA_real_, n_box - length(vol)))
-  use_conc <- any(is.finite(vol) & vol > 0)
-  prey_codes <- colnames(pprey)
-  prey_type <- if (!is.null(grp) && "code" %in% names(grp)) {
-    as.character(grp$grouptype[match(prey_codes, as.character(grp$code))])
-  } else {
-    rep("", length(prey_codes))
-  }
-  prey_type[is.na(prey_type)] <- ""
-  n_coh <- pred_g$n_coh
-  age_mat <- pred_g$age_mat
-  absolute <- identical(as.integer(par$flagfishrates), 0L) && n_coh > 1L
-  cohs <- if (n_coh > 1L && !pred_g$grouptype %in% AGE_SPECIAL) seq_len(n_coh) else 1L
-  cohs <- cohs[vapply(cohs, function(c) {
-    cohort_in_stage(c, age_mat, meta$pred_stage[ri], n_coh)
-  }, logical(1))]
-  if (!length(cohs)) cohs <- 1L
-  habitat_refuge <- as.numeric(habitat_refuge)[1]
-  if (!is.finite(habitat_refuge)) habitat_refuge <- 1
-
-  out <- lapply(seq_len(n_box), function(b) {
-    pred_st <- stock_stage(stocks, pred, meta$pred_stage[ri])
-    pred_scale <- if (is.null(pred_st)) {
-      0
-    } else if (absolute) {
-      pred_st$nums[b]
-    } else {
-      pred_st$mass_mgn[b]
-    }
-    pred_t <- if (is.null(pred_st)) 0 else pred_st$tonnes[b]
-    C_use <- if (length(par$C)) mean(par$C[pmin(cohs, length(par$C))]) else NA_real_
-    mum_use <- if (length(par$mum)) mean(par$mum[pmin(cohs, length(par$mum))]) else NA_real_
-    sn_pred <- if (is.null(pred_st)) NA_real_ else pred_st$sn
-    avail <- rep(0, ncol(pprey))
-    e_av <- rep(0, ncol(pprey))
-    prey_mass <- 0
-    gape_sel <- 0
-    for (j in seq_len(ncol(pprey))) {
-      pval <- as.numeric(pprey[ri, j])
-      if (!is.finite(pval) || pval <= 0) next
-      pry <- stock_stage(stocks, prey_codes[j], meta$prey_stage[ri])
-      if (is.null(pry)) next
-      mass <- pry$mass_mgn[b]
-      if (!is.finite(mass) || mass <= 0) next
-      if (j == pj) prey_mass <- mass
-      conc <- if (use_conc && is.finite(vol[b]) && vol[b] > 0) mass / vol[b] else mass
-      gape <- gape_size_scalar(sn_pred, pry$sn, par$klp, par$kup)
-      if (j == pj) gape_sel <- gape
-      avail[j] <- pval * conc * gape * habitat_refuge
-      e_av[j] <- e_for_prey(par, prey_codes[j], prey_type[j]) * avail[j]
-    }
-    eaten <- holling_ingest_mgn_day(
-      C_use, mum_use, avail, e_av, pred_scale, par$predcase, e_live = par$E_live
-    )
-    cons <- if (length(eaten) >= pj) eaten[pj] else 0
-    frac <- if (prey_mass > 0) cons / prey_mass else 0
-    data.frame(
-      Box = b - 1L,
-      Consumption_t_day = cons * mg2t * x.cn,
-      Prey_loss_frac_day = frac,
-      Prey_loss_frac_year = frac * 365,
-      Prey_tonnes = prey_mass * mg2t * x.cn,
-      Pred_tonnes = pred_t,
-      Gape = gape_sel,
-      stringsAsFactors = FALSE
-    )
-  })
-  do.call(rbind, out)
+  pj <- match(as.character(prey), colnames(pprey))
+  if (!length(rows) || is.na(pj)) return(empty)
+  res <- tryCatch(cached_feeding_rates(pprey, grp, prm, handle, time_i = time_i),
+                  error = function(e) NULL)
+  if (is.null(res)) return(empty)
+  n_b <- res$n_box
+  cons_b <- colSums(matrix(res$cons_box[rows, pj, ], nrow = length(rows)))
+  st <- meta$prey_stage[rows[1]]
+  if (!is.finite(st)) st <- 1L
+  prey_b <- res$prey_mass_box[st, pj, ]
+  qj <- match(as.character(pred), colnames(pprey))
+  pred_b <- if (is.na(qj)) rep(NA_real_, n_b) else colSums(res$prey_mass_box[, qj, , drop = FALSE][1:2, 1, ])
+  frac <- ifelse(prey_b > 0, cons_b / prey_b, 0)
+  data.frame(
+    Box = seq_len(n_b) - 1L,
+    Consumption_t_day = cons_b * mg2t * x.cn,
+    Prey_loss_frac_day = frac,
+    Prey_loss_frac_year = frac * 365,
+    Prey_tonnes = prey_b * mg2t * x.cn,
+    Pred_tonnes = pred_b * mg2t * x.cn,
+    Gape = max(res$window[rows, pj]),
+    stringsAsFactors = FALSE
+  )
 }
 
 ##' Prey production (t/day) at one time step.
@@ -1172,9 +1030,9 @@ pressure_vs_realised <- function(press, diet, pred_mort, pred, prey,
   }
   data.frame(
     Source = c(
-      "Screening index: consumption (t/day)",
-      "Screening index: prey loss / day",
-      "Screening index: share of predator consumption",
+      "Expected consumption (t/day)",
+      "Expected prey loss / day",
+      "Expected share of predator consumption",
       "Atlantis realised intake of predator (t/day)",
       "Atlantis realised intake of this prey (t/day)",
       "DietCheck mean proportion",
@@ -1184,7 +1042,7 @@ pressure_vs_realised <- function(press, diet, pred_mort, pred, prey,
     Value = c(pair_t, pair_f, share, realised_pred_t_day, realised_pair_t_day,
               diet_val, mort_val, production_t_day),
     Note = c(
-      "Holling Gr_j summed over boxes. Not Atlantis intake (validation D05).",
+      "Atlantis feeding equations per cohort and cell, summed over the selected boxes (approximate; see notes).",
       "Gr_j / prey biomass.",
       "Gr_prey / sum Gr.",
       "Sum over cohorts and boxes of Nums x Growth / E from output.nc and outputPROD.nc.",
@@ -1210,4 +1068,325 @@ pressure_map_polygons <- function(poly, by_box, metric = "frac_day") {
   map <- stats::setNames(val, as.character(by_box$Box))
   poly$Value <- unname(map[as.character(poly$boxid)])
   poly
+}
+
+## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
+## ~   Atlantis-faithful feeding (per cohort, per cell)   ~ ##
+## ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ##
+##
+## Rebuild of the expected predation pressure (validation D05) following the
+## Atlantis feeding code (atprocess.c Eat, atvertprocesses.c prey window):
+##  - each predator cohort in each water cell (box x layer) feeds on the prey
+##    present in that cell, with sp = Nums / cell volume (flagfishrates = 0)
+##    or C and mum scaled by the individual's mass (flagfishrates = 1);
+##    biomass-pool predators use their concentration and mass-specific rates;
+##  - available prey a_j = pPREY(prey stage, predator stage) x prey density x
+##    size window; one Holling denominator over all prey of the cohort:
+##    clearance = C / (1 + C sum_j(E_j a_j) / mum); with flag_satiation the
+##    clearance is capped at mum / E (atprocess.c:896); type I and III as in
+##    atprocess.c:840-848;
+##  - size window on vertebrate prey only: hard (KLP SN <= prey SN <= KUP SN),
+##    humped, or bi-logistic on length, as selected by UseHardFeedingWindow and
+##    UseBiLogisticFeedingWindow (atvertprocesses.c:541-653);
+##  - pools are stage-1 prey (pPREY1 rows); sediment and epibenthic prey are
+##    available in each box's deepest water cell.
+## Not included: Q10 (on NESP the realised temperature multiplier on rates was
+## ~1, see validation phase 4), habitat refuge, pSTOCK, pH and turbidity.
+## On NESP (adult FTM, box 94, day 930) the same calculation in Python gave
+## 0.0052 t/day against 0.0050 t/day realised from Atlantis Growth / E.
+
+ra_window_scalar <- function(mode, prey_sn, prey_w, pred_sn, pred_w, klp, kup,
+                             kmax, li_a_prey, li_b_prey, li_a_pred, li_b_pred) {
+  n <- length(prey_sn)
+  if (identical(mode, "hard")) {
+    return(as.numeric(prey_sn >= klp * pred_sn & prey_sn <= kup * pred_sn))
+  }
+  if (identical(mode, "humped")) {
+    rel <- prey_sn / (kup * pred_sn)
+    s <- rel * exp(kmax * (1 - rel))
+  } else {
+    ## bi-logistic on length; length (cm) from wet weight (g) = W mg N x 20 x X_CN / 1000
+    len <- function(w, a, b) (pmax(w, 1e-30) * 20 * 5.7 / 1000 / a)^(1 / b)
+    pl <- len(pred_w, li_a_pred, li_b_pred)
+    ql <- len(prey_w, li_a_prey, li_b_prey)
+    mx <- klp + (kup - klp) * 0.5
+    lo <- (klp + (mx - klp) * 0.5) * pl
+    hi <- (kup - (kup - mx) * 0.5) * pl
+    s <- ifelse(ql <= mx * pl,
+                1 / (1 + exp(pmin(700, pmax(-700, -kmax * (ql - lo))))),
+                1 / (1 + exp(pmin(700, pmax(-700, kmax * (ql - hi))))))
+  }
+  s[!is.finite(s)] <- 0
+  pmin(1, pmax(0, s))
+}
+
+##' Atlantis-faithful consumption for every pPREY row and prey column.
+##' @return list(cons = mg N/day [row x prey], cons_box = [row x prey x box],
+##'   window = max size scalar [row x prey], prey_mass = mg N by prey and
+##'   stage, notes)
+atlantis_feeding_rates <- function(pprey, grp, prm, nc, time_i = 1L, boxes = NULL,
+                                   q10 = FALSE, exclude_boxes = NULL) {
+  prm <- prm_with_index(prm)
+  names(grp) <- tolower(names(grp))
+  vars <- names(nc$var)
+  notes <- character()
+  t <- max(1L, as.integer(time_i)[1])
+  slice <- function(vn) {
+    a <- tryCatch(nc_get_at_t(nc, vn, t), error = function(e) NULL)
+    if (is.null(a)) a <- tryCatch(nc_get(nc, vn), error = function(e) NULL)
+    if (!is.null(a) && length(dim(a)) == 3) a <- a[, , min(t, dim(a)[3])]
+    ## restore dimensions dropped by ncdf4 (e.g. a single box)
+    sz <- nc$var[[vn]]$size
+    has_t <- !is.null(nc$dim$t) && length(sz) && sz[length(sz)] == nc$dim$t$len &&
+      any(vapply(nc$var[[vn]]$dim, function(d) identical(d$name, "t"), logical(1)))
+    want <- if (has_t) sz[-length(sz)] else sz
+    if (!is.null(a) && length(want) >= 2 && length(a) == prod(want)) a <- array(a, want)
+    a
+  }
+  vol <- slice("volume")
+  if (is.null(vol) || length(dim(vol)) != 2) stop("output.nc / init.nc has no volume variable")
+  n_z <- nrow(vol); n_b <- ncol(vol)
+  info <- tryCatch(atlantis_layer_info(nc), error = function(e) NULL)
+  n_w <- if (!is.null(info)) info$n_water else rep(n_z - 1L, n_b)
+  water <- matrix(FALSE, n_z, n_b)
+  bottom <- rep(NA_integer_, n_b)
+  for (b in seq_len(n_b)) {
+    if (!is.finite(n_w[b]) || n_w[b] < 1) next
+    zs <- (n_z - n_w[b]):(n_z - 1L)
+    water[zs, b] <- vol[zs, b] > 0
+    bottom[b] <- zs[1]
+  }
+  if (!is.null(boxes)) {
+    keep_b <- seq_len(n_b) %in% (as.integer(boxes) + 1L)
+    water[, !keep_b] <- FALSE
+  }
+  ## Atlantis does not run ecology in boundary boxes (their animals are held
+  ## at fixed values), so nothing feeds there.
+  if (length(exclude_boxes)) water[, as.integer(exclude_boxes) + 1L] <- FALSE
+  cells <- which(water)
+  cell_box <- col(water)[cells]
+  vcell <- vol[cells]
+  area <- nc_box_area(nc)
+  ## put a box-level mass (mg N) into the deepest water cell as a density
+  to_bottom <- function(mass_b) {
+    d <- numeric(length(cells))
+    for (b in unique(cell_box)) {
+      zb <- bottom[b]
+      if (!is.finite(zb)) next
+      k <- which(cells == (b - 1L) * n_z + zb)
+      if (length(k) && vcell[k] > 0) d[k] <- mass_b[b] / vcell[k]
+    }
+    d
+  }
+  hard <- isTRUE(read_prm_scalar(prm, "UseHardFeedingWindow", default = 1) == 1)
+  bilog <- isTRUE(read_prm_scalar(prm, "UseBiLogisticFeedingWindow", default = 0) == 1)
+  mode <- if (hard) "hard" else if (bilog) "bilogistic" else "humped"
+  satiation <- isTRUE(read_prm_scalar(prm, "flag_satiation", default = 0) == 1)
+  params <- read_predator_feed_params(prm, grp)
+  codes <- as.character(grp$code)
+  ## size and Q10 parameters, read once per group
+  gpar <- lapply(codes, function(cd) list(
+    li_a = read_prm_scalar(prm, paste0("li_a_", cd), default = NA_real_),
+    li_b = read_prm_scalar(prm, paste0("li_b_", cd), default = NA_real_),
+    kmax = read_prm_scalar(prm, paste0("Kmax_coefft_", cd), default = 1),
+    age_mat = read_prm_scalar(prm, paste0(cd, "_age_mat"), default = NA_real_)))
+  names(gpar) <- codes
+  temp <- if (isTRUE(q10)) slice("Temp") else NULL
+  tcorr <- if (!is.null(temp) && length(dim(temp)) == 2) 0.693 * 1.066^temp[cells] else rep(1, length(cells))
+  tcorr[!is.finite(tcorr)] <- 1
+
+  ## ---- prey items: one per prey cohort (age-structured) or pool ----
+  prey_items <- list()
+  is_vert <- function(g) !as.character(g$grouptype) %in% c(AGE_SPECIAL, "PWN", "PRAWN", "PRAWNS", "CEP")
+  for (i in seq_len(nrow(grp))) {
+    g <- grp[i, ]
+    code <- as.character(g$code); name <- as.character(g$name)
+    n_coh <- max(1L, as.integer(g$numcohorts))
+    age_mat <- gpar[[code]]$age_mat
+    if (!is.finite(age_mat)) age_mat <- max(1, ceiling(n_coh / 2))
+    if (n_coh > 1 && !g$grouptype %in% AGE_SPECIAL && paste0(name, "1_Nums") %in% vars) {
+      for (k in seq_len(n_coh)) {
+        nv <- paste0(name, k, "_Nums")
+        if (!nv %in% vars) next
+        N <- slice(nv); SN <- slice(paste0(name, k, "_StructN")); RN <- slice(paste0(name, k, "_ResN"))
+        if (is.null(N) || is.null(SN) || is.null(RN)) next
+        Nc <- N[cells]; Nc[!is.finite(Nc)] <- 0
+        if (!any(Nc > 0)) next
+        prey_items[[length(prey_items) + 1]] <- list(
+          code = code, col = code, stage = if ((k - 1) < age_mat) 1L else 2L,
+          dens = Nc * (SN[cells] + RN[cells]) / vcell, sn = SN[cells],
+          w = SN[cells] + RN[cells], vert = is_vert(g), type = as.character(g$grouptype),
+          li_a = gpar[[code]]$li_a, li_b = gpar[[code]]$li_b)
+      }
+    } else {
+      dens <- numeric(length(cells))
+      found <- FALSE
+      for (vn in pool_var_names(vars, name, n_coh, g$grouptype)) {
+        x <- slice(vn)
+        if (is.null(x)) next
+        found <- TRUE
+        if (length(dim(x)) == 2) {
+          dens <- dens + x[cells]
+          if (n_z >= 2) {  # sediment layer -> deepest water cell
+            sed <- x[n_z, ] * vol[n_z, ]
+            sed[!is.finite(sed)] <- 0
+            dens <- dens + to_bottom(sed)
+          }
+        } else if (length(x) == n_b && length(area) == n_b) {
+          m <- x * area; m[!is.finite(m)] <- 0
+          dens <- dens + to_bottom(m)
+        }
+      }
+      if (!found) next
+      dens[!is.finite(dens)] <- 0
+      prey_items[[length(prey_items) + 1]] <- list(
+        code = code, col = code, stage = 1L, dens = dens, sn = NA, w = NA,
+        vert = FALSE, type = as.character(g$grouptype), li_a = NA, li_b = NA)
+      if (code %in% c("DL", "DR", "DC")) {   # sediment detritus columns
+        x <- slice(pool_var_names(vars, name, 1L, g$grouptype)[1])
+        if (!is.null(x) && length(dim(x)) == 2 && n_z >= 2) {
+          sed <- x[n_z, ] * vol[n_z, ]; sed[!is.finite(sed)] <- 0
+          prey_items[[length(prey_items) + 1]] <- list(
+            code = code, col = paste0(code, "sed"), stage = 1L, dens = to_bottom(sed),
+            sn = NA, w = NA, vert = FALSE, type = as.character(g$grouptype), li_a = NA, li_b = NA)
+        }
+      }
+    }
+  }
+  prey_cols <- colnames(pprey)
+  item_col <- match(vapply(prey_items, `[[`, "", "col"), prey_cols)
+
+  ## ---- outputs ----
+  meta <- parse_pprey_rownames(rownames(pprey))
+  cons <- matrix(0, nrow(pprey), ncol(pprey), dimnames = dimnames(pprey))
+  win <- cons
+  cons_box <- array(0, c(nrow(pprey), ncol(pprey), n_b))
+  prey_mass <- matrix(0, 2, ncol(pprey), dimnames = list(c("1", "2"), prey_cols))
+  prey_mass_box <- array(0, c(2, ncol(pprey), n_b))
+  for (it in seq_along(prey_items)) {
+    j <- item_col[it]
+    if (is.na(j)) next
+    st <- prey_items[[it]]$stage
+    m <- prey_items[[it]]$dens * vcell
+    prey_mass[st, j] <- prey_mass[st, j] + sum(m)
+    prey_mass_box[st, j, ] <- prey_mass_box[st, j, ] + tabulate_by(m, cell_box, n_b)
+  }
+  unsupported <- character()
+
+  ## ---- predators ----
+  for (pred in unique(meta$pred_code)) {
+    par <- params[[pred]]
+    if (is.null(par)) next
+    if (!par$predcase %in% 0:2) { unsupported <- c(unsupported, pred); next }
+    g <- grp[grp$code == pred, ][1, ]
+    name <- as.character(g$name); n_coh <- max(1L, as.integer(g$numcohorts))
+    rows <- which(meta$pred_code == pred)
+    E1 <- if (is.finite(par$E_live) && par$E_live > 0) par$E_live else 1
+    e_item <- vapply(prey_items, function(p) e_for_prey(par, p$col, p$type), numeric(1))
+    age_mat <- if (is.finite(par$age_mat)) par$age_mat else max(1, ceiling(n_coh / 2))
+    cohorts <- list()
+    if (n_coh > 1 && !g$grouptype %in% AGE_SPECIAL && paste0(name, "1_Nums") %in% vars) {
+      for (k in seq_len(n_coh)) {
+        N <- slice(paste0(name, k, "_Nums"))
+        if (is.null(N)) next
+        SN <- slice(paste0(name, k, "_StructN")); RN <- slice(paste0(name, k, "_ResN"))
+        Nc <- N[cells]; Nc[!is.finite(Nc)] <- 0
+        if (!any(Nc > 0)) next
+        w <- SN[cells] + RN[cells]
+        C <- pick_rate(par$C, k); mum <- pick_rate(par$mum, k)
+        if (identical(as.integer(par$flagfishrates), 1L)) { C <- C * w; mum <- mum * w }
+        cohorts[[length(cohorts) + 1]] <- list(stage = if ((k - 1) < age_mat) 1L else 2L,
+          sp = Nc / vcell, C = C, mum = mum, sn = SN[cells], w = w)
+      }
+    } else {
+      dens <- numeric(length(cells))
+      for (vn in pool_var_names(vars, name, n_coh, g$grouptype)) {
+        x <- slice(vn)
+        if (is.null(x)) next
+        if (length(dim(x)) == 2) dens <- dens + x[cells]
+        else if (length(x) == n_b && length(area) == n_b) {
+          m <- x * area; m[!is.finite(m)] <- 0; dens <- dens + to_bottom(m)
+        }
+      }
+      dens[!is.finite(dens)] <- 0
+      if (any(dens > 0)) cohorts[[1]] <- list(stage = NA_integer_, sp = dens,
+        C = pick_rate(par$C, 1), mum = pick_rate(par$mum, 1), sn = NA, w = NA)
+    }
+    for (ch in cohorts) {
+      ## pPREY row for each prey stage, given this predator stage
+      row_for <- function(js) {
+        r <- rows[(is.na(meta$pred_stage[rows]) | meta$pred_stage[rows] %in% ch$stage) &
+                  (is.na(meta$prey_stage[rows]) | meta$prey_stage[rows] == js)]
+        if (length(r)) r[1] else NA_integer_
+      }
+      rmap <- c(row_for(1L), row_for(2L))
+      if (all(is.na(rmap))) next
+      avail <- matrix(0, length(cells), length(prey_items))
+      for (it in seq_along(prey_items)) {
+        j <- item_col[it]; p <- prey_items[[it]]
+        r <- rmap[p$stage]
+        if (is.na(j) || is.na(r)) next
+        pp <- as.numeric(pprey[r, j])
+        if (!is.finite(pp) || pp <= 0) next
+        s <- if (isTRUE(p$vert) && length(ch$sn) == length(cells)) {
+          ra_window_scalar(mode, p$sn, p$w, ch$sn, ch$w, par$klp, par$kup,
+                           gpar[[pred]]$kmax, p$li_a, p$li_b,
+                           gpar[[pred]]$li_a, gpar[[pred]]$li_b)
+        } else 1
+        if (length(s) == 1) s <- rep(s, length(cells))
+        win[r, j] <- max(win[r, j], max(s[p$dens > 0], 0, na.rm = TRUE))
+        avail[, it] <- pp * p$dens * s
+      }
+      avail[!is.finite(avail)] <- 0
+      if (identical(as.integer(par$predcase), 2L)) avail <- avail^2
+      A <- rowSums(avail)
+      EA <- as.numeric(avail %*% e_item)
+      C <- ch$C; mum <- ch$mum
+      if (length(C) == 1) C <- rep(C, length(cells))
+      if (length(mum) == 1) mum <- rep(mum, length(cells))
+      C <- C * tcorr; mum <- mum * tcorr
+      if (identical(as.integer(par$predcase), 1L)) {
+        ingest <- pmin(C * A, mum / E1)               # per unit predator
+        frac_j <- ifelse(A > 0, avail / A, 0)
+        eaten <- ch$sp * ingest * vcell * frac_j
+      } else {
+        clear <- C / (1 + C * EA / mum)
+        if (satiation) clear <- pmin(clear, mum / E1)
+        clear[!is.finite(clear)] <- 0
+        eaten <- ch$sp * clear * vcell * avail
+      }
+      eaten[!is.finite(eaten)] <- 0
+      for (it in which(colSums(eaten) > 0)) {
+        j <- item_col[it]; r <- rmap[prey_items[[it]]$stage]
+        if (is.na(j) || is.na(r)) next
+        cons[r, j] <- cons[r, j] + sum(eaten[, it])
+        cons_box[r, j, ] <- cons_box[r, j, ] + tabulate_by(eaten[, it], cell_box, n_b)
+      }
+    }
+  }
+  if (length(unsupported)) notes <- c(notes, paste0(
+    "Not computed (predcase other than 0, 1, 2): ", paste(unique(unsupported), collapse = ", "), "."))
+  notes <- c(notes, paste0("Feeding window: ", mode, "; satiation cap: ",
+                           if (satiation) "on" else "off", "; no Q10."))
+  list(cons = cons, cons_box = cons_box, window = win, prey_mass = prey_mass,
+       prey_mass_box = prey_mass_box, n_box = n_b, notes = notes)
+}
+
+tabulate_by <- function(x, g, n) {
+  out <- numeric(n)
+  s <- rowsum(x, g)
+  out[as.integer(rownames(s))] <- s[, 1]
+  out
+}
+
+##' atlantis_feeding_rates() for all boxes, cached per file, time step and
+##' pPREY matrix (the view used to take ~2 min on every visit; PF2).
+cached_feeding_rates <- function(pprey, grp, prm, nc, time_i = 1L) {
+  path <- tryCatch(nc$filename, error = function(e) "anon")
+  sig <- paste(dim(pprey), signif(sum(pprey * seq_along(pprey), na.rm = TRUE), 12),
+               paste(rownames(pprey)[1:min(3, nrow(pprey))], collapse = ","), collapse = "|")
+  key <- paste("feed", file_cache_key(path, paste("t", time_i)), sig, sep = "|")
+  hit <- ra_cache_get(key)
+  if (!is.null(hit)) return(hit)
+  ra_cache_set(key, atlantis_feeding_rates(pprey, grp, prm, nc, time_i = time_i))
 }

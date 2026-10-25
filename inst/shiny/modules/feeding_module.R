@@ -138,7 +138,7 @@ feeding_server <- function(id, project = NULL) {
     output$matrix_caption <- renderUI({
       if (identical(input$view_type, "pressure")) {
         p(class = "ra-muted",
-          "Screening index, not Atlantis intake: each cell is a simplified Holling calculation from pPREY, C, mum and biomass at the selected time (box totals, no Q10, satiation cap or refuge). Use it to rank links. On NESP it ran about 35x above the intake Atlantis realised, which is shown in the table for the selected pair.")
+          "Each cell is the consumption expected from the Atlantis feeding equations (per predator cohort and water cell, with the size window and satiation cap) at the selected time. It is approximate: output snapshots miss day-night vertical movement and Q10 is not applied. The intake Atlantis realised is shown in the table for the selected pair.")
       } else {
         p(class = "ra-muted",
           "Every predator x prey cell is drawn, including zeros. Scroll or zoom if the matrix is large.")
