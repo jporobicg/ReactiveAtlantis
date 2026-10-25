@@ -64,3 +64,16 @@ All commits are on the local branch `audit/pre-release-validation`, on top of PR
 | S05 | CI (no GitHub Actions). |
 | S07, S12, S25 | Guide safety and answer quality. These are design limits, not bugs. |
 | Visual redesigns | All approved redesigns in `visual_design/proposed_improvements.md` are proposals; none is implemented. |
+
+## Round 2 (2026-10-26, owner: "fix them", accepted Catch as not validated, predation pressure not accepted, so rebuilt)
+
+| Commit | ID | Change | Verified | Regression test |
+|---|---|---|---|---|
+| 32ee665 | N5 | Food-web trophic levels solved for the whole web, (I − P) TL = 1 | NESP day 930: PL 1, ZS 2.1, ZL 4.3, FTM 5.3 (high zooplankton TLs come from NESP's own diets) | "trophic levels are solved for the whole web" |
+| 32ee665 | N6 | Atlantis YOY drawn on top; BH dashed; "new α/β" lines only when edited | screenshot | — |
+| 32ee665 | N7 | S–R pairs each recruitment with the latest spawning (SSB > 0) before it | — | "stock-recruit pairs use the spawning before each recruitment" |
+| 32ee665 | D17 | Warning when no BGM is found (Compare, Ages, Physics) | — | "missing BGM is reported on Compare" |
+| 32ee665 | D19, D31, D22 | Legacy `compare()`: NetCDF volumes and areas, pools in tonnes, no t1 copy over t0 | NESP pools within 0.4–4 % of BiomIndx (boundary boxes included) | — |
+| 32ee665 | D18 | Integrated tracers volume-weighted over water cells; whole-system tracer series volume-weighted; Physics all-box mean volume-weighted; problem cohorts numbers-weighted | — | "concentrations are volume-weighted" |
+| 8033dfc | D14 | Fleet = CSV row (Atlantis nf + 1); tonnes only; no cross-fleet or cross-group fallback; tab labelled "Not validated" | Atlantis source atHarvestSetup.c:316 | catch FC test rewritten (FC2 for the second fleet; no fallback) |
+| fcd6474, ea6de2d | D05 | Expected predation pressure rebuilt per cohort and cell (see `defects.md`); cached; the per-box map uses the same result | Box 94 exact against the reference; system 0.3–4× realised | "expected consumption follows Atlantis per cohort and cell" (hand values, satiation cap) |

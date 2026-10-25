@@ -1,5 +1,30 @@
 # Release readiness: final position (Phase 10, 2026-10-26)
 
+## Update after round 2 (2026-10-26, branch `ea6de2d`)
+
+The owner asked for the remaining P1 items to be fixed, accepted Catch as "not validated", and did not accept predation pressure as a screening index, so it was rebuilt.
+
+**R CMD check:** 1 NOTE; **1,340 tests pass**, 0 failed, 0 skipped, browser tests included.
+
+| Item | Status |
+|---|---|
+| D05 predation pressure | **Rebuilt** per cohort and cell from the Atlantis equations; exact against the reference case; 0.3–4× Atlantis realised system-wide (was 35×). Labelled approximate (vertical migration between snapshots, no Q10). Proposed: close it as a documented limitation, or investigate further (day/night distribution, Q10 variants). |
+| D14 Catch | Fleet mapping and units fixed; **accepted by the owner as "not validated"** (the tab says so) |
+| D17, D18, D19, N5, N6, N7 | **Fixed**, with tests |
+| S02 tests | Partly fixed: 13 tests now use hand-computed references; most older tests still rely on synthetic fixtures |
+| S25 Scientific Guide reliability | **Open, not accepted.** About 1 in 3 answers contains a false scientific claim. Options: ship it disabled (it is off by default) and documented as experimental, remove it from this release, or improve retrieval and prompts before release |
+
+**Recommendation now: CONDITIONAL GO**, provided the owner:
+
+1. decides the Scientific Guide (S25);
+2. accepts D05's remaining approximation.
+
+S02 remains a test-quality gap, not a correctness defect.
+
+---
+
+
+
 **Recommendation: NO-GO for the release candidate as audited** (PR #4, `92974ba`).
 
 **For the remediated branch** (`audit/pre-release-validation`, `ce1f9f6`), the recommendation is NO-GO until the open P1 items below are either fixed or **explicitly accepted by the owner** as labelled limitations. If they are accepted, the branch qualifies as a **CONDITIONAL GO**.
