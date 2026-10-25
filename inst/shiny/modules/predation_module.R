@@ -80,7 +80,7 @@ predation_server <- function(id, project = NULL) {
     })
 
     to_year <- function(df) {
-      origin <- ps()$data$origin
+      origin <- ra_run_origin(ps)
       df$Time <- days_as_date(df$Time, origin)
       df
     }

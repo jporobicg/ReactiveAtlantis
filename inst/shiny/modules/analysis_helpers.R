@@ -1040,6 +1040,19 @@ spatial_empty_plotly <- function(msg) {
 }
 
 ##' Native plotly box map (ggplotly + geom_polygon + coord_equal is blank).
+##' Number for display: plain digits with thousands separators for ordinary
+##' magnitudes (100005 stays 100,005, not "1e+05"; validation S19), 4
+##' significant digits, scientific only below 1e-3 or from 1e9.
+ra_fmt_num <- function(x, digits = 4) {
+  vapply(as.numeric(x), function(v) {
+    if (!is.finite(v)) return("NA")
+    a <- abs(v)
+    if (a != 0 && (a < 1e-3 || a >= 1e9)) return(formatC(v, format = "e", digits = digits - 1))
+    if (a >= 10^digits) return(formatC(round(v), format = "d", big.mark = ","))
+    trimws(formatC(signif(v, digits), format = "fg", digits = digits, big.mark = ","))
+  }, character(1))
+}
+
 plot_spatial_map_plotly <- function(poly, fill_lim = NULL, fill_high = "#0B3C5D",
                                     selected_box = NULL, title = NULL,
                                     legend = "Value") {
@@ -1093,7 +1106,7 @@ plot_spatial_map_plotly <- function(poly, fill_lim = NULL, fill_high = "#0B3C5D"
     }
     lab <- paste0(
       "Box ", id, "<br>",
-      if (is.finite(val)) format(val, digits = 4, trim = TRUE) else "NA"
+      if (is.finite(val)) ra_fmt_num(val) else "NA"
     )
     plt <- plotly::add_trace(
       plt, type = "scatter", mode = "lines",
@@ -1718,7 +1731,7 @@ load_run_lite <- function(folder, label = NULL, config_dir = NULL, output_dir = 
     out$biomindx <- tryCatch(read_space_table(paths$biomindx), error = function(e) NULL)
   }
   if (path_ok(paths$yoy)) {
-    out$yoy <- tryCatch(utils::read.csv(paths$yoy, sep = " ", stringsAsFactors = FALSE),
+    out$yoy <- tryCatch(read_yoy_table(paths$yoy),
                         error = function(e) NULL)
   }
   if (path_ok(paths$ssb)) {
@@ -1783,8 +1796,12 @@ ensemble_table <- function(runs, code, kind = "biomass") {
                   ssb = rn$ssb,
                   NULL)
     if (is.null(tab)) next
-    col <- if (kind == "yoy") paste0(code, ".0") else code
-    if (!col %in% names(tab)) next
+    ## YOY columns are CODE-0 in Atlantis output (CODE.0 after R name
+    ## cleaning); accept both so every run is found (validation D26).
+    col <- if (kind == "yoy") {
+      intersect(paste0(code, c("-0", ".0", "_0", "")), names(tab))[1]
+    } else code
+    if (is.na(col) || !col %in% names(tab)) next
     tcol <- if ("Time" %in% names(tab)) tab$Time else seq_len(nrow(tab))
     rows[[length(rows) + 1]] <- data.frame(
       Time = as.numeric(tcol),

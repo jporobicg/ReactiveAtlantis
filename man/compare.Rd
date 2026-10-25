@@ -77,6 +77,13 @@ This function allows visualization of either the output from a simulation or
     outputs. The user is also able to check the changes is these variables by
     age for the different functional groups.
 }
+\section{Unified Application}{
+
+This function launches a separate Shiny app. For a better experience with all
+tools integrated in one modern interface, use \code{\link{launch_reactiveatlantis}}
+instead.
+}
+
 \author{
 Demiurgo
 }

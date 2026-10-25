@@ -49,7 +49,7 @@ overview_server <- function(id, project) {
           )
         ))
       }
-      dat <- ps()$data
+      dat <- ra_with_nc_out(ps)
       ## Cards stay cheap: BiomIndx health only. Problem-cohort counts wait for the table.
       sm <- summarise_run(dat$grp, dat$nc_out, dat$biomindx, dat$time_dates)
       flags <- tryCatch(health(), error = function(e) NULL)
@@ -98,7 +98,7 @@ overview_server <- function(id, project) {
 
     output$run_window <- shiny::renderUI({
       if (!isTRUE(ps()$ready)) return(NULL)
-      dat <- ps()$data
+      dat <- ra_with_nc_out(ps)
       sm <- summarise_run(dat$grp, dat$nc_out, dat$biomindx, dat$time_dates)
       start_lab <- if (!is.na(sm$origin)) format(sm$origin, "%Y-%m-%d") else "not in NetCDF"
       bslib::card(

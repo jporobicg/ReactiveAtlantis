@@ -4,9 +4,34 @@
 
 .ra_cache <- new.env(parent = emptyenv())
 
+ra_cache_close_entry <- function(key) {
+  v <- get(key, envir = .ra_cache, inherits = FALSE)
+  if (inherits(v, "ncdf4")) try(ncdf4::nc_close(v), silent = TRUE)
+  rm(list = key, envir = .ra_cache)
+}
+
 ra_cache_clear <- function() {
-  rm(list = ls(envir = .ra_cache, all.names = TRUE), envir = .ra_cache)
+  for (k in ls(envir = .ra_cache, all.names = TRUE)) ra_cache_close_entry(k)
   invisible(NULL)
+}
+
+##' Keep only cache entries for the given files; close other NetCDF handles
+##' and drop their arrays. Called on every Load so a session holds at most the
+##' loaded runs (validation S03: handles 1 -> 6 and RSS 747 -> 1406 MB over
+##' reloads). Returns the number of entries dropped.
+ra_cache_retain <- function(paths) {
+  keep <- unique(stats::na.omit(as.character(unlist(paths))))
+  keep <- keep[nzchar(keep)]
+  keys <- ls(envir = .ra_cache, all.names = TRUE)
+  dropped <- 0L
+  for (k in keys) {
+    hit <- any(vapply(keep, function(p) grepl(p, k, fixed = TRUE), logical(1)))
+    if (!hit) {
+      ra_cache_close_entry(k)
+      dropped <- dropped + 1L
+    }
+  }
+  invisible(dropped)
 }
 
 file_cache_key <- function(path, extra = "") {
@@ -208,4 +233,17 @@ ensure_project_data <- function(snap, need = character()) {
   } else {
     open_needed()
   }
+}
+
+## Project data with output.nc opened (handle, origin, time_dates). The
+## snapshot from project_snapshot() leaves these NULL until a tab asks for
+## them, so tabs that only read ps()$data saw no time origin and the Overview
+## cards showed "-" (validation D21). Falls back to the plain snapshot.
+ra_with_nc_out <- function(ps) {
+  tryCatch(ensure_project_data(ps(), "nc_out"), error = function(e) ps()$data)
+}
+
+ra_run_origin <- function(ps) {
+  o <- tryCatch(ra_with_nc_out(ps)$origin, error = function(e) NULL)
+  if (is.null(o)) NA else o
 }

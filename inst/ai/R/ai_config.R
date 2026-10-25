@@ -113,6 +113,10 @@ ra_ai_config <- function() {
   if (!is.finite(temp)) temp <- 0.2
   timeout_s <- suppressWarnings(as.numeric(Sys.getenv("RA_OLLAMA_TIMEOUT_S", "90")))
   if (!is.finite(timeout_s) || timeout_s <= 0) timeout_s <- 90
+  ## Reasoning models (qwen3.5, the default) write long hidden reasoning
+  ## before answering; on a CPU a one-sentence answer took 306 s, beyond the
+  ## timeout. Off by default (validation S23); RA_OLLAMA_THINK=true enables it.
+  think <- tolower(Sys.getenv("RA_OLLAMA_THINK", "false")) %in% c("true", "1", "yes", "on")
 
   list(
     enabled = ra_ai_enabled(),
@@ -123,6 +127,7 @@ ra_ai_config <- function() {
     sources_config = sources_config,
     temperature = temp,
     timeout_s = timeout_s,
+    think = think,
     health_timeout_s = 2,
     max_history = 12L,
     max_chunks = 6L,

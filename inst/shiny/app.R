@@ -184,6 +184,8 @@ ui <- page_navbar(
 )
 
 server <- function(input, output, session) {
+  ## Close NetCDF handles and drop cached arrays when the session ends (S03).
+  session$onSessionEnded(function() ra_cache_clear())
   project <- project_server("project")
   overview_server("overview", project)
   compare_server("compare", project)

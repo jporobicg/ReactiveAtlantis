@@ -44,7 +44,7 @@ foodweb_server <- function(id, project = NULL) {
       dat <- diet_dat()
       req(dat$diet_time, input$time_step)
       tstep <- nearest_time(as.numeric(input$time_step), sort(unique(dat$diet_time$Time)))
-      origin <- dat$origin
+      origin <- ra_run_origin(ps)
       when <- days_as_date(tstep, origin)
       paste("Selected:", tstep, "days",
             if (inherits(when, "Date")) paste0("(", format(when, "%Y-%m-%d"), ")") else "")

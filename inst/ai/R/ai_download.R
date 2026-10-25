@@ -42,7 +42,13 @@ ra_ai_looks_like_pdf <- function(path) {
 
 ##' Fetch one URL to destfile. Tests may replace this with
 ##' options(reactiveatlantis.download_file = function(url, destfile) ...).
-ra_ai_http_download <- function(url, destfile, timeout_s = 180) {
+ra_ai_http_download <- function(url, destfile, timeout_s = 180, expect = "pdf") {
+  check_type <- function(path) {
+    if (identical(expect, "pdf")) return(ra_ai_looks_like_pdf(path))
+    if (!file.exists(path) || file.size(path) == 0) return(FALSE)
+    head <- tolower(paste(readLines(path, n = 20, warn = FALSE), collapse = " "))
+    grepl("<html|<!doctype html", head)
+  }
   transport <- getOption("reactiveatlantis.download_file", default = NULL)
   if (is.function(transport)) {
     return(transport(url = url, destfile = destfile))
@@ -61,10 +67,10 @@ ra_ai_http_download <- function(url, destfile, timeout_s = 180) {
     }
     status <- httr2::resp_status(resp)
     bytes <- suppressWarnings(file.size(destfile))
-    if (status < 200 || status >= 300 || !ra_ai_looks_like_pdf(destfile)) {
+    if (status < 200 || status >= 300 || !check_type(destfile)) {
       if (file.exists(destfile)) unlink(destfile)
       return(list(ok = FALSE, status = status, url = url,
-                  error = paste("HTTP", status, "or not a PDF"),
+                  error = paste("HTTP", status, "or not a", toupper(expect), "file"),
                   bytes = bytes))
     }
     return(list(ok = TRUE, status = status, url = url,
@@ -82,10 +88,10 @@ ra_ai_http_download <- function(url, destfile, timeout_s = 180) {
                 error = msg, bytes = NA_real_))
   }
   bytes <- suppressWarnings(file.size(destfile))
-  if (!ra_ai_looks_like_pdf(destfile)) {
+  if (!check_type(destfile)) {
     unlink(destfile)
     return(list(ok = FALSE, status = NA_integer_, url = url,
-                error = "downloaded file is not a PDF", bytes = bytes))
+                error = paste("downloaded file is not a", toupper(expect), "file"), bytes = bytes))
   }
   list(ok = TRUE, status = 200L, url = url, error = NULL, bytes = bytes)
 }
@@ -231,8 +237,14 @@ ra_ai_download_html_manual <- function(dest_dir = NULL, overwrite = FALSE,
       status <- "skipped"
     } else {
       ok <- tryCatch({
-        ra_ai_http_download(pg$url, dest)
-        TRUE
+        res <- ra_ai_http_download(pg$url, dest, expect = "html")
+        ## The downloader reports failure as a value, not an error (S22).
+        if (is.list(res) && !isTRUE(res$ok)) {
+          err <- as.character(res$error %||% "download failed")
+          FALSE
+        } else {
+          TRUE
+        }
       }, error = function(e) {
         err <<- e$message
         FALSE

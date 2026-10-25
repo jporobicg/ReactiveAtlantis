@@ -127,6 +127,7 @@ ra_ollama_chat <- function(messages, config = ra_ai_config()) {
     model = config$model,
     messages = messages,
     stream = FALSE,
+    think = isTRUE(config$think),
     options = list(temperature = config$temperature)
   )
   res <- ra_ollama_request(

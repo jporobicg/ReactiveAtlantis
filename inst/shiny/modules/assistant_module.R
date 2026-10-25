@@ -188,8 +188,18 @@ assistant_server <- function(id, project = NULL, parent_session = NULL) {
                        inherits = FALSE)
     ask_task <- NULL
     if (isTRUE(use_task)) {
+      ## ExtendedTask needs a promise; ra_ai_answer() returns a list, which made
+      ## every question fail on Shiny >= 1.8.1 (validation S17). Errors are
+      ## turned into an answer so the busy state always clears.
       ask_task <- shiny::ExtendedTask$new(function(question, hist, ctx, cfg) {
-        ra_ai_answer(question, history = hist, context = ctx, config = cfg)
+        promises::promise_resolve(tryCatch(
+          ra_ai_answer(question, history = hist, context = ctx, config = cfg),
+          error = function(e) list(
+            ok = FALSE, blocked = FALSE, reason = "error",
+            answer = paste("The assistant failed:", conditionMessage(e)),
+            citations = list(), nav_targets = list()
+          )
+        ))
       })
     }
 

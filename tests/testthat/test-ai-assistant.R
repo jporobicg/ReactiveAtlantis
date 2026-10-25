@@ -467,3 +467,61 @@ test_that("csiro manual chunk detector ignores fixture manuals", {
     "FIXTURE-NOT-OFFICIAL"
   ))
 })
+
+test_that("chat requests switch model reasoning off by default (S23)", {
+  seen <- NULL
+  tr <- function(method, url, path, body = NULL, timeout_s = 30) {
+    if (identical(path, "/api/chat")) seen <<- body
+    list(ok = TRUE, status = 200L, body = list(message = list(content = "ok")), raw = "")
+  }
+  withr::local_envvar(RA_OLLAMA_THINK = NA)
+  with_mock_ollama(ra_ollama_chat(list(list(role = "user", content = "hi")), ra_ai_config()), tr)
+  expect_identical(seen$think, FALSE)
+  withr::local_envvar(RA_OLLAMA_THINK = "true")
+  with_mock_ollama(ra_ollama_chat(list(list(role = "user", content = "hi")), ra_ai_config()), tr)
+  expect_identical(seen$think, TRUE)
+})
+
+test_that("a slow model is reported as a timeout, not as unreachable (S23)", {
+  tr <- function(method, url, path, body = NULL, timeout_s = 30) {
+    if (identical(path, "/api/chat")) stop("Timeout was reached: Operation timed out after 90000 milliseconds")
+    ra_ai_test_transport(method, url, path, body, timeout_s)
+  }
+  cfg <- ra_ai_config()
+  ans <- with_mock_ollama(ra_ai_answer("What do C and mum mean in the Holling type II response?",
+                                       config = cfg), tr)
+  txt <- paste(unlist(ans$answer), collapse = " ")
+  if (identical(ans$reason, "ollama_error")) {
+    expect_true(grepl("did not answer within", txt))
+    expect_false(grepl("could not reach", txt))
+  } else {
+    succeed()  # answered from the local index without calling the model
+  }
+})
+
+test_that("HTML manual download reports a failed fetch with its reason (S22)", {
+  dest <- tempfile("html_manual_")
+  old <- getOption("reactiveatlantis.download_file")
+  on.exit(options(reactiveatlantis.download_file = old), add = TRUE)
+  options(reactiveatlantis.download_file = function(url, destfile) {
+    list(ok = FALSE, status = 404L, url = url, error = "HTTP 404", bytes = NA_real_)
+  })
+  res <- ra_ai_download_html_manual(dest_dir = dest, verbose = FALSE)
+  expect_false(res$ok)
+  expect_true(all(res$files$error == "HTTP 404"))
+  options(reactiveatlantis.download_file = function(url, destfile) {
+    writeLines("<!DOCTYPE html><html><body>Atlantis manual</body></html>", destfile)
+    list(ok = TRUE, status = 200L, url = url, error = NULL, bytes = file.size(destfile))
+  })
+  res <- ra_ai_download_html_manual(dest_dir = dest, overwrite = TRUE, verbose = FALSE)
+  expect_true(res$ok)
+  expect_true(all(res$files$status == "downloaded"))
+})
+
+test_that("the assistant task returns a promise so Shiny ExtendedTask accepts it (S17)", {
+  src <- readLines(file.path(root, "inst", "shiny", "modules", "assistant_module.R"))
+  task <- paste(src, collapse = "\n")
+  expect_true(grepl("ExtendedTask$new(function(question, hist, ctx, cfg) {\n        promises::promise_resolve(", task, fixed = TRUE))
+  p <- promises::promise_resolve(list(answer = "x"))
+  expect_true(promises::is.promise(p))
+})

@@ -78,6 +78,13 @@ This function is useful for dynamically evaluating and visualizing predator-prey
     analyze the predatory pressure from the predator and from the prey
     perspective.
 }
+\section{Unified Application}{
+
+This function launches a separate Shiny app. For a better experience with all
+tools integrated in one modern interface, use \code{\link{launch_reactiveatlantis}}
+instead.
+}
+
 \author{
 Demiurgo
 }

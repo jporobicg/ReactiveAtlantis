@@ -468,11 +468,20 @@ ra_ai_answer <- function(question,
         ok = FALSE,
         blocked = FALSE,
         reason = "ollama_error",
-        answer = paste(
-          "I could not reach the local language model.",
-          raw$message,
-          "Existing calibration tools are unaffected."
-        ),
+        answer = if (grepl("timeout|timed out", raw$message, ignore.case = TRUE)) {
+          paste(
+            "The local language model did not answer within",
+            config$timeout_s, "seconds (RA_OLLAMA_TIMEOUT_S).",
+            "It is reachable but slow; a smaller model or a longer timeout may help.",
+            "Existing calibration tools are unaffected."
+          )
+        } else {
+          paste(
+            "I could not reach the local language model.",
+            raw$message,
+            "Existing calibration tools are unaffected."
+          )
+        },
         claim_kinds = "insufficient_evidence",
         citations = list(),
         nav_targets = ra_ai_validate_nav(ra_ai_suggest_nav(question)),

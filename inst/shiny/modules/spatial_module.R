@@ -217,7 +217,7 @@ spatial_server <- function(id, project = NULL) {
     })
 
     output$time_lab <- renderText({
-      dat <- ps()$data
+      dat <- ra_with_nc_out(ps)
       req(input$time_i)
       tdates <- dat$time_dates
       if (!is.null(tdates) && length(tdates) >= input$time_i) {

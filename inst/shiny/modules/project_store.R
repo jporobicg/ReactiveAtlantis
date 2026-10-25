@@ -450,11 +450,43 @@ detect_project_files <- function(folder) {
 ##' \code{output_dir}. A file found only in the other folder is kept and
 ##' listed in \code{fallback}. The same path for both folders is the
 ##' single-folder (backward compatible) case.
+## One folder given: Atlantis runs usually keep config files at the top and
+## outputs in outputs/ (or output/), and output folders sit inside the run
+## folder. Look one level down for outputs and one level up for config
+## (validation L01). Returns the folders to use.
+resolve_single_folder <- function(dir) {
+  has <- function(d, roles) {
+    if (!nzchar(d) || !dir.exists(d)) return(FALSE)
+    f <- detect_project_files(d)
+    any(vapply(roles, function(r) path_ok(f[[r]]), logical(1)))
+  }
+  out_roles <- c("biomindx", "output_nc", "dietcheck")
+  cfg_roles <- c("groups", "bio_prm")
+  cfg <- dir
+  out <- dir
+  if (!has(dir, out_roles)) {
+    subs <- list.dirs(dir, recursive = FALSE, full.names = TRUE)
+    subs <- subs[tolower(basename(subs)) %in% c("outputs", "output", "out", "results")]
+    hit <- subs[vapply(subs, has, logical(1), roles = out_roles)]
+    if (length(hit)) out <- hit[1]
+  }
+  if (!has(dir, cfg_roles)) {
+    up <- dirname(normalizePath(dir, mustWork = FALSE))
+    if (has(up, cfg_roles)) cfg <- up
+  }
+  list(config_dir = cfg, output_dir = out)
+}
+
 detect_run_pair <- function(config_dir = NULL, output_dir = NULL) {
   cfg_dir <- ra_nz(config_dir)
   out_dir <- ra_nz(output_dir)
   if (!nzchar(cfg_dir) && nzchar(out_dir)) cfg_dir <- out_dir
   if (!nzchar(out_dir) && nzchar(cfg_dir)) out_dir <- cfg_dir
+  if (nzchar(cfg_dir) && same_dir(cfg_dir, out_dir)) {
+    one <- resolve_single_folder(cfg_dir)
+    cfg_dir <- one$config_dir
+    out_dir <- one$output_dir
+  }
   cfg <- if (nzchar(cfg_dir) && dir.exists(cfg_dir)) {
     detect_project_files(cfg_dir)
   } else empty_paths()
@@ -1118,6 +1150,9 @@ project_server <- function(id) {
         ra_inc(0.55, detail = "Loading extra runs")
         ens <- build_ensemble(out, pairs)
         ra_inc(0.85, detail = "Updating tools")
+        ## Release files of runs that are no longer loaded (S03).
+        ra_cache_retain(c(unlist(paths), unlist(lapply(ens, function(r) r$paths))))
+        gc(verbose = FALSE)
         list(data = out, paths = paths, det = det, pairs = pairs, ensemble = ens)
       })
       shiny::removeNotification("load_run")

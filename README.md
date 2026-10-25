@@ -12,10 +12,18 @@ changes how you load data and how results are shown.
 ## Install
 
 ```r
-install.packages("devtools")
-devtools::install_github("jporobicg/ReactiveAtlantis", dependencies = TRUE)
+install.packages("remotes")
+remotes::install_github("jporobicg/ReactiveAtlantis", dependencies = TRUE)
 library(ReactiveAtlantis)
 ```
+
+This installs the default branch. To try a branch that is not merged yet,
+add `ref = "<branch name>"`.
+
+Requires R 4.0 or later, and the NetCDF and PROJ system libraries. On Debian
+or Ubuntu, install `plotly` from CRAN rather than the `r-cran-plotly`
+package: that package ships a replaced `typedarray.min.js` that stops plotly
+charts from drawing.
 
 ## How to use the app
 
@@ -73,7 +81,8 @@ launch_reactiveatlantis()
 ![Spatial water layer](man/figures/spatial_layer_water.png)
 
 ![Spatial sediment layer](man/figures/spatial_layer_sediment.png)
-| Consumption | Tonnes consumed from `outputPROD.nc`: age groups `<name><cohort>_Eat`, pools `<name>Grazing` (Name column, case-sensitive) × volume × DietCheck; predator and prey views. Disabled if PROD is missing |
+| Ages | Biomass, numbers, reserve and structural N by age class |
+| Consumption | Food intake (t/day) as Atlantis realises it: for age-structured groups, numbers × `<Name><cohort>_Growth` (outputPROD.nc) ÷ E, split by each cohort's DietCheck shares. Pools still use `<name>Grazing` × volume and are not validated. Predator and prey views. Disabled if PROD is missing |
 | Physics | Temperature, salinity, NO3, NH3, Chl_a and denitrification by box and the water/sediment layers that exist in that box, plus `nominal_dz` |
 | Multi-run | Overlay biomass, SSB, YOY or catch from extra run pairs; ensemble mean and range when more than two runs are loaded |
 | Predation | Stacked diet composition, top N prey plus Other, year axis |
@@ -81,8 +90,8 @@ launch_reactiveatlantis()
 | Recruitment | Beverton–Holt alpha/beta in a side panel; SSB view; observed Recruitment / SSB ribbons |
 | Growth | Light / nutrient / eddy limitation by layer, years on the x-axis |
 | Catch | Stacked catch by group or fleet; observed overlay and skill when a catch CSV is loaded |
-| Feeding | Searchable heatmap; cells with pPREY > 0 and gape overlap = 0 are flagged |
-| Mortality | Fishing, natural and predation mortality stacked per age (Age01…Age10) |
+| Feeding | pPREY matrix (cells with pPREY > 0 and no gape overlap are flagged); predation-pressure **screening index** (a simplified Holling calculation, not Atlantis intake; the realised intake is shown beside the selected pair); realised diet; diagnostics |
+| Mortality | Fishing, natural and predation mortality stacked per age; predation mortality on a group split by predator (SpecificPredMort.txt: rows are prey, columns predators); Mort.txt F vs M |
 
 ![Compare small multiples](man/figures/compare.png)
 
@@ -110,7 +119,14 @@ Time axes use years from the NetCDF time units, not raw seconds or days. Plots
 share `theme_reactiveatlantis()`. Time series use plotly when the view is small
 enough to hover.
 
-## Atlantis Scientific Guide (optional)
+## Atlantis Scientific Guide (optional, experimental)
+
+**Experimental.** In a 55-question test against the Atlantis source and
+manuals, about one answer in three contained a scientific error, sometimes
+with a citation attached. Check every answer against the manual or the
+model output before acting on it. The Guide never edits files or runs
+Atlantis. Reasoning output is switched off by default (`RA_OLLAMA_THINK`),
+because reasoning models were too slow on a CPU.
 
 An optional **Atlantis Scientific Guide** drawer (the existing local
 Ask Atlantis stack) can answer modelling questions from a local index
@@ -132,13 +148,13 @@ locally (they are not shipped in the package) and indexed with
 The original exported functions still open their own apps for scripts:
 
 ```r
-compare(nc.current, nc.out.old = NULL, grp.csv, bgm.file, cum.depths)
-predation(biom, grp.csv, diet.file, bio.age = NULL)
-feeding.mat(prm.file, grp.file, nc.initial, bgm.file, cum.depths)
-food.web(diet.file, grp.file, diet.file.bypol = NULL)
-growth.pp(nc.initial, grp.csv, prm.file, nc.current)
-recruitment.cal(nc.initial, nc.current, yoy.file, grp.file, prm.file)
-catch(grp.csv, fsh.csv, catch.nc, ext.catch.by.fleet = NULL, ext.catch.total = NULL)
+compare(nc.out.current, nc.out.old = NULL, grp.csv, bgm.file, cum.depths)
+predation(biom.file, groups.csv, diet.file, age.biomass = NULL)
+feeding.mat(prm.file, grp.file, nc.file, bgm.file, cum.depths, quiet = TRUE)
+food.web(diet.file, grp.file, diet.file.bypol = NULL, quiet = TRUE)
+growth.pp(ini.nc.file, grp.file, prm.file, out.nc.file)
+recruitment.cal(ini.nc.file, out.nc.file, yoy.file, grp.file, prm.file, quiet = TRUE)
+catch(grp.csv, fish.csv, catch.nc, ext.catch.by.fleet = NULL, ext.catch.total = NULL)
 mortality(grp.file, prm.file, SpeMort, PredMort)
 ```
 

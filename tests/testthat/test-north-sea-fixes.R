@@ -2316,3 +2316,62 @@ test_that("North Sea pPREY keeps all rows and Spatial diagnose is on the map", {
   expect_true(grepl("map_status", ui))
 })
 
+
+test_that("one folder finds outputs/ below it and config above it (L01)", {
+  fx <- northsea_fixture_dir()
+  skip_if_not(dir.exists(fx))
+  run <- file.path(tempfile("run_"), "run1")
+  outd <- file.path(run, "outputs")
+  dir.create(outd, recursive = TRUE)
+  on.exit(unlink(dirname(run), recursive = TRUE), add = TRUE)
+  files <- list.files(fx, full.names = TRUE)
+  is_out <- grepl("^output", basename(files))
+  file.copy(files[!is_out], run)
+  file.copy(files[is_out], outd)
+  ## run folder: config at top, outputs one level down
+  a <- detect_run_pair(run, run)
+  expect_true(path_ok(a$paths$groups))
+  expect_true(path_ok(a$paths$biomindx))
+  expect_true(path_ok(a$paths$output_nc))
+  expect_equal(normalizePath(a$output_dir), normalizePath(outd))
+  ## output folder: outputs here, config one level up
+  b <- detect_run_pair(outd, outd)
+  expect_true(path_ok(b$paths$groups))
+  expect_true(path_ok(b$paths$bio_prm))
+  expect_true(path_ok(b$paths$biomindx))
+  expect_equal(normalizePath(b$config_dir), normalizePath(run))
+})
+
+test_that("Multi-run finds YOY in every run whatever the column naming (D26)", {
+  r1 <- list(label = "base", yoy = data.frame(Time = c(0, 365), `FTM-0` = c(5, 6), check.names = FALSE))
+  r2 <- list(label = "c1", yoy = data.frame(Time = c(0, 365), FTM.0 = c(7, 8)))
+  df <- ensemble_table(list(r1, r2), "FTM", "yoy")
+  expect_setequal(unique(df$Run), c("base", "c1"))
+  expect_equal(df$Value[df$Run == "base"], c(5, 6))
+})
+
+test_that("loading keeps only the loaded runs' files open (S03)", {
+  fx <- northsea_fixture_dir()
+  skip_if_not(dir.exists(fx))
+  a <- file.path(fx, "outputNorthSea.nc")
+  b <- file.path(fx, "outputNorthSeaPROD.nc")
+  ra_cache_clear()
+  ha <- nc_handle(a); hb <- nc_handle(b)
+  invisible(nc_get(ha, names(ha$var)[1])); invisible(nc_get(hb, names(hb$var)[1]))
+  keys <- ls(envir = .ra_cache, all.names = TRUE)
+  expect_true(any(grepl(a, keys, fixed = TRUE)) && any(grepl(b, keys, fixed = TRUE)))
+  dropped <- ra_cache_retain(a)
+  keys <- ls(envir = .ra_cache, all.names = TRUE)
+  expect_true(dropped >= 2)
+  expect_false(any(grepl(b, keys, fixed = TRUE)))
+  expect_true(any(grepl(a, keys, fixed = TRUE)))
+  expect_error(ncdf4::ncvar_get(hb, names(hb$var)[1]))   # handle closed
+  ra_cache_clear()
+  expect_length(ls(envir = .ra_cache, all.names = TRUE), 0)
+})
+
+test_that("map hover numbers are plain for ordinary magnitudes (S19)", {
+  expect_equal(ra_fmt_num(c(100005, 7000, 12.5, 0.01234, 0)),
+               c("100,005", "7,000", "12.5", "0.01234", "0"))
+  expect_equal(ra_fmt_num(1.2e-5), "1.200e-05")
+})

@@ -132,7 +132,7 @@ mortality_server <- function(id, project = NULL) {
         plot_message("No mortality columns for this group in SpecificMort.txt")
         return(invisible(NULL))
       }
-      origin <- dat$origin
+      origin <- ra_run_origin(ps)
       mort$Time <- days_as_date(mort$Time, origin)
       long <- reshape2::melt(mort, id.var = c("Time", "Mtype"))
       names(long)[names(long) == "variable"] <- "Age"
@@ -163,7 +163,7 @@ mortality_server <- function(id, project = NULL) {
         plot_message("No predation mortality for this age class.")
         return(invisible(NULL))
       }
-      origin <- ps()$data$origin
+      origin <- ra_run_origin(ps)
       long$Date <- days_as_date(long$Time, origin)
       pal <- get_fg_colors(unique(long$Predator), ps()$data$fg_palette)
       p <- ggplot2::ggplot(long, ggplot2::aes(x = Date, y = Value, fill = Predator))
@@ -188,7 +188,7 @@ mortality_server <- function(id, project = NULL) {
                        mortality_missing_message(file_status(), "mort"))
         return(invisible(NULL))
       }
-      origin <- dat$origin
+      origin <- ra_run_origin(ps)
       long$Date <- days_as_date(long$Time, origin)
       pal <- mortality_type_colors()
       p <- ggplot2::ggplot(long, ggplot2::aes(x = Date, y = Value, colour = Source))

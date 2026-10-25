@@ -68,7 +68,7 @@ ensemble_server <- function(id, project = NULL) {
         plot_message("No series for this group in the loaded runs")
         return(invisible(NULL))
       }
-      origin <- ps()$data$origin
+      origin <- ra_run_origin(ps)
       df$Date <- days_as_date(df$Time, origin)
       n_runs <- length(unique(df$Run))
       pal <- cycle_pool(n_runs, c("#0B3C5D", "#1D7874", "#C4A35A", "#A33B20",
