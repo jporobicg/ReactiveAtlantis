@@ -22,10 +22,9 @@ Independent audit of ReactiveAtlantis before public release. It covers scientifi
 | 5 Interactive and visual | Done. 35 states at 3 sizes; science and design reviews reconciled. `visual_design/` |
 | 6 Scientific Guide | Done. `ai_guide_validation.md` |
 | 7 Performance | Done, on a loaded machine. `performance_report.md` |
-| 8 Remediation | Awaiting owner decisions on scientific fixes |
-| 9–10 | Not started |
-
-Interim recommendation: **NO-GO** (`release_readiness.md`).
+| 8 Remediation | Done for A–G and the software fixes. `phase8_remediation.md` |
+| 9 Regression | Done. R CMD check: 1 NOTE; 1,319 tests pass; NESP checks re-run; "after" screenshots, performance and Guide benchmark |
+| 10 Release decision | **NO-GO** until 10 open P1 items are fixed or accepted, then CONDITIONAL GO (`release_readiness.md`) |
 
 ## Environment
 
@@ -41,6 +40,7 @@ Interim recommendation: **NO-GO** (`release_readiness.md`).
 - `scientific_reference_matrix.md`: each diagnostic against its Atlantis definition
 - `test_dataset_manifest.md`: datasets A–F and where they come from
 - `defects.md`: defect register (confirmed / suspected / refuted)
-- `release_readiness.md`: interim position
+- `release_readiness.md`: final position and open items
+- `phase3_automated_tests.md`, `phase4_scientific_validation.md`, `phase8_remediation.md`, `performance_report.md`, `ai_guide_validation.md`
 - `visual_design/`: visualisation audit (inventory only; screenshots blocked)
 - `evidence/`: command outputs supporting the findings

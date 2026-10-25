@@ -1,0 +1,8 @@
+         n  exact
+kind             
+age     73     73
+pool2d  10     10
+pool3d  18     18
+Empty DataFrame
+Columns: [Code, kind, ref_tot, ra_tot, max_abs_rel, ratio_tot, ok]
+Index: []

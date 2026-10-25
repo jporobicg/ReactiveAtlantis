@@ -1,39 +1,57 @@
-# Release readiness: interim position, before remediation (end of Phases 1–7)
+# Release readiness: final position (Phase 10, 2026-10-26)
 
-**Recommendation as of 2026-10-25: NO-GO.** This is not final; it will be re-issued after Phases 8–10.
+**Recommendation: NO-GO for the release candidate as audited** (PR #4, `92974ba`).
 
-## Why
+**For the remediated branch** (`audit/pre-release-validation`, `ce1f9f6`), the recommendation is NO-GO until the open P1 items below are either fixed or **explicitly accepted by the owner** as labelled limitations. If they are accepted, the branch qualifies as a **CONDITIONAL GO**.
 
-- **7 P0 defects**, 6 of them confirmed by running the code on real NESP output:
-  - D01: predator attribution is transposed.
-  - D05: expected predation pressure is about 35× the realised intake.
-  - D11: epibenthic biomass is about 1e-10 of the true value.
-  - D16: the Consumption tab shows about 1e-11 of the realised intake.
-  - D31: Compare pool totals are in mg N but labelled tonnes.
-  - N1: the scaled zooplankton (ZL) total hides a 68 % crash.
-  - N9: D01 is visible on screen (detritus listed as a predator of tuna).
-- **26 P1 defects**, including:
-  - D03: spawn has the wrong sign (2.6–12× too high in thin years).
-  - D15: diet proportions are summed over cohorts.
-  - D26: run 1 is missing from Multi-run.
-  - S01: the documented install command installs master.
-  - S13: no tests run under `R CMD check`.
-  - S17 and S23: the Scientific Guide cannot answer.
-  - S25: Guide answers are unreliable.
-- **The existing test suite does not detect any of these.** It is green (1,095 expectations) and asserts some of the wrong behaviour.
+## What changed in Phase 8
+
+All 7 P0 defects are resolved.
+
+**Fixed and confirmed on NESP against independent references:**
+
+| ID | Item | Result |
+|---|---|---|
+| D01 | Predator attribution | predators of FTM = SHW, FVL, as in Atlantis |
+| D11 | Epibenthic biomass | all 101 groups exact per box |
+| D16 | Consumption | equals Atlantis intake |
+| D31, N1 | Compare pools | within 0.1–0.4 % of BiomIndx; the ZL crash is visible |
+| N9 | D01 visible on screen | fixed with D01 |
+
+**Mitigated:**
+
+- D05, predation pressure: relabelled as a screening index, with Atlantis realised intake shown beside it.
+
+**Also fixed:** 27 P1/P2/P3 items, including spawn (D03, now exact), diet weighting (D15), Multi-run run 1 (D26), the Overview (D21), health flags (D22), folder detection (L01), the Guide hang and timeout (S17, S23), the HTML manual download (S22), and NetCDF handles (S03). See `phase8_remediation.md`.
+
+## Regression after Phase 8
+
+- **R CMD check:** 1 NOTE. It was 1 ERROR, 1 WARNING and 5 NOTEs before. The tests now run under check: **1,319 passed, 0 failed, 0 skipped**, including every browser test.
+- **NESP reference checks re-run** (`evidence/phase9/`):
+  - biomass per box: 101/101 groups exact;
+  - spawn: ratio 1.000 (FTM and FTB, 5 spawnings);
+  - consumption: ratio 1.000 (4 groups, 3 times);
+  - SpecificPredMort: identical to the file;
+  - Compare totals: within 0.4 % of BiomIndx.
+- **"After" screenshots:** 35 states in `visual_design/screenshots/after/`. Spot-checked: Overview, Consumption, Mortality by predator, Compare ZL, Multi-run YOY.
+
+## Open P0/P1 items (block release unless accepted)
+
+| ID | Sev | Item | Smallest way to close it |
+|---|---|---|---|
+| D05 | P1 (was P0) | Predation pressure is still ~35× Atlantis; it is now labelled as a screening index | Accept as labelled, or rebuild per cell and per cohort (option 1) |
+| D14 | P1 | Catch by fleet: fallback double-counts and mixes units | Fix the fleet regex and units; **validate on a real fished run (none available)**, or label Catch "unvalidated" |
+| D17 | P1 | Silent dummy geometry when the BGM is missing | Show a banner and stop reporting tonnes |
+| D18 | P1 | Intensive vs extensive aggregation (Physics box mean, "integrated" tracers, problem cohorts) | Volume-weight or relabel |
+| D19 | P1 | BGM-derived volumes (`boxes.prop`) still used outside Compare pools | Use NetCDF volume everywhere |
+| N5 | P1 | Food-web trophic levels (producers hard-coded) | Solve TL properly, or hide the TL axis |
+| N6, N7 | P1 | Recruitment display: what-if lines hide the Atlantis series; S–R pairs not lagged | Draw Atlantis on top; lag recruits to spawning |
+| S02 | P1 | Most tests still rely on synthetic fixtures | Add small real-output regression fixtures (e.g. NESP subsets) |
+| S25 | P1 | Guide answers are unreliable (about 1 in 3 has a false claim) | Accept as "experimental", or disable by default (it already is) |
 
 ## Coverage
 
-| | Software test coverage | Scientific validation coverage |
+| | Software tests | Scientific validation |
 |---|---|---|
-| Executed | Install: 3 methods. R CMD check. Existing suite: 1,095 expectations, all 10 browser tests. 4 launch modes. 35 screenshot states at 3 sizes. 55-question Guide benchmark. Performance run of 51 steps. | Against an independent reference or Atlantis output:<br>- biomass for 101 groups per box, and Compare totals;<br>- polygon and layer indexing (all 147 boxes);<br>- SpecificPredMort attribution;<br>- spawn;<br>- predation pressure (one cell, decomposed);<br>- consumption (4 groups);<br>- DietCheck aggregation;<br>- Schoener's D (controlled cases);<br>- health thresholds;<br>- mortality stocks. |
-| Not tested | Rapid-interaction and long-session stress beyond 51 steps; a dark-mode visual pass | Catch and fleets (**blocked: no real fished run**); growth limitation (D23); Ages totals; the BH curve plot end-to-end; mortality vs abundance consistency; AGE_SPECIAL pools (none in NESP) |
-
-## What a release needs
-
-1. Fix all P0 and P1 defects, or remove or relabel the affected views as "unverified".
-2. Add a regression test for each, built on independent references like the ones in `evidence/phase4/`.
-3. Make the documented install command install the release.
-4. Get the test suite running under `R CMD check`.
-5. Mark the Scientific Guide experimental.
-6. Validate Catch on a real fished run, or label it unvalidated.
+| Done | Install (3 methods), R CMD check, 1,319 tests incl. browser, 4 launch modes, 35 screenshot states × 3 sizes before and after, 55-question Guide benchmark before and after, performance before and after | Biomass (box and system, all group kinds), polygon and layer indexing, SpecificPredMort, spawn, consumption, diet aggregation, predation pressure (decomposed), Schoener's D, health thresholds, mortality stocks |
+| Not done | Long-session stress beyond 51 steps; dark-mode pass; implementing the approved visual redesigns (`visual_design/proposed_improvements.md`) | **Catch (blocked: no real fished run)**; growth limitation (D23); Ages totals; the mortality vs abundance consistency check; AGE_SPECIAL pools (none in NESP) |

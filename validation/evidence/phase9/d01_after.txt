@@ -1,0 +1,11 @@
+RA view 'predation mortality on FTM by predator' at t = 1824.5 
+  Predator         Value
+5      SHW  3.247681e+02
+1      FVL  3.209148e-01
+4      SHD 8.988306e-249
+3      SBS 2.531073e-253
+2      SBL 4.603053e-255
+
+Atlantis layout: predation mortality ON FTM, by predator (columns of FTM rows):
+          SHW           FVL           SHD           SBS           SBL 
+ 3.247681e+02  3.209148e-01 8.988306e-249 2.531073e-253 4.603053e-255 

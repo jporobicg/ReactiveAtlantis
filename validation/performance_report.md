@@ -48,3 +48,20 @@ Possible stale view (unconfirmed): after switching to run c1, the Spatial tab re
 | Memory after loading N runs | ≤ the size of what is loaded, released when a run is removed |
 
 **Currently not met:** map interactions, predation pressure, reload, and memory release.
+
+## After Phase 8 (2026-10-26, load average 22–30, same hardware and dataset)
+
+Raw data: `evidence/phase9/perf_steps_after.csv`.
+
+| Action | Before | After |
+|---|---|---|
+| Load c3 (first) | 67.9 s, 747 MB | 84.2 s, 501 MB |
+| Spatial group change | 8.4–9.2 s | 9.0–12.8 s (PF1 not addressed; the machine was busier) |
+| Time slider step | 4.7–5.4 s | 5.0–6.1 s |
+| Predation pressure | 119.7 s, then 94.3 s | 151.2 s, then 120.3 s (PF2 not addressed) |
+| Reload ×3 | 122–125 s; RSS to 1,314 MB | 131–138 s; RSS to 1,147 MB |
+| Switch to run c1 | 156 s; RSS **1,406 MB**; **6** open .nc | 172 s; RSS **1,150 MB**; **3** open .nc |
+
+- **S03 (handles):** fixed. Open NetCDF handles stay at 3 instead of growing.
+- **S03 (memory):** partly fixed. Peak RSS is about 256 MB lower, but memory still grows by about 40–100 MB per reload, which points to R's own memory retention or other caches (DietCheck, reactive values).
+- **PF1 and PF2:** open. The re-run's absolute times are higher because estigia's load was 22–30, against 18–21 in the first run.

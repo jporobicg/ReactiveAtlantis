@@ -90,3 +90,17 @@ The grader reported that User Guide I p.157 has `UseHardFeedingWindow` inverted.
 - fixed for S23 (`think: false`) and S22 (HTML manual download);
 - given a narrower refusal rule that admits in-scope questions;
 - scored with the rubric automatically, on a reference set like this one, before each release.
+
+## After Phase 8 (shipped defaults: `think: false`, timeout message, promise fix)
+
+Same 55 questions, through the Guide's own `ra_ai_answer()` with no audit workaround. Results: `evidence/phase9/benchmark_results_shipped_after.csv`.
+
+| Measure | Before the fixes | After the fixes |
+|---|---|---|
+| Questions answered | 0 / 3 tried (every one timed out) | **54 / 55** (one hit the 90 s limit and now says so) |
+| Median answer time | — | 66 s (max 90 s) |
+| Regex key facts | — | 36 / 55 (40 / 55 with the earlier workaround; the model's answers vary between runs) |
+| In-scope questions refused | 5 | 6 |
+
+- **S17, S22, S23:** fixed. The Guide now answers in the app.
+- **S25 (answer reliability):** unchanged. The quality findings above still apply, and the Guide stays experimental.
