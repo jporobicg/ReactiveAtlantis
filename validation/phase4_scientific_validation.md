@@ -49,3 +49,45 @@ Design note for the visual review: `water_6` is labelled "Deepest water", but it
 - Compare-tab `nitro.weight` path and Overview health vs reference.
 - Schoener's D on controlled distributions.
 - Catch is blocked by data: no real fished run.
+
+## V4.5 Spawn feeding the BH expectation (D03): **FAIL**
+
+RA spawn / Atlantis formula (atdemography.c:571-592, aggregated as in atdemography.c:1032-1048 with Σ FSPB·IndSpawn·Nums):
+
+- 1.00 in well-fed years (days 330 and 1800);
+- FTM 2.6, 12.4, 11.9 and FTB 1.8, 7.0, 8.1 in thin years (days 690, 1080, 1440).
+
+Evidence: `evidence/phase4/d03_spawn_tuna.txt`.
+
+## V4.6 Expected predation pressure (D05–D10): **FAIL**
+
+Case: adult FTM (cohorts 4–10, age_mat 3) in box 94 (the densest), day 930, v8d (flag_satiation 0, soft window `UseHardFeedingWindow 0`).
+
+| Quantity | t/day |
+|---|---|
+| RA `expected_predation_pressure` | **0.184** |
+| Atlantis-faithful reference (per cohort × per water cell, soft window, one Holling denominator, no Tcorr) | **0.00523** |
+| Realised intake from Atlantis output, Σ Nums·Growth / E | **0.00503** |
+| Reference + Tcorr (0.693·1.066^T) | 0.0109 |
+| Reference with hard SN window / no window | 0.0205 |
+| Reference box-integrated instead of per cell | 0.0619 |
+| Reference with a separate denominator per prey stage | 0.00524 |
+
+- The reference without Tcorr reproduces realised intake within 4 %.
+- RA is **35×** realised. The main causes are box integration (~12×) and the window (~4×).
+- Applying the nominal Tcorr would *double* the error. This agrees with the earlier finding that the effective temperature multiplier in this Atlantis build is about 1.0–1.2, not 2.1–2.5.
+
+Evidence: `evidence/phase4/d05_epp_FTM_box94_day930.txt`, scripts `epp_ra.R` and `epp_atlantis.py`.
+
+## V4.7 Consumption tab (D16): **FAIL**
+
+RA `consumed_tonnes` vs realised Σ Nums·Growth / E across the whole system:
+
+| Group | Ratio |
+|---|---|
+| FTM | 3e-11 |
+| FTS | 1e-11 |
+| FPL | 2.5e-11 |
+| SHW | 1e-10 – 2e-9 |
+
+Evidence: `evidence/phase4/d16_consumption.txt`.

@@ -1,0 +1,4 @@
+FTM E=0.50 | RA consumed_tonnes t=2,32,62: 4.6e-11, 3.28e-10, 9.66e-10 | realised Sum(N*Growth)/E t/day: 1, 10.6, 30.6 | ratio 4.59e-11, 3.09e-11, 3.16e-11
+FTS E=0.80 | RA consumed_tonnes t=2,32,62: 6.35e-10, 1.46e-09, 2.45e-09 | realised Sum(N*Growth)/E t/day: 61.6, 142, 241 | ratio 1.03e-11, 1.03e-11, 1.02e-11
+FPL E=0.50 | RA consumed_tonnes t=2,32,62: 5.33e-09, 3.6e-09, 4.98e-09 | realised Sum(N*Growth)/E t/day: 212, 144, 209 | ratio 2.51e-11, 2.5e-11, 2.38e-11
+SHW E=0.30 | RA consumed_tonnes t=2,32,62: 1.53e-09, 3.74e-11, 4.42e-10 | realised Sum(N*Growth)/E t/day: 0.805, 0.262, 0.532 | ratio 1.9e-09, 1.43e-10, 8.3e-10

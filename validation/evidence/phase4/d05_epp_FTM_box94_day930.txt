@@ -1,0 +1,9 @@
+FTM adults, box 94, t index 31 (day 930); adult cohorts [4, 5, 6, 7, 8, 9, 10]; water layers [0, 1, 2, 3, 4, 5]
+    0.005234 t/day  Atlantis-faithful: per cohort, per cell, soft window, one denominator, no Tcorr
+      0.0109 t/day    + Tcorr (q10 method 1, 0.693*1.066^T)
+     0.02053 t/day    with hard SN window instead of soft
+     0.02053 t/day    with no size window
+     0.06191 t/day    box-integrated instead of per cell (soft)
+    0.005242 t/day    separate denominator per prey stage (soft)
+RA expected_predation_pressure, same box/time (R time_i 32): 0.1841 t/day
+Realised intake sum(Nums*Growth)/E, same box/time: 0.00503 t/day
