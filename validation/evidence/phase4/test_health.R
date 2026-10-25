@@ -1,0 +1,11 @@
+## Overview health thresholds: exact boundaries, zero / NA / non-finite initial values (synthetic BiomIndx)
+.libPaths(c(path.expand("~/whacamole_nesp/ra_audit_data/lib_pr4"), .libPaths()))
+source(path.expand("~/whacamole_nesp/ra_audit_data/scripts/ra_harness.R")); ra_source_modules()
+first <- c(A = 100, B = 100, C = 100, D = 100, E = 0, F = 0, G = NA, H = 100, I = Inf, J = 100, K = -5)
+last  <- c(A = 1,   B = 0.999, C = 1000, D = 1000.001, E = 0, F = 5, G = 50, H = NA, I = 10, J = 0, K = 5)
+bi <- rbind(data.frame(Time = 0, t(first)), data.frame(Time = 365, t(last)))
+grp <- data.frame(code = names(first), longname = names(first), grouptype = "FISH")
+h <- biomass_health(bi, grp)
+h$Expected <- c("OK (exactly 1%, '<1%' rule)", "Extinct", "OK (exactly 10x, '>10x' rule)", "Exploding", "No data / undefined (0 -> 0)",
+                "Undefined (0 -> 5)", "No data (NA initial)", "No data (NA final)", "No data (Inf initial)", "Extinct (to 0)", "Invalid (negative initial)")
+options(width = 200); print(h[, c("Code", "Initial", "Final", "Ratio", "Flag", "Expected")], row.names = FALSE)

@@ -1,0 +1,6 @@
+raw: rows 51415 ; per (predator,cohort,time) proportions sum to: 0.8814 - 1 
+FTM t=930: RA diet proportions summed over prey = 10.000 (cohorts with diet: 10)
+FTS t=930: RA diet proportions summed over prey = 10.000 (cohorts with diet: 10)
+FPL t=930: RA diet proportions summed over prey = 10.000 (cohorts with diet: 10)
+SHW t=930: RA diet proportions summed over prey = 10.000 (cohorts with diet: 10)
+ZL t=930: RA diet proportions summed over prey = 1.000 (cohorts with diet: 1)

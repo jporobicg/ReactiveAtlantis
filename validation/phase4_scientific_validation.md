@@ -91,3 +91,65 @@ RA `consumed_tonnes` vs realised Σ Nums·Growth / E across the whole system:
 | SHW | 1e-10 – 2e-9 |
 
 Evidence: `evidence/phase4/d16_consumption.txt`.
+
+## V4.8 DietCheck aggregation (D15): **FAIL**
+
+After `preaggregate_diet`, the diet proportions per predator and time sum to 10.0 for 10-cohort groups (FTM, FTS, FPL, SHW) and to 1.0 for the pool ZL. Absolute "consumption" from diet × biomass is n_cohorts × too high, and the shares are unweighted over cohorts.
+
+Evidence: `evidence/phase4/d15_diet.txt`.
+
+## V4.9 Schoener's D (controlled synthetic cases): **PASS**, with interpretation caveats (D30)
+
+Complete overlap, no overlap, partial, scale invariance, unequal shares and two independent time steps all give the expected values. The problems are in interpretation:
+
+- A predator with zero biomass everywhere gives D = 0 instead of "undefined".
+- The per-box map index depends on scale.
+
+Evidence: `evidence/phase4/schoener.txt`.
+
+## V4.10 Compare tab "total" biomass (`nitro.weight`)
+
+| Groups | Result |
+|---|---|
+| Age-structured (FTM, FTS, FPL, SHW, FMN) | **PASS**: within 0.1 % of BiomIndx and the reference |
+| Pools (ZL, ZS, PL, BO, MA, SG, BFF) | **FAIL, D31**: 2.5e3 to 8.8e6 × too high. They are left in mg N while labelled tonnes, and the `boxes.prop` volumes differ from the NetCDF `volume` (D19b) |
+
+Evidence: `evidence/phase4/d31_compare_total.txt`.
+
+## V4.11 Overview health thresholds (controlled cases)
+
+- The exact boundaries are correct.
+- Zero, Inf and negative initial values receive "Extinct" or "Exploding" verdicts. On real NESP data this affects DL and DR (D22).
+
+Evidence: `evidence/phase4/health_thresholds.txt`.
+
+## V4.12 Mortality (SpecificMort)
+
+- The column parsing matches Atlantis.
+- 8 multi-stock NESP groups lose their S1+ stocks without notice (D27).
+- Predator attribution is transposed (D01).
+
+## Phase 4 coverage summary
+
+| Diagnostic | Status |
+|---|---|
+| Per-box biomass (Spatial) | PASS for age-structured and 3-D pools; **FAIL** for epibenthos (D11) |
+| Compare totals | PASS for age-structured; **FAIL** for pools (D31) |
+| Polygon / layer indexing | **PASS** |
+| SpecificPredMort attribution | **FAIL** (D01) |
+| Spawn → BH | **FAIL** (D03) |
+| Expected predation pressure | **FAIL**, 35× (D05) |
+| Consumption tab | **FAIL**, about 1e-11 (D16) |
+| DietCheck aggregation | **FAIL** (D15) |
+| Schoener's D | PASS, with caveats (D30) |
+| Health thresholds | Boundaries PASS; edge cases FAIL (D22) |
+
+**Not tested yet:**
+
+- Ages tab totals.
+- Growth limitation (D23).
+- Satiation-cap magnitude on v8c.
+- The BH curve plot end-to-end.
+- The mortality vs abundance-change consistency check.
+
+**Blocked by data:** Catch and fleets. A real fished Atlantis run is needed.

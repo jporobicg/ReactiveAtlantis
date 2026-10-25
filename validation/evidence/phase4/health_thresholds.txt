@@ -1,0 +1,12 @@
+ Code Initial    Final        Ratio             Flag                      Expected
+    A     100    1.000 1.000000e-02               OK   OK (exactly 1%, '<1%' rule)
+    B     100    0.999 9.990000e-03    Extinct (<1%)                       Extinct
+    C     100 1000.000 1.000000e+01               OK OK (exactly 10x, '>10x' rule)
+    D     100 1000.001 1.000001e+01 Exploding (>10x)                     Exploding
+    E       0    0.000 0.000000e+00    Extinct (<1%)  No data / undefined (0 -> 0)
+    F       0    5.000 5.000000e+12 Exploding (>10x)            Undefined (0 -> 5)
+    G      NA   50.000           NA          No data          No data (NA initial)
+    H     100       NA           NA          No data            No data (NA final)
+    I     Inf   10.000 0.000000e+00    Extinct (<1%)         No data (Inf initial)
+    J     100    0.000 0.000000e+00    Extinct (<1%)                Extinct (to 0)
+    K      -5    5.000 5.000000e+12 Exploding (>10x)    Invalid (negative initial)

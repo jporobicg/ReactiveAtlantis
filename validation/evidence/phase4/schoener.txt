@@ -1,0 +1,8 @@
+complete overlap, same shares (D=1)            expected 1    got 1        PASS
+no overlap (D=0)                               expected 0    got 0        PASS
+partial: p=(.5,.5,0) q=(0,.5,.5) (D=.5)        expected 0.5  got 0.5      PASS
+scale invariance: x1000 prey (D=.5)            expected 0.5  got 0.5      PASS
+predator zero everywhere (D undefined -> ?)    expected NA   got 0        (check: undefined case)
+unequal shares p=(.9,.1) q=(.1,.9) (D=.2)      expected 0.2  got 0.2      PASS
+two time steps: D(t1)= 0.5  expected 0.5; D(t2)= 1  expected 1
+local index for pred (1,1) vs prey (1000,1): box0 = 0.002  box1 = 1  (shares: pred .5/.5, prey .999/.001)
